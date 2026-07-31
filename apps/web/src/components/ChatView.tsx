@@ -2971,6 +2971,17 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byMessageId;
   }, [turnDiffSummaries]);
+  const checkpointTurnCountByTurnId = useMemo(() => {
+    const byTurnId = new Map<TurnId, number>();
+    for (const summary of turnDiffSummaries) {
+      const turnCount =
+        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+      if (typeof turnCount === "number") {
+        byTurnId.set(summary.turnId, turnCount);
+      }
+    }
+    return byTurnId;
+  }, [inferredCheckpointTurnCountByTurnId, turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
     for (let index = 0; index < timelineEntries.length; index += 1) {
@@ -7824,6 +7835,7 @@ export default function ChatView(props: ChatViewProps) {
                 latestTurn={activeLatestTurn}
                 runningTurnId={activeRunningTurnId}
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                checkpointTurnCountByTurnId={checkpointTurnCountByTurnId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}

@@ -122,8 +122,21 @@ vi.mock("@pierre/diffs/react", () => {
   return { FileDiff: MockFileDiff };
 });
 
-vi.mock("../DiffWorkerPoolProvider", () => ({
-  DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
+vi.mock("../../lib/checkpointDiffState", () => ({
+  useCheckpointDiff: () => ({
+    data: {
+      diff: [
+        "diff --git a/src/second.ts b/src/second.ts",
+        "--- a/src/second.ts",
+        "+++ b/src/second.ts",
+        "@@ -1 +1 @@",
+        "-before",
+        "+after",
+      ].join("\n"),
+    },
+    error: null,
+    isPending: false,
+  }),
 }));
 
 function matchMedia() {
@@ -182,6 +195,7 @@ function buildProps() {
     latestTurn: null,
     runningTurnId: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
+    checkpointTurnCountByTurnId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
     revertTurnCountByUserMessageId: new Map(),
@@ -384,6 +398,74 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('aria-label="Collapse all folders"');
     expect(markup).toContain('aria-label="Open diff"');
     expect(markup).toContain("1 changed file");
+  });
+
+  it("auto-expands the newest successful file change whenever its work row is visible", () => {
+    const assistantMessageId = MessageId.make("message-assistant-inline-diff");
+    const turnId = TurnId.make("turn-inline-diff");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        latestTurn={{
+          turnId,
+          state: "running",
+          startedAt: MESSAGE_CREATED_AT,
+          completedAt: null,
+        }}
+        timelineEntries={[
+          {
+            id: "entry-first-file-change",
+            kind: "work",
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: "work-first-file-change",
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              label: "File change",
+              tone: "tool",
+              itemType: "file_change",
+              toolLifecycleStatus: "completed",
+              changedFiles: ["src/first.ts"],
+            },
+          },
+          {
+            id: "entry-second-file-change",
+            kind: "work",
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: "work-second-file-change",
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              label: "File change",
+              tone: "tool",
+              itemType: "file_change",
+              toolLifecycleStatus: "completed",
+              changedFiles: ["src/second.ts"],
+            },
+          },
+        ]}
+        checkpointTurnCountByTurnId={new Map([[turnId, 1]])}
+        turnDiffSummaryByAssistantMessageId={
+          new Map([
+            [
+              assistantMessageId,
+              {
+                turnId,
+                checkpointTurnCount: 1,
+                checkpointRef: CheckpointRef.make(`provider-diff:${turnId}`),
+                status: "ready",
+                files: [{ path: "src/second.ts", kind: "modified", additions: 1, deletions: 1 }],
+                assistantMessageId,
+                completedAt: MESSAGE_CREATED_AT,
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    expect(markup.match(/data-testid="file-diff"/g)).toHaveLength(1);
+    expect(markup).toContain("src/second.ts");
   });
 
   it("treats only the strict list end as the live edge", async () => {

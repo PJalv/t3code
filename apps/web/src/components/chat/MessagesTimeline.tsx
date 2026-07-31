@@ -70,6 +70,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  buildFileDiffRenderKey,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -111,8 +112,15 @@ import {
 } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
-import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
-import { CHAT_TIMELINE_ANCHOR_OFFSET } from "./timelineScrollAnchoring";
+import {
+  shouldAutoExpandChangedFiles,
+  shouldAutoExpandChangedFilesTree,
+  shouldAutoExpandInlineFileChange,
+} from "./changedFilesPresentation";
+import {
+  CHAT_TIMELINE_ANCHOR_OFFSET,
+  keepTimelineEndVisibleAfterOverlayGrowth,
+} from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -180,6 +188,8 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import { useCheckpointDiff } from "../../lib/checkpointDiffState";
+import { selectInlineFileChangeDiffs } from "./inlineFileChangeDiff";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -205,6 +215,11 @@ interface TimelineRowSharedState {
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  checkpointTurnCountByTurnId: ReadonlyMap<TurnId, number>;
+  turnDiffSummaryByTurnId: ReadonlyMap<TurnId, TurnDiffSummary>;
+  latestSuccessfulFileChangeEntryIdByTurnId: ReadonlyMap<TurnId, string>;
+  fileChangeExpandedByEntryId: ReadonlyMap<string, boolean>;
+  onSetFileChangeExpanded: (entryId: string, expanded: boolean) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
@@ -308,6 +323,7 @@ interface MessagesTimelineProps {
   latestTurn: TimelineLatestTurn | null;
   runningTurnId: TurnId | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  checkpointTurnCountByTurnId: ReadonlyMap<TurnId, number>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
@@ -360,6 +376,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   latestTurn,
   runningTurnId,
   turnDiffSummaryByAssistantMessageId,
+  checkpointTurnCountByTurnId,
   routeThreadKey,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
@@ -399,10 +416,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [routeThreadKey],
   );
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+  const [fileChangeExpandedByEntryId, setFileChangeExpandedByEntryId] = useState<
+    ReadonlyMap<string, boolean>
+  >(new Map());
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
+  const previousContentInsetEndAdjustmentRef = useRef(contentInsetEndAdjustment);
+
+  useLayoutEffect(() => {
+    keepTimelineEndVisibleAfterOverlayGrowth({
+      timeline: listRef.current,
+      previousOverlayHeight: previousContentInsetEndAdjustmentRef.current,
+      overlayHeight: contentInsetEndAdjustment,
+      followingEnd: liveFollowEnabled && anchorMessageId === null,
+    });
+    previousContentInsetEndAdjustmentRef.current = contentInsetEndAdjustment;
+  }, [anchorMessageId, contentInsetEndAdjustment, listRef, liveFollowEnabled]);
+
+  const onSetFileChangeExpanded = useCallback((entryId: string, expanded: boolean) => {
+    setFileChangeExpandedByEntryId((current) => {
+      if (current.get(entryId) === expanded) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(entryId, expanded);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       if (disclosureSettleFrameRef.current !== null) {
@@ -547,6 +590,27 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     revertTurnCountByUserMessageId,
   ]);
   const rows = useStableRows(rawRows);
+  const turnDiffSummaryByTurnId = useMemo(() => {
+    const byTurnId = new Map<TurnId, TurnDiffSummary>();
+    for (const summary of turnDiffSummaryByAssistantMessageId.values()) {
+      byTurnId.set(summary.turnId, summary);
+    }
+    return byTurnId;
+  }, [turnDiffSummaryByAssistantMessageId]);
+  const latestSuccessfulFileChangeEntryIdByTurnId = useMemo(() => {
+    const byTurnId = new Map<TurnId, string>();
+    for (const entry of timelineEntries) {
+      if (
+        entry.kind === "work" &&
+        entry.entry.turnId &&
+        entry.entry.itemType === "file_change" &&
+        workEntryIndicatesToolSuccess(entry.entry)
+      ) {
+        byTurnId.set(entry.entry.turnId, entry.entry.id);
+      }
+    }
+    return byTurnId;
+  }, [timelineEntries]);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -670,6 +734,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onFileOpen,
       onFileDownload,
       onOpenTurnDiff,
+      checkpointTurnCountByTurnId,
+      turnDiffSummaryByTurnId,
+      latestSuccessfulFileChangeEntryIdByTurnId,
+      fileChangeExpandedByEntryId,
+      onSetFileChangeExpanded,
       onToggleTurnFold,
       onToggleWorkGroup,
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
@@ -694,6 +763,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onFileOpen,
       onFileDownload,
       onOpenTurnDiff,
+      checkpointTurnCountByTurnId,
+      turnDiffSummaryByTurnId,
+      latestSuccessfulFileChangeEntryIdByTurnId,
+      fileChangeExpandedByEntryId,
+      onSetFileChangeExpanded,
       onToggleTurnFold,
       onToggleWorkGroup,
       suspendEndScrollMaintenanceForDisclosure,
@@ -2123,8 +2197,11 @@ function AssistantChangedFilesSectionInner({
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId],
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
+  const hasProviderNativeInlineDiff = String(turnSummary.checkpointRef).startsWith(
+    "provider-diff:",
+  );
   const [autoExpanded] = useState(() =>
-    shouldAutoExpandChangedFiles(checkpointFiles, isLatestTurn),
+    shouldAutoExpandChangedFilesTree(checkpointFiles, isLatestTurn, hasProviderNativeInlineDiff),
   );
   const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(autoExpanded);
   const expanded = persistedExpanded ?? (isLatestTurn && autoExpanded);
@@ -3072,26 +3149,16 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
 });
 
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
+const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
   isExpandedToolGroupEntry: boolean;
   displayLabel?: string | undefined;
 }) {
-  const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  const { threadRef, onImageExpand } = use(TimelineRowCtx);
-  const groupView = use(WorkGroupViewCtx);
-  const [expanded, setExpanded] = useState(
-    () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
-  );
-  const toggleExpanded = () => {
-    const next = !expanded;
-    if (groupView) {
-      groupView.onToggleEntry();
-      if (next) groupView.state.expandedEntries.add(workEntry.id);
-      else groupView.state.expandedEntries.delete(workEntry.id);
-    }
-    setExpanded(next);
-  };
+  const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const ctx = use(TimelineRowCtx);
+  const { threadRef, onImageExpand } = ctx;
+  const [locallyExpanded, setLocallyExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
@@ -3113,25 +3180,36 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           workspaceRoot,
         })
       : null;
-  const commandMatchesVisibleLabel = workEntry.command?.trim() === previewText.trim();
-  const canExpand =
-    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
-    Boolean(
-      (!commandMatchesVisibleLabel &&
-        (workEntryRawCommand(workEntry) || workEntry.command?.trim())) ||
-      workEntry.detail?.trim() ||
-      workEntry.changedFiles?.length ||
-      viewedImage,
+  const checkpointTurnCount = workEntry.turnId
+    ? ctx.checkpointTurnCountByTurnId.get(workEntry.turnId)
+    : undefined;
+  const turnDiffSummary = workEntry.turnId
+    ? ctx.turnDiffSummaryByTurnId.get(workEntry.turnId)
+    : undefined;
+  const canShowInlineFileDiff =
+    workEntry.itemType === "file_change" &&
+    workEntry.turnId != null &&
+    checkpointTurnCount !== undefined &&
+    ctx.threadRef !== null;
+  const shouldAutoExpandInlineDiff =
+    canShowInlineFileDiff &&
+    turnDiffSummary !== undefined &&
+    workEntry.turnId != null &&
+    ctx.latestSuccessfulFileChangeEntryIdByTurnId.get(workEntry.turnId) === workEntry.id &&
+    shouldAutoExpandInlineFileChange(
+      turnDiffSummary.files,
+      workEntryIndicatesToolSuccess(workEntry),
     );
-  const expandedBody = expanded
-    ? buildToolCallExpandedBody(
-        workEntry,
-        workspaceRoot,
-        previewText,
-        viewedImage ? viewedImagePath : null,
-      )
-    : null;
-  // Reserve destructive row styling for severe failures, not routine tool errors.
+  const isFileChangeEntry = workEntry.itemType === "file_change";
+  const expanded = isFileChangeEntry
+    ? (ctx.fileChangeExpandedByEntryId.get(workEntry.id) ?? shouldAutoExpandInlineDiff)
+    : locallyExpanded;
+  const canExpand = canShowInlineFileDiff || expandedBody !== null;
+  const showDestructiveRowStyle =
+    showFailedIndicator &&
+    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
+  // Ordinary tool failures stay muted; only runtime errors and warnings get
+  // color. The red treatment is reserved for severe failures.
   const iconWrapperClass = cn(
     "flex size-6 shrink-0 items-center justify-center",
     showWarningIndicator
@@ -3160,11 +3238,21 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         tabIndex: 0 as const,
         "aria-label": accessibleDisplayText,
         "aria-expanded": expanded,
-        onClick: toggleExpanded,
+        onClick: () => {
+          if (isFileChangeEntry) {
+            ctx.onSetFileChangeExpanded(workEntry.id, !expanded);
+          } else {
+            setLocallyExpanded((value) => !value);
+          }
+        },
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            toggleExpanded();
+            if (isFileChangeEntry) {
+              ctx.onSetFileChangeExpanded(workEntry.id, !expanded);
+            } else {
+              setLocallyExpanded((value) => !value);
+            }
           }
         },
       }
@@ -3232,32 +3320,106 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </span>
         </div>
       </div>
-      {expanded && viewedImage && threadRef ? (
-        <div
-          className="mt-1 ms-7 cursor-default"
-          onClick={stopRowToggle}
-          onPointerDown={stopRowToggle}
-        >
-          <ChatMarkdownAssetImage
-            environmentId={threadRef.environmentId}
-            resource={viewedImage.resource}
-            alt={viewedImage.alt}
-            srcFragment={viewedImage.srcFragment}
-            workspaceRoot={workspaceRoot}
-            style={{ maxHeight: "16rem" }}
-            onImageExpand={onImageExpand}
-          />
-        </div>
-      ) : null}
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default rounded-md bg-muted/40 px-3 py-2"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          {viewedImage && threadRef ? (
+            <div className="mb-1.5">
+              <ChatMarkdownAssetImage
+                environmentId={threadRef.environmentId}
+                resource={viewedImage.resource}
+                alt={viewedImage.alt}
+                srcFragment={viewedImage.srcFragment}
+                style={{ maxHeight: "16rem" }}
+                onImageExpand={onImageExpand}
+              />
+            </div>
+          ) : null}
+          {canShowInlineFileDiff && workEntry.turnId != null ? (
+            <InlineFileChangeDiff
+              turnId={workEntry.turnId}
+              checkpointTurnCount={checkpointTurnCount}
+              changedFiles={workEntry.changedFiles ?? []}
+            />
+          ) : expandedBody ? (
+            <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 });
+
+function InlineFileChangeDiff(props: {
+  turnId: TurnId;
+  checkpointTurnCount: number;
+  changedFiles: ReadonlyArray<string>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const checkpointDiff = useCheckpointDiff(
+    {
+      environmentId: ctx.activeThreadEnvironmentId,
+      threadId: ctx.threadRef?.threadId ?? null,
+      fromTurnCount: Math.max(0, props.checkpointTurnCount - 1),
+      toTurnCount: props.checkpointTurnCount,
+      ignoreWhitespace: false,
+      cacheScope: `turn:${props.turnId}:inline-file-change`,
+    },
+    { enabled: true },
+  );
+  const renderablePatch = useMemo(
+    () =>
+      getRenderablePatch(
+        checkpointDiff.data?.diff,
+        `inline-file-change:${props.turnId}:${ctx.resolvedTheme}`,
+      ),
+    [checkpointDiff.data?.diff, ctx.resolvedTheme, props.turnId],
+  );
+  const matchingFiles = useMemo(
+    () =>
+      renderablePatch?.kind === "files"
+        ? selectInlineFileChangeDiffs(renderablePatch.files, props.changedFiles, ctx.workspaceRoot)
+        : [],
+    [ctx.workspaceRoot, props.changedFiles, renderablePatch],
+  );
+
+  if (checkpointDiff.isPending) {
+    return <p className="py-1 text-[11px] text-muted-foreground">Loading file changes…</p>;
+  }
+  if (checkpointDiff.error) {
+    return (
+      <p className="py-1 text-[11px] text-destructive">
+        Unable to load file changes: {checkpointDiff.error}
+      </p>
+    );
+  }
+  if (!renderablePatch) {
+    return <p className="py-1 text-[11px] text-muted-foreground">No patch content available.</p>;
+  }
+  if (renderablePatch.kind === "raw") {
+    return (
+      <pre className="max-h-80 cursor-text overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+        {renderablePatch.text}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="max-h-[32rem] space-y-2 overflow-auto rounded-md border border-border/60 bg-background/40 p-1">
+      {matchingFiles.map((fileDiff) => (
+        <FileDiff
+          key={buildFileDiffRenderKey(fileDiff)}
+          fileDiff={fileDiff}
+          options={{
+            collapsed: false,
+            diffStyle: "unified",
+            theme: resolveDiffThemeName(ctx.resolvedTheme),
+          }}
+        />
+      ))}
+    </div>
+  );
+}

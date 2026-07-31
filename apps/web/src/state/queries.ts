@@ -30,6 +30,7 @@ import { projectContentSearch, projectEnvironment } from "./projects";
 import { useEnvironmentQuery } from "./query";
 import { useEnvironmentThread } from "./threads";
 import { vcsEnvironment } from "./vcs";
+import { resolveCheckpointDiffQueryKind } from "./checkpointDiffQuery";
 
 const PROJECT_PATH_SEARCH_DEBOUNCE_MS = 120;
 const COMPOSER_PATH_SEARCH_LIMIT = 80;
@@ -356,8 +357,9 @@ export function useCheckpointDiff(
     target.threadId !== null &&
     target.fromTurnCount !== null &&
     target.toTurnCount !== null;
+  const queryKind = resolveCheckpointDiffQueryKind(target, enabled);
   const fullThreadTarget =
-    enabled && target.fromTurnCount === 0
+    queryKind === "full-thread"
       ? {
           environmentId: target.environmentId!,
           input: {
@@ -368,7 +370,7 @@ export function useCheckpointDiff(
         }
       : null;
   const turnTarget =
-    enabled && target.fromTurnCount !== 0
+    queryKind === "turn"
       ? {
           environmentId: target.environmentId!,
           input: {
