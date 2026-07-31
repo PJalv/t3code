@@ -339,7 +339,9 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
-  turnTokenUsage: OpenCodeTurnTokenUsageAccumulator | undefined;
+  readonly turns: Array<OpenCodeTurnSnapshot>;
+  readonly fileDiffsByTurnId: Map<TurnId, Map<string, string[]>>;
+  readonly fileDiffsByCallId: Map<string, { readonly file: string; readonly patch: string }>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
@@ -370,73 +372,116 @@ interface OpenCodeSessionContext {
   readonly sessionScope: Scope.Closeable;
 }
 
-interface OpenCodeTurnTokenUsageAccumulator {
-  readonly partIds: Set<string>;
-  readonly promptMessageIds: Set<string>;
-  readonly assistantOwnershipByMessageId: Map<string, "owned" | "other" | "unknown">;
-  readonly unresolvedStepPartIds: Set<string>;
-  inputTokens: number;
-  cachedInputTokens: number;
-  cacheCreationTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  complete: boolean;
-  hasSubagents: boolean;
-}
-
-function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumulator {
-  return {
-    partIds: new Set(),
-    promptMessageIds: new Set(),
-    assistantOwnershipByMessageId: new Map(),
-    unresolvedStepPartIds: new Set(),
-    inputTokens: 0,
-    cachedInputTokens: 0,
-    cacheCreationTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: 0,
-    complete: true,
-    hasSubagents: false,
-  };
-}
-
-function accumulateOpenCodeStepUsage(
-  accumulator: OpenCodeTurnTokenUsageAccumulator,
-  part: Extract<Part, { readonly type: "step-finish" }>,
-): void {
-  if (accumulator.partIds.has(part.id)) return;
-  accumulator.partIds.add(part.id);
-  accumulator.inputTokens += part.tokens.input + part.tokens.cache.read + part.tokens.cache.write;
-  accumulator.cachedInputTokens += part.tokens.cache.read;
-  accumulator.cacheCreationTokens += part.tokens.cache.write;
-  accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
-  accumulator.reasoningTokens += part.tokens.reasoning;
-}
-
-function takeOpenCodeTurnTokenUsage(
-  context: OpenCodeSessionContext,
-  complete: boolean,
-): TurnTokenUsage {
-  const usage = context.turnTokenUsage;
-  context.turnTokenUsage = undefined;
-  if (!usage || usage.partIds.size === 0) {
-    return {
-      usageStatus: "unavailable",
-      usageScope: "main_agent",
-      hasSubagents: usage?.hasSubagents ?? false,
-    };
+function fileDiffFromToolPart(
+  part: Extract<Part, { type: "tool" }>,
+): { readonly file: string; readonly patch: string } | undefined {
+  if (part.state.status !== "completed") {
+    return undefined;
+  }
+  const fileDiff = part.state.metadata?.filediff;
+  if (
+    !fileDiff ||
+    typeof fileDiff !== "object" ||
+    !("file" in fileDiff) ||
+    !("patch" in fileDiff) ||
+    typeof fileDiff.file !== "string" ||
+    typeof fileDiff.patch !== "string" ||
+    fileDiff.file.trim().length === 0 ||
+    fileDiff.patch.trim().length === 0
+  ) {
+    return undefined;
   }
   return {
-    usageStatus:
-      complete && usage.complete && usage.unresolvedStepPartIds.size === 0 ? "complete" : "partial",
-    usageScope: "main_agent",
-    inputTokens: usage.inputTokens,
-    cachedInputTokens: usage.cachedInputTokens,
-    cacheCreationTokens: usage.cacheCreationTokens,
-    outputTokens: usage.outputTokens,
-    reasoningTokens: Math.min(usage.outputTokens, usage.reasoningTokens),
-    hasSubagents: usage.hasSubagents,
+    file: fileDiff.file,
+    patch: fileDiff.patch,
   };
+}
+
+function fileDiffFromPermissionRequest(
+  request: PermissionRequest,
+): { readonly file: string; readonly patch: string } | undefined {
+  const file = request.metadata.filepath;
+  const patch = request.metadata.diff;
+  return typeof file === "string" &&
+    typeof patch === "string" &&
+    file.trim().length > 0 &&
+    patch.trim().length > 0
+    ? { file, patch }
+    : undefined;
+}
+
+function newFileDiffFromWritePart(
+  part: Extract<Part, { type: "tool" }>,
+): { readonly file: string; readonly patch: string } | undefined {
+  if (
+    part.state.status !== "completed" ||
+    part.tool.toLowerCase() !== "write" ||
+    part.state.metadata?.exists !== false
+  ) {
+    return undefined;
+  }
+  const file = part.state.metadata.filepath;
+  const content = part.state.input.content;
+  if (
+    typeof file !== "string" ||
+    file.trim().length === 0 ||
+    typeof content !== "string" ||
+    content.length === 0
+  ) {
+    return undefined;
+  }
+
+  const normalizedContent = content.replaceAll("\r\n", "\n");
+  const hasFinalNewline = normalizedContent.endsWith("\n");
+  const lines = normalizedContent.split("\n");
+  if (hasFinalNewline) {
+    lines.pop();
+  }
+  const addedLines = lines.map((line) => `+${line}`);
+  if (!hasFinalNewline) {
+    addedLines.push("\\ No newline at end of file");
+  }
+
+  return {
+    file,
+    patch: [
+      `Index: ${file}`,
+      "===================================================================",
+      "--- /dev/null",
+      `+++ ${file}`,
+      `@@ -0,0 +1,${lines.length} @@`,
+      ...addedLines,
+    ].join("\n"),
+  };
+}
+
+function updateOpenCodeTurnDiff(
+  context: OpenCodeSessionContext,
+  turnId: TurnId,
+  fileDiffs: ReadonlyArray<{ readonly file: string; readonly patch: string }>,
+  options?: { readonly replace?: boolean },
+): string | undefined {
+  const patchesByPath = context.fileDiffsByTurnId.get(turnId) ?? new Map<string, string[]>();
+  context.fileDiffsByTurnId.set(turnId, patchesByPath);
+  for (const fileDiff of fileDiffs) {
+    if (fileDiff.file.trim().length > 0 && fileDiff.patch.trim().length > 0) {
+      const patch = fileDiff.patch.trim();
+      const existingPatches = patchesByPath.get(fileDiff.file) ?? [];
+      if (options?.replace) {
+        patchesByPath.set(fileDiff.file, [patch]);
+      } else if (!existingPatches.includes(patch)) {
+        existingPatches.push(patch);
+        patchesByPath.set(fileDiff.file, existingPatches);
+      }
+    }
+  }
+  if (patchesByPath.size === 0) {
+    return undefined;
+  }
+  return [...patchesByPath.entries()]
+    .toSorted(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
+    .flatMap(([, patches]) => patches)
+    .join("\n");
 }
 
 export interface OpenCodeAdapterLiveOptions {
@@ -2479,17 +2524,106 @@ export function makeOpenCodeAdapter(
               payload,
             };
             yield* emit(runtimeEvent);
+
+            const fileDiff =
+              fileDiffFromToolPart(part) ??
+              context.fileDiffsByCallId.get(part.callID) ??
+              newFileDiffFromWritePart(part);
+            if (part.state.status === "completed" || part.state.status === "error") {
+              context.fileDiffsByCallId.delete(part.callID);
+            }
+            if (turnId && itemType === "file_change" && fileDiff) {
+              const unifiedDiff = updateOpenCodeTurnDiff(context, turnId, [fileDiff]);
+              if (unifiedDiff) {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    turnId,
+                    itemId: part.callID,
+                    createdAt: toolStateCreatedAt(part),
+                    raw: event,
+                  })),
+                  type: "turn.diff.updated",
+                  payload: { unifiedDiff },
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        case "session.diff": {
+          if (!turnId) {
+            break;
+          }
+          const fileDiffs = event.properties.diff.flatMap((fileDiff) =>
+            typeof fileDiff.file === "string" && typeof fileDiff.patch === "string"
+              ? [{ file: fileDiff.file, patch: fileDiff.patch }]
+              : [],
+          );
+          const unifiedDiff = updateOpenCodeTurnDiff(context, turnId, fileDiffs, {
+            replace: true,
+          });
+          if (unifiedDiff) {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              })),
+              type: "turn.diff.updated",
+              payload: { unifiedDiff },
+            });
           }
           break;
         }
 
         case "permission.asked": {
-          yield* emitPendingOpenCodeRequest(context, event, event);
+          context.pendingPermissions.set(event.properties.id, event.properties);
+          const fileDiff = fileDiffFromPermissionRequest(event.properties);
+          const callId = event.properties.tool?.callID;
+          if (callId && fileDiff) {
+            context.fileDiffsByCallId.set(callId, fileDiff);
+          }
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              requestId: event.properties.id,
+              raw: event,
+            })),
+            type: "request.opened",
+            payload: {
+              requestType: mapPermissionToRequestType(event.properties.permission),
+              detail:
+                event.properties.patterns.length > 0
+                  ? event.properties.patterns.join("\n")
+                  : event.properties.permission,
+              args: event.properties.metadata,
+            },
+          });
           break;
         }
 
         case "permission.replied": {
-          yield* emitTerminalOpenCodeRequest(context, event);
+          const request = context.pendingPermissions.get(event.properties.requestID);
+          context.pendingPermissions.delete(event.properties.requestID);
+          if (event.properties.reply === "reject" && request?.tool?.callID) {
+            context.fileDiffsByCallId.delete(request.tool.callID);
+          }
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              requestId: event.properties.requestID,
+              raw: event,
+            })),
+            type: "request.resolved",
+            payload: {
+              requestType: "unknown",
+              decision: mapPermissionDecision(event.properties.reply),
+            },
+          });
           break;
         }
 
@@ -2590,6 +2724,8 @@ export function makeOpenCodeAdapter(
               break;
             }
             yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+            context.fileDiffsByTurnId.delete(turnId);
+            context.fileDiffsByCallId.clear();
           }
           break;
         }
@@ -2967,7 +3103,9 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
-          turnTokenUsage: undefined,
+          turns: [],
+          fileDiffsByTurnId: new Map(),
+          fileDiffsByCallId: new Map(),
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,

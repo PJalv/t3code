@@ -22,6 +22,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import {
   CheckpointDiffResultInvalidError,
   CheckpointRefUnavailableError,
@@ -78,6 +79,7 @@ function buildTurnDiffResult(
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
 
   const getTurnDiff: CheckpointDiffQuery["Service"]["getTurnDiff"] = Effect.fn("getTurnDiff")(
     function* (input) {
@@ -104,6 +106,18 @@ export const make = Effect.gen(function* () {
           });
         }
         return emptyDiff;
+      }
+
+      const providerDiff = yield* projectionTurnRepository.getDiffBlob(input);
+      if (Option.isSome(providerDiff)) {
+        const turnDiff = buildTurnDiffResult(input, providerDiff.value.diff);
+        if (!isTurnDiffResult(turnDiff)) {
+          return yield* new CheckpointDiffResultInvalidError({
+            operation,
+            threadId: input.threadId,
+          });
+        }
+        return turnDiff;
       }
 
       const threadContext = yield* projectionSnapshotQuery

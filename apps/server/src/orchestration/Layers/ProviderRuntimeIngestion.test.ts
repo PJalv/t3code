@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -257,9 +258,12 @@ describe("ProviderRuntimeIngestion", () => {
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
+    createGitRepository?: boolean;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
-    NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
+    if (options?.createGitRepository !== false) {
+      NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
+    }
     const provider = createProviderServiceHarness();
     const sqlCounter = makeSqlStatementCounter();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -3355,6 +3359,158 @@ describe("ProviderRuntimeIngestion", () => {
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("User-set title");
+  });
+
+  it("projects provider-native file changes without a Git repository when enabled", async () => {
+    const harness = await createHarness({
+      createGitRepository: false,
+      serverSettings: { providerNativeFileChangesEnabled: true },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-provider-native-diff"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-provider-native"),
+      itemId: asItemId("item-provider-native"),
+      payload: {
+        unifiedDiff: [
+          "Index: /tmp/outside-workspace.ts",
+          "===================================================================",
+          "--- /tmp/outside-workspace.ts",
+          "+++ /tmp/outside-workspace.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.checkpoints.some(
+        (checkpoint: ProviderRuntimeTestCheckpoint) =>
+          checkpoint.turnId === "turn-provider-native" && checkpoint.status === "ready",
+      ),
+    );
+    const checkpoint = thread.checkpoints.find(
+      (entry: ProviderRuntimeTestCheckpoint) => entry.turnId === "turn-provider-native",
+    );
+
+    expect(checkpoint).toMatchObject({
+      checkpointRef: "provider-diff:turn-provider-native",
+      status: "ready",
+      assistantMessageId: "assistant:item-provider-native",
+      files: [
+        {
+          path: "/tmp/outside-workspace.ts",
+          kind: "modified",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+    });
+
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-provider-native-diff-updated"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-provider-native"),
+      itemId: asItemId("item-provider-native"),
+      payload: {
+        unifiedDiff: [
+          "Index: /tmp/outside-workspace.ts",
+          "===================================================================",
+          "--- /tmp/outside-workspace.ts",
+          "+++ /tmp/outside-workspace.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+newer",
+          "Index: /tmp/another-external.ts",
+          "===================================================================",
+          "--- /tmp/another-external.ts",
+          "+++ /tmp/another-external.ts",
+          "@@ -0,0 +1 @@",
+          "+created",
+        ].join("\n"),
+      },
+    });
+
+    const updatedThread = await waitForThread(harness.readModel, (entry) =>
+      entry.checkpoints.some(
+        (entryCheckpoint: ProviderRuntimeTestCheckpoint) =>
+          entryCheckpoint.turnId === "turn-provider-native" && entryCheckpoint.files.length === 2,
+      ),
+    );
+    const matchingCheckpoints = updatedThread.checkpoints.filter(
+      (entry: ProviderRuntimeTestCheckpoint) => entry.turnId === "turn-provider-native",
+    );
+    expect(matchingCheckpoints).toHaveLength(1);
+    expect(matchingCheckpoints[0]?.checkpointTurnCount).toBe(checkpoint?.checkpointTurnCount);
+    expect(matchingCheckpoints[0]?.files.map((file) => file.path)).toEqual([
+      "/tmp/another-external.ts",
+      "/tmp/outside-workspace.ts",
+    ]);
+  });
+
+  it("preserves an existing Git checkpoint ref when a provider diff arrives later", async () => {
+    const harness = await createHarness({
+      serverSettings: { providerNativeFileChangesEnabled: true },
+    });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-with-git-checkpoint");
+    const checkpointRef = CheckpointRef.make("refs/t3/checkpoints/thread-1/1");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-real-git-checkpoint"),
+        threadId,
+        turnId,
+        completedAt: createdAt,
+        checkpointRef,
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 1,
+        createdAt,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-provider-diff-after-git"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+      payload: {
+        unifiedDiff: [
+          "Index: /tmp/after-git.ts",
+          "===================================================================",
+          "--- /tmp/after-git.ts",
+          "+++ /tmp/after-git.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.checkpoints.some(
+        (checkpoint: ProviderRuntimeTestCheckpoint) =>
+          checkpoint.turnId === turnId && checkpoint.files.length === 1,
+      ),
+    );
+    const checkpoint = thread.checkpoints.find(
+      (entry: ProviderRuntimeTestCheckpoint) => entry.turnId === turnId,
+    );
+    expect(checkpoint?.checkpointRef).toBe(checkpointRef);
   });
 
   it("projects context window updates into normalized thread activities", async () => {

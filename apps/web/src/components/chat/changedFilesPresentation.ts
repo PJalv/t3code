@@ -23,6 +23,14 @@ export function changedFileName(pathValue: string): string {
 }
 
 function changedFileScope(pathValue: string): string {
+  const normalizedPath = pathValue.replaceAll("\\", "/");
+  if (
+    normalizedPath.startsWith("/") ||
+    normalizedPath.startsWith("//") ||
+    /^[A-Za-z]:\//.test(normalizedPath)
+  ) {
+    return "outside workspace";
+  }
   const segments = pathSegments(pathValue);
   return segments.length > 1 ? (segments[0] ?? "root") : "root";
 }

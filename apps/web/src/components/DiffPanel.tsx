@@ -215,6 +215,14 @@ export default function DiffPanel({
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
   const latestTurn = orderedTurnDiffSummaries[0];
+
+  useEffect(() => {
+    if (isGitRepo || !routeThreadRef || !latestTurn || diffSelection.kind === "turn") {
+      return;
+    }
+    useDiffPanelStore.getState().selectTurn(routeThreadRef, latestTurn.turnId);
+  }, [diffSelection.kind, isGitRepo, latestTurn, routeThreadRef]);
+
   const selectedScopeLabel =
     selectedTurnId === null
       ? selectedGitScope === "unstaged"
@@ -256,7 +264,7 @@ export default function DiffPanel({
       ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
     },
-    { enabled: isGitRepo && selectedTurn !== undefined },
+    { enabled: selectedTurn !== undefined },
   );
   const primaryBranchDiffPreview = useEnvironmentQuery(
     selectedTurnId === null && activeThread && activeCwd
@@ -555,26 +563,30 @@ export default function DiffPanel({
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "unstaged"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("unstaged")}
-            >
-              <span>Working tree</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "branch"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("branch")}
-            >
-              <span>Branch changes</span>
-            </DropdownMenuItem>
+            {isGitRepo ? (
+              <>
+                <DropdownMenuItem
+                  className={
+                    selectedTurnId === null && selectedGitScope === "unstaged"
+                      ? "bg-foreground/[0.08]"
+                      : undefined
+                  }
+                  onClick={() => selectGitScope("unstaged")}
+                >
+                  <span>Working tree</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={
+                    selectedTurnId === null && selectedGitScope === "branch"
+                      ? "bg-foreground/[0.08]"
+                      : undefined
+                  }
+                  onClick={() => selectGitScope("branch")}
+                >
+                  <span>Branch changes</span>
+                </DropdownMenuItem>
+              </>
+            ) : null}
             <DropdownMenuItem
               className={
                 selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
@@ -890,9 +902,9 @@ export default function DiffPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
         </div>
-      ) : !isGitRepo ? (
+      ) : !isGitRepo && selectedTurnId === null ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Turn diffs are unavailable because this project is not a git repository.
+          No provider-reported file changes yet.
         </div>
       ) : selectedTurnId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
@@ -917,7 +929,7 @@ export default function DiffPanel({
                 <DiffPanelLoadingState
                   label={
                     selectedTurn
-                      ? "Loading checkpoint diff..."
+                      ? "Loading turn diff..."
                       : selectedGitScope === "unstaged"
                         ? "Loading working tree diff..."
                         : "Loading branch diff..."

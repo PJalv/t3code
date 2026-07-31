@@ -8,13 +8,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionTurnRepositoryLive } from "./ProjectionTurns.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
+import { ProjectionTurnRepository } from "../Services/ProjectionTurns.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionTurnRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -256,6 +259,34 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
       const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-linked-pr") });
       assert.strictEqual(Option.getOrNull(cleared)?.linkedPullRequest, null);
+    }),
+  );
+
+  it.effect("round-trips and deletes provider-native turn diffs", () =>
+    Effect.gen(function* () {
+      const turns = yield* ProjectionTurnRepository;
+      const threadId = ThreadId.make("thread-provider-diff");
+      const row = {
+        threadId,
+        fromTurnCount: 0,
+        toTurnCount: 1,
+        diff: "--- /tmp/external.ts\n+++ /tmp/external.ts\n@@ -1 +1 @@\n-old\n+new\n",
+        createdAt: "2026-03-25T00:00:00.000Z",
+      } as const;
+
+      yield* turns.upsertDiffBlob(row);
+      assert.deepStrictEqual(Option.getOrNull(yield* turns.getDiffBlob(row)), row);
+
+      const updatedRow = {
+        ...row,
+        diff: "--- /tmp/external.ts\n+++ /tmp/external.ts\n@@ -1 +1 @@\n-old\n+newer\n",
+        createdAt: "2026-03-25T00:00:01.000Z",
+      } as const;
+      yield* turns.upsertDiffBlob(updatedRow);
+      assert.deepStrictEqual(Option.getOrNull(yield* turns.getDiffBlob(row)), updatedRow);
+
+      yield* turns.deleteByThreadId({ threadId });
+      assert.strictEqual(Option.isNone(yield* turns.getDiffBlob(row)), true);
     }),
   );
 });

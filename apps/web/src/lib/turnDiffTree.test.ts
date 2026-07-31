@@ -113,6 +113,29 @@ describe("buildTurnDiffTree", () => {
     ]);
   });
 
+  it("preserves absolute file paths for files outside the workspace", () => {
+    const tree = buildTurnDiffTree([
+      {
+        path: "/home/user/shared/config.ts",
+        kind: "modified",
+        additions: 1,
+        deletions: 1,
+      },
+    ]);
+
+    expect(tree[0]).toMatchObject({
+      kind: "directory",
+      name: "home/user/shared",
+      children: [
+        {
+          kind: "file",
+          name: "config.ts",
+          path: "/home/user/shared/config.ts",
+        },
+      ],
+    });
+  });
+
   it("compacts only single-directory chains and stops at branch points", () => {
     const tree = buildTurnDiffTree([
       { path: "apps/server/src/index.ts", kind: "modified", additions: 2, deletions: 1 },

@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -589,6 +590,69 @@ describe("CheckpointReactor", () => {
       ).toBe("v2\n");
     }),
   );
+
+  it("captures a Git checkpoint without discarding provider-native file summaries", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-provider-native");
+    const createdAt = "2026-01-01T00:00:00.000Z";
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-provider-native-turn-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0));
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-provider-native-diff"),
+        threadId,
+        turnId,
+        completedAt: createdAt,
+        checkpointRef: CheckpointRef.make("provider-diff:turn-provider-native"),
+        status: "ready",
+        files: [
+          {
+            path: "/tmp/external.ts",
+            kind: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+        checkpointTurnCount: 1,
+        createdAt,
+      }),
+    );
+
+    NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "v2\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-provider-native-turn-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 1));
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.checkpoints.length === 1,
+    );
+    expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
+    const snapshot = await harness.readModel();
+    const checkpoint = snapshot.threads
+      .find((entry) => entry.id === threadId)
+      ?.checkpoints.find((entry) => entry.turnId === turnId);
+    expect(checkpoint?.checkpointRef).toBe(checkpointRefForThreadTurn(threadId, 1));
+    expect(checkpoint?.files.map((file) => file.path)).toEqual(["/tmp/external.ts", "README.md"]);
+  });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
     const gitStatusRefreshCalls: string[] = [];

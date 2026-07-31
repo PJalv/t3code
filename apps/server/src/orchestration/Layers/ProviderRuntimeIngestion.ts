@@ -33,6 +33,7 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
 
+import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
@@ -2011,9 +2012,54 @@ const make = Effect.gen(function* () {
               .getThreadCheckpointContext(thread.id)
               .pipe(Effect.map(Option.getOrUndefined))
           : undefined;
+        const settings = yield* serverSettingsService.getSettings;
         const workspaceCwd =
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
-        if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd)) {
+        if (turnId && checkpointContext && settings.providerNativeFileChangesEnabled) {
+          const existingCheckpoint = checkpointContext.checkpoints.find(
+            (checkpoint) => checkpoint.turnId === turnId,
+          );
+          const checkpointTurnCount =
+            existingCheckpoint?.checkpointTurnCount ??
+            maxCheckpointTurnCount(checkpointContext.checkpoints) + 1;
+          const assistantMessageId =
+            existingCheckpoint?.assistantMessageId ??
+            MessageId.make(`assistant:${event.itemId ?? event.turnId ?? event.eventId}`);
+          const checkpointRef =
+            existingCheckpoint &&
+            !String(existingCheckpoint.checkpointRef).startsWith("provider-diff:")
+              ? existingCheckpoint.checkpointRef
+              : CheckpointRef.make(`provider-diff:${turnId}`);
+          const files = parseTurnDiffFilesFromUnifiedDiff(event.payload.unifiedDiff).map(
+            (file) => ({
+              path: file.path,
+              kind: "modified",
+              additions: file.additions,
+              deletions: file.deletions,
+            }),
+          );
+
+          yield* projectionTurnRepository.upsertDiffBlob({
+            threadId: thread.id,
+            fromTurnCount: Math.max(0, checkpointTurnCount - 1),
+            toTurnCount: checkpointTurnCount,
+            diff: event.payload.unifiedDiff,
+            createdAt: now,
+          });
+          yield* orchestrationEngine.dispatch({
+            type: "thread.turn.diff.complete",
+            commandId: yield* providerCommandId(event, "thread-provider-diff-complete"),
+            threadId: thread.id,
+            turnId,
+            completedAt: now,
+            checkpointRef,
+            status: "ready",
+            files,
+            assistantMessageId,
+            checkpointTurnCount,
+            createdAt: now,
+          });
+        } else if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd)) {
           // Skip if a checkpoint already exists for this turn. A real
           // (non-placeholder) capture from CheckpointReactor should not
           // be clobbered, and dispatching a duplicate placeholder for the

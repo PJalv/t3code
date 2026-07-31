@@ -2092,6 +2092,19 @@ export function GeneralSettingsPanel() {
       <SharedSettingsMismatchAlert />
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
+          title="Provider-native file changes"
+          description="Show file changes reported by coding providers, including files outside the project and projects without Git. This does not enable Git checkpoints or rollback."
+          control={
+            <Switch
+              checked={settings.providerNativeFileChangesEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ providerNativeFileChangesEnabled: Boolean(checked) })
+              }
+              aria-label="Enable provider-native file changes"
+            />
+          }
+        />
+        <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
           resetAction={

@@ -324,6 +324,19 @@ describe("ServerSettings thread settlement", () => {
   });
 });
 
+describe("ServerSettings provider-native file changes", () => {
+  it("defaults the beta off for existing settings files", () => {
+    expect(decodeServerSettings({}).providerNativeFileChangesEnabled).toBe(false);
+  });
+
+  it("accepts an explicit beta setting patch", () => {
+    expect(
+      decodeServerSettingsPatch({ providerNativeFileChangesEnabled: true })
+        .providerNativeFileChangesEnabled,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults text generation to Luna at low reasoning effort", () => {
     expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({

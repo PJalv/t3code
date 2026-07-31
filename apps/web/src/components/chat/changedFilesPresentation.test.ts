@@ -51,6 +51,17 @@ describe("changed-files presentation", () => {
     ]);
   });
 
+  it("labels absolute provider paths as outside the workspace", () => {
+    const files = [
+      { path: "/tmp/external.ts", kind: "modified", additions: 1, deletions: 0 },
+      { path: "C:\\shared\\external.ts", kind: "modified", additions: 1, deletions: 0 },
+    ];
+
+    expect(summarizeChangedFileScopes(files)).toEqual([
+      { label: "outside workspace", fileCount: 2 },
+    ]);
+  });
+
   it("previews files across different scopes before filling from one scope", () => {
     const files = [
       { path: "apps/web/src/App.tsx", kind: "modified", additions: 1, deletions: 0 },

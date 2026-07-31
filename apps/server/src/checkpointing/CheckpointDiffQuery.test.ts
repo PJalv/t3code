@@ -6,10 +6,31 @@ import * as Option from "effect/Option";
 import { describe, expect } from "vite-plus/test";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  ProjectionTurnRepository,
+  type ProjectionTurnRepositoryShape,
+} from "../persistence/Services/ProjectionTurns.ts";
 import { checkpointRefForThreadTurn } from "./Utils.ts";
 import * as CheckpointDiffQuery from "./CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 import { CheckpointThreadNotFoundError } from "./Errors.ts";
+
+function makeProjectionTurnRepositoryLayer(
+  getDiffBlob: ProjectionTurnRepositoryShape["getDiffBlob"] = () => Effect.succeed(Option.none()),
+) {
+  return Layer.succeed(ProjectionTurnRepository, {
+    upsertByTurnId: () => Effect.void,
+    replacePendingTurnStart: () => Effect.void,
+    getPendingTurnStartByThreadId: () => Effect.succeed(Option.none()),
+    deletePendingTurnStartByThreadId: () => Effect.void,
+    listByThreadId: () => Effect.succeed([]),
+    getByTurnId: () => Effect.succeed(Option.none()),
+    upsertDiffBlob: () => Effect.void,
+    getDiffBlob,
+    clearCheckpointTurnConflict: () => Effect.void,
+    deleteByThreadId: () => Effect.void,
+  });
+}
 
 function makeThreadCheckpointContext(input: {
   readonly projectId: ProjectId;
@@ -39,6 +60,85 @@ function makeThreadCheckpointContext(input: {
 }
 
 describe("CheckpointDiffQuery.layer", () => {
+  it.effect("returns a provider-native diff without consulting Git or projection state", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-provider-diff");
+      const diff = [
+        "Index: /tmp/outside-workspace.ts",
+        "===================================================================",
+        "--- /tmp/outside-workspace.ts",
+        "+++ /tmp/outside-workspace.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+      const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
+        isGitRepository: () => Effect.die("provider diff should not inspect Git"),
+        captureCheckpoint: () => Effect.die("provider diff should not capture Git"),
+        hasCheckpointRef: () => Effect.die("provider diff should not inspect checkpoint refs"),
+        restoreCheckpoint: () => Effect.die("provider diff should not restore checkpoints"),
+        diffCheckpoints: () => Effect.die("provider diff should not diff checkpoints"),
+        deleteCheckpointRefs: () => Effect.die("provider diff should not delete checkpoints"),
+      };
+      const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(
+          makeProjectionTurnRepositoryLayer(() =>
+            Effect.succeed(
+              Option.some({
+                threadId,
+                fromTurnCount: 0,
+                toTurnCount: 1,
+                diff,
+                createdAt: "2026-01-01T00:00:00.000Z",
+              }),
+            ),
+          ),
+        ),
+        Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
+        Layer.provideMerge(
+          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            getCommandReadModel: () => Effect.die("provider diff should not query projections"),
+            getSnapshot: () => Effect.die("provider diff should not query projections"),
+            getShellSnapshot: () => Effect.die("provider diff should not query projections"),
+            getArchivedShellSnapshot: () =>
+              Effect.die("provider diff should not query projections"),
+            getSnapshotSequence: () => Effect.die("provider diff should not query projections"),
+            getCounts: () => Effect.die("provider diff should not query projections"),
+            getActiveProjectByWorkspaceRoot: () =>
+              Effect.die("provider diff should not query projections"),
+            getProjectShellById: () => Effect.die("provider diff should not query projections"),
+            getFirstActiveThreadIdByProjectId: () =>
+              Effect.die("provider diff should not query projections"),
+            getThreadCheckpointContext: () =>
+              Effect.die("provider diff should not query projections"),
+            getFullThreadDiffContext: () =>
+              Effect.die("provider diff should not query projections"),
+            getThreadShellById: () => Effect.die("provider diff should not query projections"),
+            getThreadDetailById: () => Effect.die("provider diff should not query projections"),
+            getThreadDetailSnapshot: () => Effect.die("provider diff should not query projections"),
+            searchThreads: () => Effect.die("provider diff should not query projections"),
+          }),
+        ),
+      );
+
+      const result = yield* Effect.gen(function* () {
+        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+        return yield* query.getTurnDiff({
+          threadId,
+          fromTurnCount: 0,
+          toTurnCount: 1,
+        });
+      }).pipe(Effect.provide(layer));
+
+      expect(result).toEqual({
+        threadId,
+        fromTurnCount: 0,
+        toTurnCount: 1,
+        diff,
+      });
+    }),
+  );
+
   it.effect("uses the narrow full-thread context lookup for all-turns diffs", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.make("project-full-thread");
@@ -72,6 +172,7 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
@@ -184,6 +285,7 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
@@ -271,6 +373,7 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
@@ -343,6 +446,7 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
@@ -400,6 +504,7 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {

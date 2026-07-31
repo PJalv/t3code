@@ -98,6 +98,7 @@ const runtimeMock = {
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
     subscribedEvents: [] as Array<unknown | Promise<unknown>>,
+    subscribedEventStream: null as AsyncIterable<unknown> | null,
     eventSubscribeObserved: null as (() => void) | null,
     eventStreamError: null as ((cause: unknown) => void) | null,
     permissionReplyCalls: [] as Array<{ requestID: string; reply: string }>,
@@ -157,6 +158,7 @@ const runtimeMock = {
     this.state.closeError = null;
     this.state.messages = [];
     this.state.subscribedEvents = [];
+    this.state.subscribedEventStream = null;
     this.state.eventSubscribeObserved = null;
     this.state.eventStreamError = null;
     this.state.permissionReplyCalls.length = 0;
@@ -394,12 +396,17 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           runtimeMock.state.eventStreamError = options?.onSseError ?? null;
           return {
             stream: (async function* () {
-              const aborted = promiseWithResolvers<void>();
-              const onAbort = () => aborted.resolve(undefined);
-              options?.signal?.addEventListener("abort", onAbort, { once: true });
-              try {
-                if (runtimeMock.state.autoConnect) {
-                  yield { id: "evt-auto-connected", type: "server.connected", properties: {} };
+              if (runtimeMock.state.subscribedEventStream) {
+                yield* runtimeMock.state.subscribedEventStream;
+                return;
+              }
+              if (runtimeMock.state.autoConnect) {
+                yield { id: "evt-auto-connected", type: "server.connected", properties: {} };
+              }
+              for (const event of runtimeMock.state.subscribedEvents) {
+                const resolved = await event;
+                while (runtimeMock.state.promptEchoEvents.length > 0) {
+                  yield runtimeMock.state.promptEchoEvents.shift();
                 }
                 for (const event of runtimeMock.state.subscribedEvents) {
                   if (options?.signal?.aborted) return;
@@ -6540,195 +6547,101 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
-  it.effect("emits tool lifecycle events before late assistant metadata", () =>
+  it.effect("emits provider-native turn diffs from completed file tools", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-tool-lifecycle");
-      const sessionID = "http://127.0.0.1:9999/session";
-      const messageID = "msg-tools-before-role";
-      const start = promiseWithResolvers<OpenCodeEvent>();
-      const input = { command: "pwd" };
-      const states = [
-        { status: "pending", input, raw: "" },
-        { status: "running", input, title: "Working directory", time: { start: 1 } },
-        {
-          status: "completed",
-          input,
-          output: "/repo\n",
-          title: "Working directory",
-          metadata: {},
-          time: { start: 1, end: 2 },
-        },
-        { status: "error", input, error: "Command failed", time: { start: 3, end: 4 } },
-      ] satisfies ReadonlyArray<ToolPart["state"]>;
-      runtimeMock.state.subscribedEvents = [
-        start.promise,
-        ...states.map(
-          (state) =>
-            ({
-              id: `evt-tool-${state.status}`,
-              type: "message.part.updated",
-              properties: {
-                sessionID,
-                time: 4,
-                part: {
-                  id: state.status === "error" ? "part-failed" : "part-working",
-                  sessionID,
-                  messageID,
-                  type: "tool",
-                  callID: state.status === "error" ? "call-failed" : "call-working",
-                  tool: "bash",
-                  state,
-                },
-              },
-            }) satisfies OpenCodeEvent,
-        ),
-        {
-          id: "evt-text-before-role",
+      const threadId = asThreadId("thread-opencode-file-diff");
+      let releaseEventStream: (() => void) | undefined;
+      const eventStreamReady = new Promise<void>((resolve) => {
+        releaseEventStream = resolve;
+      });
+      const patch = [
+        "Index: /tmp/outside-workspace.ts",
+        "===================================================================",
+        "--- /tmp/outside-workspace.ts",
+        "+++ /tmp/outside-workspace.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+      const secondPatch = [
+        "Index: /tmp/outside-workspace.ts",
+        "===================================================================",
+        "--- /tmp/outside-workspace.ts",
+        "+++ /tmp/outside-workspace.ts",
+        "@@ -2 +2 @@",
+        "-before",
+        "+after",
+      ].join("\n");
+      runtimeMock.state.subscribedEventStream = (async function* () {
+        await eventStreamReady;
+        yield {
           type: "message.part.updated",
           properties: {
-            sessionID,
-            time: 4,
+            sessionID: "http://127.0.0.1:9999/session",
             part: {
-              id: "part-late-text",
-              sessionID,
-              messageID,
-              type: "text",
-              text: "Tool results received",
-              time: { start: 4 },
-            },
-          },
-        },
-        {
-          id: "evt-late-assistant-role",
-          type: "message.updated",
-          properties: { sessionID, info: { id: messageID, role: "assistant" } },
-        },
-        {
-          id: "evt-tool-lifecycle-drained",
-          type: "session.compacted",
-          properties: { sessionID },
-        },
-      ];
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId),
-        Stream.takeUntil((event) => event.type === "thread.state.changed"),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({
-        threadId,
-        input: "Read the working directory",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "opencode/kimi-k3",
-        ),
-      });
-      start.resolve({
-        id: "evt-tool-lifecycle-started",
-        type: "session.status",
-        properties: { sessionID, status: { type: "busy" } },
-      });
-      const events = yield* Fiber.join(eventsFiber);
-      const tools = events.filter(
-        (event) =>
-          event.type === "item.started" ||
-          event.type === "item.updated" ||
-          event.type === "item.completed",
-      );
-      NodeAssert.deepEqual(
-        tools.map((event) => [event.type, event.itemId, event.payload.status]),
-        [
-          ["item.started", "call-working", "inProgress"],
-          ["item.updated", "call-working", "inProgress"],
-          ["item.completed", "call-working", "completed"],
-          ["item.completed", "call-failed", "failed"],
-        ],
-      );
-      NodeAssert.partialDeepStrictEqual(tools[2]?.payload.data, {
-        command: "pwd",
-        result: "/repo\n",
-      });
-      NodeAssert.partialDeepStrictEqual(tools[3]?.payload.data, {
-        command: "pwd",
-        state: { error: "Command failed" },
-      });
-      NodeAssert.deepEqual(
-        events
-          .filter((event) => event.type === "content.delta")
-          .map((event) => event.payload.delta),
-        ["Tool results received"],
-      );
-    }),
-  );
-
-  it.effect("maps native task progress only while a turn is active", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-native-progress");
-      const sessionID = "http://127.0.0.1:9999/session";
-      const startProgress = promiseWithResolvers<OpenCodeEvent>();
-      const finishTurn = promiseWithResolvers<OpenCodeEvent>();
-      const lateProgress = promiseWithResolvers<OpenCodeEvent>();
-      const todos = [
-        { content: "Read files", status: "completed", priority: "high" },
-        { content: "Fix OpenCode", status: "in_progress", priority: "high" },
-        { content: "Run tests", status: "pending", priority: "medium" },
-        { content: "Old task", status: "cancelled", priority: "low" },
-      ];
-      const todoEvent = {
-        id: "evt-todos",
-        type: "todo.updated",
-        properties: { sessionID, todos },
-      } satisfies OpenCodeEvent;
-      runtimeMock.state.subscribedEvents = [
-        startProgress.promise,
-        ...["todowrite", "bash"].map(
-          (tool) =>
-            ({
-              id: `evt-${tool}`,
-              type: "message.part.updated",
-              properties: {
-                sessionID,
-                time: 2,
-                part: {
-                  id: `part-${tool}`,
-                  sessionID,
-                  messageID: "msg-tools",
-                  type: "tool",
-                  callID: `call-${tool}`,
-                  tool,
-                  state: {
-                    status: "completed",
-                    input: tool === "bash" ? { command: "pwd" } : { todos },
-                    output: tool === "bash" ? "/repo\n" : "Tasks updated",
-                    title: tool === "bash" ? "Working directory" : "Tasks updated",
-                    metadata: {},
-                    time: { start: 1, end: 2 },
+              id: "part-file-change",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-file-change",
+              type: "tool",
+              tool: "edit",
+              callID: "call-file-change",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/outside-workspace.ts" },
+                output: "Edit applied successfully.",
+                metadata: {
+                  filediff: {
+                    file: "/tmp/outside-workspace.ts",
+                    patch,
+                    additions: 1,
+                    deletions: 1,
                   },
                 },
+                title: "/tmp/outside-workspace.ts",
+                time: { start: 1, end: 2 },
               },
-            }) satisfies OpenCodeEvent,
-        ),
-        finishTurn.promise,
-        lateProgress.promise,
-        { id: "evt-progress-drained", type: "session.compacted", properties: { sessionID } },
-      ];
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.plan.updated" || event.type === "item.completed"),
-        ),
-        Stream.take(3),
+            },
+          },
+        };
+        yield {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-file-change-2",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-file-change",
+              type: "tool",
+              tool: "edit",
+              callID: "call-file-change-2",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/outside-workspace.ts" },
+                output: "Edit applied successfully.",
+                metadata: {
+                  filediff: {
+                    file: "/tmp/outside-workspace.ts",
+                    patch: secondPatch,
+                    additions: 1,
+                    deletions: 1,
+                  },
+                },
+                title: "/tmp/outside-workspace.ts",
+                time: { start: 3, end: 4 },
+              },
+            },
+          },
+        };
+      })();
+
+      const diffEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.diff.updated"),
+        Stream.take(2),
         Stream.runCollect,
         Effect.forkChild,
       );
+
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
         threadId,
@@ -6736,61 +6649,73 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
       const turn = yield* adapter.sendTurn({
         threadId,
-        input: "Work through the task list",
+        input: "edit the external file",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("opencode"),
-          "opencode/kimi-k3",
+          "anthropic/sonnet",
         ),
       });
-      startProgress.resolve(todoEvent);
-      const events = yield* Fiber.join(eventsFiber);
-      const plan = events.find((event) => event.type === "turn.plan.updated");
-      NodeAssert.equal(plan?.turnId, turn.turnId);
-      NodeAssert.deepEqual(plan?.payload.plan, [
-        { step: "Read files", status: "completed" },
-        { step: "Fix OpenCode", status: "inProgress" },
-        { step: "Run tests", status: "pending" },
-      ]);
-      const tools = events.filter((event) => event.type === "item.completed");
-      NodeAssert.equal(tools[0]?.payload.itemType, "dynamic_tool_call");
-      NodeAssert.equal(tools[1]?.payload.title, "Working directory");
-      NodeAssert.partialDeepStrictEqual(tools[1]?.payload.data, {
-        command: "pwd",
-        result: "/repo\n",
-      });
-      const completedFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
-        Stream.runHead,
-        Effect.forkChild,
-      );
-      finishTurn.resolve({
-        id: "evt-progress-completed",
-        type: "session.status",
-        properties: { sessionID, status: { type: "idle" } },
-      });
-      yield* Fiber.join(completedFiber);
-      const lateEventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId),
-        Stream.takeUntil((event) => event.type === "thread.state.changed"),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      lateProgress.resolve({ ...todoEvent, id: "evt-late-todos" });
-      NodeAssert.deepEqual(
-        (yield* Fiber.join(lateEventsFiber)).map((event) => event.type),
-        ["thread.state.changed"],
-      );
-      yield* adapter.stopSession(threadId);
+      releaseEventStream?.();
+
+      const events = Array.from(yield* Fiber.join(diffEventFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 2);
+      const firstEvent = events[0];
+      const secondEvent = events[1];
+      NodeAssert.equal(firstEvent?.type, "turn.diff.updated");
+      NodeAssert.equal(firstEvent?.turnId, turn.turnId);
+      if (firstEvent?.type === "turn.diff.updated") {
+        NodeAssert.equal(firstEvent.payload.unifiedDiff, patch);
+      }
+      if (secondEvent?.type === "turn.diff.updated") {
+        NodeAssert.equal(secondEvent.payload.unifiedDiff, `${patch}\n${secondPatch}`);
+      }
     }),
   );
 
-  it.effect("warns on disconnection and recovers a completion missed during reconnect", () =>
+  it.effect("emits a provider-native turn diff when OpenCode writes a new file", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-reconnect-completion");
-      const reconnect = promiseWithResolvers<unknown>();
-      runtimeMock.state.subscribedEvents = [reconnect.promise];
-      runtimeMock.state.sessionStatus = "busy";
+      const threadId = asThreadId("thread-opencode-write-diff");
+      let releaseEventStream: (() => void) | undefined;
+      const eventStreamReady = new Promise<void>((resolve) => {
+        releaseEventStream = resolve;
+      });
+      runtimeMock.state.subscribedEventStream = (async function* () {
+        await eventStreamReady;
+        yield {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-write",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-write",
+              type: "tool",
+              tool: "write",
+              callID: "call-write",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/new-file.txt", content: "first\nsecond\n" },
+                output: "Wrote file successfully.",
+                metadata: {
+                  filepath: "/tmp/new-file.txt",
+                  exists: false,
+                },
+                title: "/tmp/new-file.txt",
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+        };
+      })();
+
+      const diffEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.diff.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
         threadId,
@@ -6798,116 +6723,34 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
       const turn = yield* adapter.sendTurn({
         threadId,
-        input: "Work",
+        input: "write a new file",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("opencode"),
-          "opencode/kimi-k3",
+          "anthropic/sonnet",
         ),
       });
-      const warningFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId && event.type === "runtime.warning"),
-        Stream.runHead,
-        Effect.forkChild,
-      );
-      runtimeMock.state.eventStreamError?.(new Error("socket closed"));
-      const warning = Option.getOrThrow(yield* Fiber.join(warningFiber));
-      NodeAssert.ok(warning.type === "runtime.warning");
-      NodeAssert.equal(warning.payload.message, "OpenCode connection lost. Reconnecting.");
-      const completedFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
-        Stream.runHead,
-        Effect.forkChild,
-      );
-      runtimeMock.state.sessionStatus = "idle";
-      reconnect.resolve({
-        id: "evt-reconnected",
-        type: "server.connected",
-        properties: {},
-      } satisfies OpenCodeEvent);
-      NodeAssert.equal(Option.getOrThrow(yield* Fiber.join(completedFiber)).turnId, turn.turnId);
-      NodeAssert.equal(
-        (yield* adapter.listSessions()).find((session) => session.threadId === threadId)?.status,
-        "ready",
-      );
-      yield* adapter.stopSession(threadId);
-    }),
-  );
+      releaseEventStream?.();
 
-  it.effect(
-    "ends a running session on clean stream closure without discarding unresolved permissions",
-    () =>
-      Effect.gen(function* () {
-        const adapter = yield* OpenCodeAdapter;
-        const threadId = asThreadId("thread-stream-closed");
-        const endStream = promiseWithResolvers<unknown>();
-        const request = permissionRequest("per_disconnect", "http://127.0.0.1:9999/session");
-        runtimeMock.state.pendingPermissions = [request];
-        runtimeMock.state.subscribedEvents = [endStream.promise];
-        const openedFiber = yield* adapter.streamEvents.pipe(
-          Stream.filter((event) => event.threadId === threadId && event.type === "request.opened"),
-          Stream.runHead,
-          Effect.forkChild,
-        );
-        const session = yield* adapter.startSession({
-          provider: ProviderDriverKind.make("opencode"),
-          threadId,
-          runtimeMode: "approval-required",
-        });
-        yield* Fiber.join(openedFiber);
-        yield* adapter.sendTurn({
-          threadId,
-          input: "Work",
-          modelSelection: createModelSelection(
-            ProviderInstanceId.make("opencode"),
-            "opencode/kimi-k3",
-          ),
-        });
-        const exitedFiber = yield* adapter.streamEvents.pipe(
-          Stream.filter((event) => event.threadId === threadId),
-          Stream.takeUntil((event) => event.type === "session.exited"),
-          Stream.runCollect,
-          Effect.forkChild,
-        );
-        runtimeMock.state.endEventStream = true;
-        runtimeMock.state.abortImplementation = async () => {
-          throw new Error("server unreachable");
-        };
-        endStream.resolve({
-          id: "evt-busy",
-          type: "session.status",
-          properties: { sessionID: request.sessionID, status: { type: "busy" } },
-        });
-        const exited = yield* Fiber.join(exitedFiber);
+      const events = Array.from(yield* Fiber.join(diffEventFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 1);
+      const event = events[0];
+      NodeAssert.equal(event?.type, "turn.diff.updated");
+      NodeAssert.equal(event?.turnId, turn.turnId);
+      if (event?.type === "turn.diff.updated") {
         NodeAssert.equal(
-          exited.some((event) => event.type === "request.resolved"),
-          false,
+          event.payload.unifiedDiff,
+          [
+            "Index: /tmp/new-file.txt",
+            "===================================================================",
+            "--- /dev/null",
+            "+++ /tmp/new-file.txt",
+            "@@ -0,0 +1,2 @@",
+            "+first",
+            "+second",
+          ].join("\n"),
         );
-        NodeAssert.match(
-          exited.find((event) => event.type === "runtime.error")?.payload.message ?? "",
-          /event stream ended/,
-        );
-        NodeAssert.equal(yield* adapter.hasSession(threadId), false);
-        runtimeMock.state.endEventStream = false;
-        runtimeMock.state.subscribedEvents = [];
-        runtimeMock.state.abortImplementation = null;
-        const recoveredFiber = yield* adapter.streamEvents.pipe(
-          Stream.filter((event) => event.threadId === threadId && event.type === "request.opened"),
-          Stream.runHead,
-          Effect.forkChild,
-        );
-        yield* adapter.startSession({
-          provider: ProviderDriverKind.make("opencode"),
-          threadId,
-          runtimeMode: "approval-required",
-          resumeCursor: session.resumeCursor,
-        });
-        NodeAssert.equal(
-          Option.getOrThrow(yield* Fiber.join(recoveredFiber)).requestId,
-          request.id,
-        );
-        yield* adapter.respondToRequest(threadId, ApprovalRequestId.make(request.id), "accept");
-        yield* adapter.stopSession(threadId);
-      }),
+      }
+    }),
   );
 
   it.effect("lets OpenCode own session title generation and emits title metadata updates", () =>

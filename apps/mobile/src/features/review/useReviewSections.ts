@@ -172,7 +172,10 @@ export function useReviewSections(input: {
   );
 
   return {
-    error: diffPreview.error ?? activeTurnDiff.error ?? reviewCache.asyncState.error,
+    error:
+      selectedSection?.kind === "turn"
+        ? (activeTurnDiff.error ?? reviewCache.asyncState.error)
+        : (diffPreview.error ?? reviewCache.asyncState.error),
     loadingGitDiffs: diffPreview.isPending,
     loadingTurnIds,
     reviewSections,
