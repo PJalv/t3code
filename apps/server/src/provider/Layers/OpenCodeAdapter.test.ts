@@ -104,6 +104,7 @@ const runtimeMock = {
     forkMessagesBySession: new Map<string, MessageEntry[]>(),
     forkPreservesBoundary: true,
     subscribedEvents: [] as Array<unknown | Promise<unknown>>,
+    subscribedEventStream: null as AsyncIterable<unknown> | null,
     eventSubscribeObserved: null as (() => void) | null,
     eventStreamError: null as ((cause: unknown) => void) | null,
     permissionReplyCalls: [] as Array<{ requestID: string; reply: string }>,
@@ -168,6 +169,7 @@ const runtimeMock = {
     this.state.forkMessagesBySession.clear();
     this.state.forkPreservesBoundary = true;
     this.state.subscribedEvents = [];
+    this.state.subscribedEventStream = null;
     this.state.eventSubscribeObserved = null;
     this.state.eventStreamError = null;
     this.state.permissionReplyCalls.length = 0;
@@ -452,6 +454,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           runtimeMock.state.eventStreamError = options?.onSseError ?? null;
           return {
             stream: (async function* () {
+              if (runtimeMock.state.subscribedEventStream) {
+                yield* runtimeMock.state.subscribedEventStream;
+                return;
+              }
               const aborted = promiseWithResolvers<void>();
               const onAbort = () => aborted.resolve(undefined);
               options?.signal?.addEventListener("abort", onAbort, { once: true });
@@ -7394,6 +7400,213 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  it.effect("emits provider-native turn diffs from completed file tools", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-file-diff");
+      let releaseEventStream: (() => void) | undefined;
+      const eventStreamReady = new Promise<void>((resolve) => {
+        releaseEventStream = resolve;
+      });
+      const patch = [
+        "Index: /tmp/outside-workspace.ts",
+        "===================================================================",
+        "--- /tmp/outside-workspace.ts",
+        "+++ /tmp/outside-workspace.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+      const secondPatch = [
+        "Index: /tmp/outside-workspace.ts",
+        "===================================================================",
+        "--- /tmp/outside-workspace.ts",
+        "+++ /tmp/outside-workspace.ts",
+        "@@ -2 +2 @@",
+        "-before",
+        "+after",
+      ].join("\n");
+      runtimeMock.state.subscribedEventStream = (async function* () {
+        await eventStreamReady;
+        yield {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-file-change",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-file-change",
+              type: "tool",
+              tool: "edit",
+              callID: "call-file-change",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/outside-workspace.ts" },
+                output: "Edit applied successfully.",
+                metadata: {
+                  filediff: {
+                    file: "/tmp/outside-workspace.ts",
+                    patch,
+                    additions: 1,
+                    deletions: 1,
+                  },
+                },
+                title: "/tmp/outside-workspace.ts",
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+        };
+        yield {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-file-change-2",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-file-change",
+              type: "tool",
+              tool: "edit",
+              callID: "call-file-change-2",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/outside-workspace.ts" },
+                output: "Edit applied successfully.",
+                metadata: {
+                  filediff: {
+                    file: "/tmp/outside-workspace.ts",
+                    patch: secondPatch,
+                    additions: 1,
+                    deletions: 1,
+                  },
+                },
+                title: "/tmp/outside-workspace.ts",
+                time: { start: 3, end: 4 },
+              },
+            },
+          },
+        };
+      })();
+
+      const diffEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.diff.updated"),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "edit the external file",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      releaseEventStream?.();
+
+      const events = Array.from(yield* Fiber.join(diffEventFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 2);
+      const firstEvent = events[0];
+      const secondEvent = events[1];
+      NodeAssert.equal(firstEvent?.type, "turn.diff.updated");
+      NodeAssert.equal(firstEvent?.turnId, turn.turnId);
+      if (firstEvent?.type === "turn.diff.updated") {
+        NodeAssert.equal(firstEvent.payload.unifiedDiff, patch);
+      }
+      if (secondEvent?.type === "turn.diff.updated") {
+        NodeAssert.equal(secondEvent.payload.unifiedDiff, `${patch}\n${secondPatch}`);
+      }
+    }),
+  );
+
+  it.effect("emits a provider-native turn diff when OpenCode writes a new file", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-write-diff");
+      let releaseEventStream: (() => void) | undefined;
+      const eventStreamReady = new Promise<void>((resolve) => {
+        releaseEventStream = resolve;
+      });
+      runtimeMock.state.subscribedEventStream = (async function* () {
+        await eventStreamReady;
+        yield {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-write",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-write",
+              type: "tool",
+              tool: "write",
+              callID: "call-write",
+              state: {
+                status: "completed",
+                input: { filePath: "/tmp/new-file.txt", content: "first\nsecond\n" },
+                output: "Wrote file successfully.",
+                metadata: {
+                  filepath: "/tmp/new-file.txt",
+                  exists: false,
+                },
+                title: "/tmp/new-file.txt",
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+        };
+      })();
+
+      const diffEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.diff.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "write a new file",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      releaseEventStream?.();
+
+      const events = Array.from(yield* Fiber.join(diffEventFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 1);
+      const event = events[0];
+      NodeAssert.equal(event?.type, "turn.diff.updated");
+      NodeAssert.equal(event?.turnId, turn.turnId);
+      if (event?.type === "turn.diff.updated") {
+        NodeAssert.equal(
+          event.payload.unifiedDiff,
+          [
+            "Index: /tmp/new-file.txt",
+            "===================================================================",
+            "--- /dev/null",
+            "+++ /tmp/new-file.txt",
+            "@@ -0,0 +1,2 @@",
+            "+first",
+            "+second",
+          ].join("\n"),
+        );
+      }
+    }),
+  );
+
 
   it.effect("maps native task progress only while a turn is active", () =>
     Effect.gen(function* () {

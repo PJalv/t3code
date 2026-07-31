@@ -99,6 +99,22 @@ export const DeleteProjectionTurnsByThreadInput = Schema.Struct({
 });
 export type DeleteProjectionTurnsByThreadInput = typeof DeleteProjectionTurnsByThreadInput.Type;
 
+export const ProjectionTurnDiffBlob = Schema.Struct({
+  threadId: ThreadId,
+  fromTurnCount: NonNegativeInt,
+  toTurnCount: NonNegativeInt,
+  diff: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type ProjectionTurnDiffBlob = typeof ProjectionTurnDiffBlob.Type;
+
+export const GetProjectionTurnDiffBlobInput = Schema.Struct({
+  threadId: ThreadId,
+  fromTurnCount: NonNegativeInt,
+  toTurnCount: NonNegativeInt,
+});
+export type GetProjectionTurnDiffBlobInput = typeof GetProjectionTurnDiffBlobInput.Type;
+
 export const ClearCheckpointTurnConflictInput = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
@@ -148,6 +164,16 @@ export interface ProjectionTurnRepositoryShape {
   readonly getByTurnId: (
     input: GetProjectionTurnByTurnIdInput,
   ) => Effect.Effect<Option.Option<ProjectionTurnById>, ProjectionRepositoryError>;
+
+  /** Stores the latest provider-native patch for one turn range. */
+  readonly upsertDiffBlob: (
+    row: ProjectionTurnDiffBlob,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Reads a provider-native patch before falling back to VCS checkpoint diffing. */
+  readonly getDiffBlob: (
+    input: GetProjectionTurnDiffBlobInput,
+  ) => Effect.Effect<Option.Option<ProjectionTurnDiffBlob>, ProjectionRepositoryError>;
 
   /**
    * Clears checkpoint fields on conflicting rows that reuse the same checkpoint turn count in a thread, excluding the provided turn.
