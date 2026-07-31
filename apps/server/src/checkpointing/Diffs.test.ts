@@ -51,4 +51,28 @@ describe("parseTurnDiffFilesFromNumstat", () => {
       { path, additions: 1, deletions: 0 },
     ]);
   });
+
+  it("coalesces multiple provider patches for the same file", () => {
+    const diff = [
+      "Index: /tmp/external.ts",
+      "===================================================================",
+      "--- /tmp/external.ts",
+      "+++ /tmp/external.ts",
+      "@@ -1 +1 @@",
+      "-one",
+      "+two",
+      "Index: /tmp/external.ts",
+      "===================================================================",
+      "--- /tmp/external.ts",
+      "+++ /tmp/external.ts",
+      "@@ -2 +2,2 @@",
+      "-three",
+      "+four",
+      "+five",
+    ].join("\n");
+
+    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+      { path: "/tmp/external.ts", additions: 3, deletions: 2 },
+    ]);
+  });
 });
