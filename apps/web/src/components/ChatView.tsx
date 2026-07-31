@@ -3644,6 +3644,17 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byMessageId;
   }, [turnDiffSummaries]);
+  const checkpointTurnCountByTurnId = useMemo(() => {
+    const byTurnId = new Map<TurnId, number>();
+    for (const summary of turnDiffSummaries) {
+      const turnCount =
+        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+      if (typeof turnCount === "number") {
+        byTurnId.set(summary.turnId, turnCount);
+      }
+    }
+    return byTurnId;
+  }, [inferredCheckpointTurnCountByTurnId, turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
     for (let index = 0; index < timelineEntries.length; index += 1) {
@@ -9940,27 +9951,18 @@ export default function ChatView(props: ChatViewProps) {
                 {...(draftId ? { onWorktreeSetupWorkLocally } : {})}
                 {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
                 listRef={legendListRef}
-                timelineEntries={displayedTimeline.entries}
-                latestTurn={paintOnlyDisplayedTimeline ? null : activeLatestTurn}
-                runningTurnId={paintOnlyDisplayedTimeline ? null : activeRunningTurnId}
-                turnDiffSummaries={
-                  paintOnlyDisplayedTimeline
-                    ? EMPTY_HELD_TURN_DIFF_SUMMARIES
-                    : activeThread.checkpoints
-                }
-                activeThreadEnvironmentId={
-                  displayedThreadRef?.environmentId ?? activeThread.environmentId
-                }
-                routeThreadKey={displayedTimelineKey}
-                displayThreadKey={displayedTimelineKey}
-                onOpenTurnDiff={paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiff}
-                supportsConversationRollback={
-                  !paintOnlyDisplayedTimeline && supportsConversationRollback
-                }
-                onRevertToTurnCount={
-                  paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
-                }
-                isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
+                timelineEntries={timelineEntries}
+                latestTurn={activeLatestTurn}
+                runningTurnId={activeRunningTurnId}
+                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                checkpointTurnCountByTurnId={checkpointTurnCountByTurnId}
+                activeThreadEnvironmentId={activeThread.environmentId}
+                routeThreadKey={routeThreadKey}
+                onOpenTurnDiff={onOpenTurnDiff}
+                supportsConversationRollback={supportsConversationRollback}
+                onRevertToTurnCount={onRevertTimelineTurn}
+                onUseArtifactTemplate={useArtifactTemplate}
+                isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
                 onFileDownload={

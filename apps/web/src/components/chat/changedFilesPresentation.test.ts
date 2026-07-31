@@ -4,6 +4,8 @@ import {
   changedFileName,
   selectChangedFilePreview,
   shouldAutoExpandChangedFiles,
+  shouldAutoExpandChangedFilesTree,
+  shouldAutoExpandInlineFileChange,
   summarizeChangedFileScopes,
 } from "./changedFilesPresentation";
 
@@ -33,6 +35,20 @@ describe("changed-files presentation", () => {
         true,
       ),
     ).toBe(false);
+  });
+
+  it("auto-expands successful inline file changes whenever their work row is visible", () => {
+    const files = [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1 }];
+
+    expect(shouldAutoExpandInlineFileChange(files, true)).toBe(true);
+    expect(shouldAutoExpandInlineFileChange(files, false)).toBe(false);
+  });
+
+  it("keeps the duplicate file tree collapsed for provider-native inline diffs", () => {
+    const files = [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1 }];
+
+    expect(shouldAutoExpandChangedFilesTree(files, true, true)).toBe(false);
+    expect(shouldAutoExpandChangedFilesTree(files, true, false)).toBe(true);
   });
 
   it("summarizes the most prominent top-level scopes", () => {
