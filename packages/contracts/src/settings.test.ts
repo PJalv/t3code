@@ -572,22 +572,16 @@ describe("ServerSettings thread settlement", () => {
   });
 });
 
-describe("ClientSettings pull request merge methods", () => {
-  it("defaults to no project overrides and accepts supported methods", () => {
-    expect(decodeClientSettings({}).pullRequestMergeMethodOverrides).toEqual({});
-    expect(
-      decodeClientSettingsPatch({
-        pullRequestMergeMethodOverrides: { project: "squash" },
-      }).pullRequestMergeMethodOverrides,
-    ).toEqual({ project: "squash" });
+describe("ServerSettings provider-native file changes", () => {
+  it("defaults the beta off for existing settings files", () => {
+    expect(decodeServerSettings({}).providerNativeFileChangesEnabled).toBe(false);
   });
 
-  it("rejects unsupported project merge methods", () => {
-    expect(() =>
-      decodeClientSettingsPatch({
-        pullRequestMergeMethodOverrides: { project: "fast-forward" },
-      }),
-    ).toThrow();
+  it("accepts an explicit beta setting patch", () => {
+    expect(
+      decodeServerSettingsPatch({ providerNativeFileChangesEnabled: true })
+        .providerNativeFileChangesEnabled,
+    ).toBe(true);
   });
 });
 

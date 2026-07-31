@@ -11,10 +11,12 @@ import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
   ClearCheckpointTurnConflictInput,
   DeleteProjectionTurnsByThreadInput,
+  GetProjectionTurnDiffBlobInput,
   GetProjectionPendingTurnStartInput,
   GetProjectionTurnByTurnIdInput,
   ListProjectionTurnsByThreadInput,
   ProjectionPendingTurnStart,
+  ProjectionTurnDiffBlob,
   ProjectionTurn,
   ProjectionTurnById,
   ProjectionTurnRepository,
@@ -245,6 +247,59 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
       `,
   });
 
+  const upsertProjectionTurnDiffBlob = SqlSchema.void({
+    Request: ProjectionTurnDiffBlob,
+    execute: (row) =>
+      sql`
+        INSERT INTO checkpoint_diff_blobs (
+          thread_id,
+          from_turn_count,
+          to_turn_count,
+          diff,
+          created_at
+        )
+        VALUES (
+          ${row.threadId},
+          ${row.fromTurnCount},
+          ${row.toTurnCount},
+          ${row.diff},
+          ${row.createdAt}
+        )
+        ON CONFLICT (thread_id, from_turn_count, to_turn_count)
+        DO UPDATE SET
+          diff = excluded.diff,
+          created_at = excluded.created_at
+      `,
+  });
+
+  const getProjectionTurnDiffBlob = SqlSchema.findOneOption({
+    Request: GetProjectionTurnDiffBlobInput,
+    Result: ProjectionTurnDiffBlob,
+    execute: (input) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          from_turn_count AS "fromTurnCount",
+          to_turn_count AS "toTurnCount",
+          diff,
+          created_at AS "createdAt"
+        FROM checkpoint_diff_blobs
+        WHERE thread_id = ${input.threadId}
+          AND from_turn_count = ${input.fromTurnCount}
+          AND to_turn_count = ${input.toTurnCount}
+        LIMIT 1
+      `,
+  });
+
+  const deleteProjectionTurnDiffBlobsByThread = SqlSchema.void({
+    Request: DeleteProjectionTurnsByThreadInput,
+    execute: ({ threadId }) =>
+      sql`
+        DELETE FROM checkpoint_diff_blobs
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const deleteProjectionTurnsByThread = SqlSchema.void({
     Request: DeleteProjectionTurnsByThreadInput,
     execute: ({ threadId }) =>
@@ -332,10 +387,36 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         ),
       );
 
-  const deleteByThreadId: ProjectionTurnRepositoryShape["deleteByThreadId"] = (input) =>
-    deleteProjectionTurnsByThread(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionTurnRepository.deleteByThreadId:query")),
+  const upsertDiffBlob: ProjectionTurnRepositoryShape["upsertDiffBlob"] = (row) =>
+    upsertProjectionTurnDiffBlob(row).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionTurnRepository.upsertDiffBlob:query",
+          "ProjectionTurnRepository.upsertDiffBlob:encodeRequest",
+        ),
+      ),
     );
+
+  const getDiffBlob: ProjectionTurnRepositoryShape["getDiffBlob"] = (input) =>
+    getProjectionTurnDiffBlob(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionTurnRepository.getDiffBlob:query",
+          "ProjectionTurnRepository.getDiffBlob:decodeResult",
+        ),
+      ),
+    );
+
+  const deleteByThreadId: ProjectionTurnRepositoryShape["deleteByThreadId"] = (input) =>
+    sql
+      .withTransaction(
+        deleteProjectionTurnsByThread(input).pipe(
+          Effect.andThen(deleteProjectionTurnDiffBlobsByThread(input)),
+        ),
+      )
+      .pipe(
+        Effect.mapError(toPersistenceSqlError("ProjectionTurnRepository.deleteByThreadId:query")),
+      );
 
   return {
     upsertByTurnId,
@@ -344,6 +425,8 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
     deletePendingTurnStartByThreadId,
     listByThreadId,
     getByTurnId,
+    upsertDiffBlob,
+    getDiffBlob,
     clearCheckpointTurnConflict,
     deleteByThreadId,
   } satisfies ProjectionTurnRepositoryShape;

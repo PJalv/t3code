@@ -3,6 +3,7 @@ import {
   type CheckpointRef,
   EventId,
   MessageId,
+  type OrchestrationCheckpointFile,
   type ProjectId,
   ThreadId,
   TurnId,
@@ -73,6 +74,21 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
     default:
       return "ready";
   }
+}
+
+function isProviderNativeCheckpointRef(checkpointRef: CheckpointRef): boolean {
+  return String(checkpointRef).startsWith("provider-diff:");
+}
+
+function mergeCheckpointFiles(
+  gitFiles: ReadonlyArray<OrchestrationCheckpointFile>,
+  providerFiles: ReadonlyArray<OrchestrationCheckpointFile>,
+): ReadonlyArray<OrchestrationCheckpointFile> {
+  const filesByPath = new Map(gitFiles.map((file) => [file.path, file]));
+  for (const file of providerFiles) {
+    filesByPath.set(file.path, file);
+  }
+  return [...filesByPath.values()].toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
 const make = Effect.gen(function* () {
@@ -231,6 +247,7 @@ const make = Effect.gen(function* () {
     readonly turnCount: number;
     readonly status: "ready" | "missing" | "error";
     readonly assistantMessageId: MessageId | undefined;
+    readonly providerFiles?: ReadonlyArray<OrchestrationCheckpointFile>;
     readonly createdAt: string;
   }) {
     const fromTurnCount = Math.max(0, input.turnCount - 1);
@@ -314,7 +331,7 @@ const make = Effect.gen(function* () {
       completedAt: input.createdAt,
       checkpointRef: targetCheckpointRef,
       status: input.status,
-      files,
+      files: mergeCheckpointFiles(files, input.providerFiles ?? []),
       assistantMessageId,
       checkpointTurnCount: input.turnCount,
       createdAt: input.createdAt,
@@ -374,12 +391,14 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      // Only skip if a real (non-placeholder) checkpoint already exists for this turn.
-      // ProviderRuntimeIngestion may insert placeholder entries with status "missing"
-      // before this reactor runs; those must not prevent real git capture.
+      // Provider-native diffs describe file changes but do not provide a Git ref.
+      // They must not prevent real checkpoint capture when checkpoints are enabled.
       if (
         thread.checkpoints.some(
-          (checkpoint) => checkpoint.turnId === turnId && checkpoint.status !== "missing",
+          (checkpoint) =>
+            checkpoint.turnId === turnId &&
+            checkpoint.status !== "missing" &&
+            !isProviderNativeCheckpointRef(checkpoint.checkpointRef),
         )
       ) {
         return;
@@ -399,7 +418,10 @@ const make = Effect.gen(function* () {
       // If a placeholder checkpoint exists for this turn, reuse its turn count
       // instead of incrementing past it.
       const existingPlaceholder = thread.checkpoints.find(
-        (checkpoint) => checkpoint.turnId === turnId && checkpoint.status === "missing",
+        (checkpoint) =>
+          checkpoint.turnId === turnId &&
+          (checkpoint.status === "missing" ||
+            isProviderNativeCheckpointRef(checkpoint.checkpointRef)),
       );
       const currentTurnCount = thread.checkpoints.reduce(
         (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
@@ -408,6 +430,10 @@ const make = Effect.gen(function* () {
       const nextTurnCount = existingPlaceholder
         ? existingPlaceholder.checkpointTurnCount
         : currentTurnCount + 1;
+      const existingProviderCheckpoint =
+        existingPlaceholder && isProviderNativeCheckpointRef(existingPlaceholder.checkpointRef)
+          ? existingPlaceholder
+          : undefined;
 
       yield* captureAndDispatchCheckpoint({
         threadId: thread.id,
@@ -415,11 +441,9 @@ const make = Effect.gen(function* () {
         thread,
         cwd: checkpointCwd,
         turnCount: nextTurnCount,
-        status:
-          event.type === "turn.aborted"
-            ? "ready"
-            : checkpointStatusFromRuntime(event.payload.state),
-        assistantMessageId: existingPlaceholder?.assistantMessageId ?? undefined,
+        status: checkpointStatusFromRuntime(event.payload.state),
+        assistantMessageId: existingProviderCheckpoint?.assistantMessageId ?? undefined,
+        ...(existingProviderCheckpoint ? { providerFiles: existingProviderCheckpoint.files } : {}),
         createdAt: event.createdAt,
       });
     },
@@ -933,6 +957,10 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processInputSafely);
 
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
+    if (process.env.T3_DISABLE_CHECKPOINTS === "1") {
+      return;
+    }
+
     yield* forkParked(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         if (
