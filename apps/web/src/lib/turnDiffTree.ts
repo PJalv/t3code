@@ -125,7 +125,7 @@ export function buildTurnDiffTree(files: ReadonlyArray<TurnDiffFileChange>): Tur
       continue;
     }
 
-    const filePath = segments.join("/");
+    const filePath = file.path.replaceAll("\\", "/");
     const fileName = segments.at(-1);
     if (!fileName) {
       continue;
