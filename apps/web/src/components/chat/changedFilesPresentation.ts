@@ -46,6 +46,21 @@ export function shouldAutoExpandChangedFiles(
   return stat.additions + stat.deletions <= CHANGED_FILES_AUTO_EXPAND_LINE_LIMIT;
 }
 
+export function shouldAutoExpandInlineFileChange(
+  files: ReadonlyArray<TurnDiffFileChange>,
+  completedSuccessfully: boolean,
+): boolean {
+  return completedSuccessfully && shouldAutoExpandChangedFiles(files, true);
+}
+
+export function shouldAutoExpandChangedFilesTree(
+  files: ReadonlyArray<TurnDiffFileChange>,
+  isLatestTurn: boolean,
+  hasProviderNativeInlineDiff: boolean,
+): boolean {
+  return !hasProviderNativeInlineDiff && shouldAutoExpandChangedFiles(files, isLatestTurn);
+}
+
 export function summarizeChangedFileScopes(
   files: ReadonlyArray<TurnDiffFileChange>,
   limit = CHANGED_FILES_PREVIEW_SCOPE_LIMIT,
