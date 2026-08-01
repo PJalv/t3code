@@ -17,9 +17,9 @@ describe("selectInlineFileChangeDiffs", () => {
     ).toEqual([{ name: "a/tplink/test.nix" }]);
   });
 
-  it("keeps the complete turn patch when provider paths cannot be correlated", () => {
+  it("does not show unrelated turn files when paths cannot be correlated", () => {
     expect(selectInlineFileChangeDiffs(files, ["outside/unknown.nix"], "/home/pjalv/work")).toEqual(
-      files,
+      [],
     );
   });
 });
