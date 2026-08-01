@@ -373,6 +373,7 @@ export function useCheckpointDiff(
     queryKind === "turn"
       ? {
           environmentId: target.environmentId!,
+          ...(target.cacheScope === undefined ? {} : { cacheScope: target.cacheScope }),
           input: {
             threadId: target.threadId!,
             fromTurnCount: target.fromTurnCount!,

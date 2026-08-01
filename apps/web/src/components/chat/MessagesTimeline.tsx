@@ -3340,9 +3340,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           ) : null}
           {canShowInlineFileDiff && workEntry.turnId != null ? (
             <InlineFileChangeDiff
+              entryId={workEntry.id}
               turnId={workEntry.turnId}
               checkpointTurnCount={checkpointTurnCount}
               changedFiles={workEntry.changedFiles ?? []}
+              diffVersion={JSON.stringify([
+                turnDiffSummary?.completedAt ?? null,
+                turnDiffSummary?.files ?? [],
+              ])}
             />
           ) : expandedBody ? (
             <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
@@ -3354,9 +3359,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
 });
 
 function InlineFileChangeDiff(props: {
+  entryId: string;
   turnId: TurnId;
   checkpointTurnCount: number;
   changedFiles: ReadonlyArray<string>;
+  diffVersion: string;
 }) {
   const ctx = use(TimelineRowCtx);
   const checkpointDiff = useCheckpointDiff(
@@ -3366,7 +3373,7 @@ function InlineFileChangeDiff(props: {
       fromTurnCount: Math.max(0, props.checkpointTurnCount - 1),
       toTurnCount: props.checkpointTurnCount,
       ignoreWhitespace: false,
-      cacheScope: `turn:${props.turnId}:inline-file-change`,
+      cacheScope: `turn:${props.turnId}:inline-file-change:${props.entryId}:${props.diffVersion}`,
     },
     { enabled: true },
   );
@@ -3404,6 +3411,13 @@ function InlineFileChangeDiff(props: {
       <pre className="max-h-80 cursor-text overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
         {renderablePatch.text}
       </pre>
+    );
+  }
+  if (matchingFiles.length === 0) {
+    return (
+      <p className="py-1 text-[11px] text-muted-foreground">
+        No patch content is available for these files.
+      </p>
     );
   }
 
