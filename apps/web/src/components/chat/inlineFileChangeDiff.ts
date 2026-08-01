@@ -72,5 +72,5 @@ export function selectInlineFileChangeDiffs<T extends DiffFilePath>(
     return changedPathSets.some((changedPaths) => pathsOverlap(diffPaths, changedPaths));
   });
 
-  return matchingFiles.length > 0 ? matchingFiles : files;
+  return matchingFiles;
 }
