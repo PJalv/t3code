@@ -1535,30 +1535,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               scope,
               provideFiles(fs.remove(mcpConfigFile, { force: true })).pipe(Effect.ignore),
             );
-          const spawn = factory({
-            command: options.binaryPath,
-            args: [
-              ...(options.args ?? []),
-              "--session",
-              cursor?.sessionFile ?? freshFile!.sessionFile,
-              ...DETERMINISTIC_ARGS,
-            ],
-            cwd,
-            env: {
-              ...spawnEnvironment,
-              ...(mcpConfigFile ? { T3CODE_PI_MCP_CONFIG: mcpConfigFile } : {}),
-            },
-          }).pipe(
-            Effect.provideService(Scope.Scope, scope),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          );
-          const started = yield* spawn.pipe(
-            Effect.flatMap((client) =>
-              client.getState().pipe(Effect.map((state) => ({ client, state }))),
-            ),
-            Effect.mapError((cause) => request("session/start", cause)),
-            Effect.result,
-          );
+          const startClient = (withMcpConfigFlag: boolean) =>
+            factory({
+              command: options.binaryPath,
+              args: [
+                ...(options.args ?? []),
+                ...(withMcpConfigFlag && mcpConfigFile ? ["--mcp-config", mcpConfigFile] : []),
+                "--session",
+                cursor?.sessionFile ?? freshFile!.sessionFile,
+                ...DETERMINISTIC_ARGS,
+              ],
+              cwd,
+              env: {
+                ...spawnEnvironment,
+                ...(mcpConfigFile ? { T3CODE_PI_MCP_CONFIG: mcpConfigFile } : {}),
+              },
+            }).pipe(
+              Effect.provideService(Scope.Scope, scope),
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+              Effect.flatMap((client) =>
+                client.getState().pipe(
+                  Effect.map((state) => ({ client, state })),
+                  Effect.onError(() => client.close()),
+                ),
+              ),
+              Effect.mapError((cause) => request("session/start", cause)),
+              Effect.result,
+            );
+          let started = yield* startClient(mcpConfigFile !== undefined);
+          const mcpConfigFallback = mcpConfigFile !== undefined && Result.isFailure(started);
+          if (mcpConfigFallback) started = yield* startClient(false);
           if (
             fresh &&
             Result.isSuccess(started) &&
@@ -1658,6 +1664,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           yield* Effect.yieldNow;
           if (ctx.closing || ctx.stopped)
             return yield* validation("startSession", "Pi RPC event stream ended during startup.");
+          if (mcpConfigFallback)
+            yield* offer({
+              type: "runtime.warning",
+              ...(yield* base(ctx)),
+              payload: {
+                message:
+                  "Pi could not start with the T3 MCP configuration, so injected T3 browser tools are unavailable in this session. Update pi-mcp-adapter and refresh the provider status.",
+              },
+            });
           startupLease.startupOwned = false;
           transferred = true;
           return session;

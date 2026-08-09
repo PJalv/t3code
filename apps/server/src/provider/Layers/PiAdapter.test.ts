@@ -212,7 +212,9 @@ const collectThroughSentinel = Effect.fn("PiAdapterTest.collectThroughSentinel")
   };
 });
 
-const makeHarness = (harnessOptions: { readonly failStart?: boolean } = {}): Harness => {
+const makeHarness = (
+  harnessOptions: { readonly failStart?: boolean; readonly failMcpStart?: boolean } = {},
+): Harness => {
   const client = new FakeClient();
   const spawns: PiRpcSpawnOptions[] = [];
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-pi-adapter-"));
@@ -221,7 +223,10 @@ const makeHarness = (harnessOptions: { readonly failStart?: boolean } = {}): Har
   const makeClient: PiRpcClientFactory = (spawnOptions) =>
     Effect.gen(function* () {
       spawns.push(spawnOptions);
-      if (harnessOptions.failStart) {
+      if (
+        harnessOptions.failStart ||
+        (harnessOptions.failMcpStart && spawnOptions.args?.includes("--mcp-config"))
+      ) {
         return yield* new PiRpcCommandError({
           command: "spawn",
           requestId: "test",
@@ -350,9 +355,12 @@ describe("PiAdapter", () => {
           runtimeMode: "full-access",
         });
         const args = h.spawns[0]?.args ?? [];
-        assert.equal(args.includes("--mcp-config"), false);
         const configFile = h.spawns[0]?.env?.T3CODE_PI_MCP_CONFIG;
         assert.ok(configFile);
+        assert.deepEqual(
+          args.slice(args.indexOf("--mcp-config"), args.indexOf("--mcp-config") + 2),
+          ["--mcp-config", configFile],
+        );
         assert.equal(path.resolve(configFile).startsWith(path.resolve(h.stateDir)), true);
         assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
         const config = yield* decodeMcpConfig(fs.readFileSync(configFile, "utf8")).pipe(
@@ -365,6 +373,44 @@ describe("PiAdapter", () => {
         });
         yield* adapter.stopSession(threadId);
         assert.equal(fs.existsSync(configFile), false);
+      }),
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
+    );
+  });
+
+  it.effect("falls back without injected MCP when Pi does not accept the adapter flag", () => {
+    const h = makeHarness({ failMcpStart: true });
+    const threadId = ThreadId.make("mcp-fallback-thread");
+    McpProviderSession.setMcpProviderSession({
+      environmentId: EnvironmentId.make("environment"),
+      threadId,
+      providerSessionId: "provider-session",
+      providerInstanceId: instanceId,
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer secret-token",
+    });
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        const warningFiber = yield* adapter.streamEvents.pipe(
+          Stream.runHead,
+          Effect.map(Option.getOrUndefined),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("pi"),
+          providerInstanceId: instanceId,
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        assert.equal(h.spawns.length, 2);
+        assert.equal(h.spawns[0]?.args?.includes("--mcp-config"), true);
+        assert.equal(h.spawns[1]?.args?.includes("--mcp-config"), false);
+        const warning = yield* Fiber.join(warningFiber);
+        assert.equal(warning?.type, "runtime.warning");
+        if (warning?.type === "runtime.warning")
+          assert.match(warning.payload.message, /browser tools are unavailable/);
       }),
     ).pipe(
       Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
