@@ -347,12 +347,14 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
     // transition (terminal → running, in applyStatus) reads as a fresh run.
     // The activation bump lives ONLY in applyStatus — bumping here too
     // counted every retry twice (review finding: two attempts read "run 3").
-    if (agent.attempt !== null && attempt > agent.attempt) {
-      agent.result = null;
-      agent.error = null;
-      agent.completedAt = null;
+    if (agent.attempt === null || attempt > agent.attempt) {
+      if (agent.attempt !== null) {
+        agent.result = null;
+        agent.error = null;
+        agent.completedAt = null;
+      }
+      agent.attempt = attempt;
     }
-    agent.attempt = attempt;
   }
   const outputFile = asString(payload.outputFile);
   if (outputFile) agent.outputFile = outputFile;
