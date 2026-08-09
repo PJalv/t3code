@@ -85,6 +85,7 @@ interface ActiveTurn {
   readonly reasoningItemId: RuntimeItemId;
   readonly toolItemIds: Map<string, RuntimeItemId>;
   readonly toolArgs: Map<string, Record<string, unknown>>;
+  readonly fileDiffsByPath: Map<string, string[]>;
   assistantText: string;
   assistantStarted: boolean;
   reasoningStarted: boolean;
@@ -164,6 +165,68 @@ const piToolText = (value: unknown): string | undefined => {
 
 const piToolPath = (args: Record<string, unknown>): string | undefined =>
   trimmedString(args.path) ?? trimmedString(args.file_path);
+
+const newFilePatch = (file: string, content: string): string | undefined => {
+  if (content.length === 0) return undefined;
+  const normalizedContent = content.replaceAll("\r\n", "\n");
+  const hasFinalNewline = normalizedContent.endsWith("\n");
+  const lines = normalizedContent.split("\n");
+  if (hasFinalNewline) lines.pop();
+  const addedLines = lines.map((line) => `+${line}`);
+  if (!hasFinalNewline) addedLines.push("\\ No newline at end of file");
+  return [
+    `Index: ${file}`,
+    "===================================================================",
+    "--- /dev/null",
+    `+++ ${file}`,
+    `@@ -0,0 +1,${lines.length} @@`,
+    ...addedLines,
+  ].join("\n");
+};
+
+const piFileDiff = (
+  event: Record<string, unknown>,
+): { readonly file: string; readonly patch: string } | undefined => {
+  if (event.type !== "tool_execution_end" || event.isError === true) return undefined;
+  const toolName = trimmedString(event.toolName)?.toLowerCase();
+  const args = isRecord(event.args) ? event.args : undefined;
+  const file = args ? piToolPath(args) : undefined;
+  if (!file) return undefined;
+  if (toolName === "write") {
+    const content = typeof args?.content === "string" ? args.content : undefined;
+    const patch = content === undefined ? undefined : newFilePatch(file, content);
+    return patch ? { file, patch } : undefined;
+  }
+  if (toolName !== "edit") return undefined;
+  const result = isRecord(event.result) ? event.result : undefined;
+  const details = isRecord(result?.details) ? result.details : undefined;
+  const patch = trimmedString(details?.patch);
+  if (!patch) return undefined;
+  return {
+    file,
+    patch:
+      patch.startsWith("Index: ") || patch.startsWith("diff --git ")
+        ? patch
+        : [
+            `Index: ${file}`,
+            "===================================================================",
+            patch,
+          ].join("\n"),
+  };
+};
+
+const updatePiTurnDiff = (
+  turn: ActiveTurn,
+  fileDiff: { readonly file: string; readonly patch: string },
+): string => {
+  const patches = turn.fileDiffsByPath.get(fileDiff.file) ?? [];
+  if (!patches.includes(fileDiff.patch)) patches.push(fileDiff.patch);
+  turn.fileDiffsByPath.set(fileDiff.file, patches);
+  return [...turn.fileDiffsByPath.entries()]
+    .toSorted(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
+    .flatMap(([, filePatches]) => filePatches)
+    .join("\n");
+};
 
 /**
  * Pi's agent-backed extensions share `details.agent` and `details.task`.
@@ -484,6 +547,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       reasoningItemId: RuntimeItemId.make(`pi-reasoning:${turnId}`),
       toolItemIds: new Map(),
       toolArgs: new Map(),
+      fileDiffsByPath: new Map(),
       assistantText: "",
       assistantStarted: false,
       reasoningStarted: false,
@@ -1131,6 +1195,16 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         },
         raw: raw(native),
       } as ProviderRuntimeEvent);
+      const fileDiff = piFileDiff(presentationEvent);
+      if (fileDiff) {
+        yield* offer({
+          type: "turn.diff.updated",
+          ...(yield* base(ctx, turn)),
+          itemId,
+          payload: { unifiedDiff: updatePiTurnDiff(turn, fileDiff) },
+          raw: raw(native),
+        });
+      }
       return;
     }
     if (type === "agent_settled") {
