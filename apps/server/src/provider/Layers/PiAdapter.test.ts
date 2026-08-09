@@ -859,6 +859,11 @@ describe("PiAdapter", () => {
           ["task.started", "task.progress", "task.completed"],
         );
         assert.equal(new Set(tasks.map((event) => event.payload.taskId)).size, 1);
+        assert.deepEqual(
+          tasks.map((event) => event.createdAt),
+          tasks.map((event) => event.createdAt).toSorted(),
+        );
+        assert.equal(new Set(tasks.map((event) => event.createdAt)).size, tasks.length);
         assert.equal(tasks[0]?.payload.title, "scout");
         assert.equal(tasks[0]?.payload.model, "openai/gpt-5");
         const completed = tasks[2] as Extract<ProviderRuntimeEvent, { type: "task.completed" }>;

@@ -507,12 +507,23 @@ export function foldSubagentActivities(
         const existed = agents.has(taskId);
         if (!existed && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
+        const previousAttempt = agent.attempt;
         fillMetadata(agent, payload);
+        const isNewAttempt =
+          previousAttempt !== null && agent.attempt !== null && agent.attempt > previousAttempt;
         if (agent.activationCount === 0) agent.activationCount = 1;
         const explicitStatus = asRuntimeStatus(payload.status);
-        if (explicitStatus) {
+        if (
+          explicitStatus &&
+          !(isTerminalSubagentStatus(agent.status) && explicitStatus === "running" && !isNewAttempt)
+        ) {
+          // A progress row can arrive after its completion when legacy
+          // activities share one millisecond and have no provider sequence.
+          // Progress enriches a settled run; only task.updated or a higher
+          // workflow attempt can explicitly reactivate it.
           applyStatus(agent, explicitStatus, at);
         } else if (
+          !explicitStatus &&
           (payload.usageSnapshot !== true || !existed) &&
           !isTerminalSubagentStatus(agent.status) &&
           agent.status !== "idle"
