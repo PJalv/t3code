@@ -288,6 +288,19 @@ describe("PiRpcClient transport", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("fails new requests immediately after stdout ends", () =>
+    Effect.gen(function* () {
+      const test = yield* makeIo();
+      const client = yield* makePiRpcTransport(test.io, { requestTimeoutMs: 120_000 });
+      const pending = yield* client.getState().pipe(Effect.flip, Effect.forkScoped);
+      yield* Queue.take(test.writes);
+      yield* Queue.end(test.stdout);
+      expect(yield* Fiber.join(pending)).toBeInstanceOf(PiRpcProcessExitedError);
+      expect(yield* client.getState().pipe(Effect.flip)).toBeInstanceOf(PiRpcProcessExitedError);
+      expect(Option.isNone(yield* Queue.poll(test.writes))).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("times out requests and ignores their late responses", () =>
     Effect.gen(function* () {
       const test = yield* makeIo();
