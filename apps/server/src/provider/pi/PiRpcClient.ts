@@ -180,7 +180,11 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
     return decodeJson(line).pipe(
       Effect.matchEffect({
         onFailure: (cause) =>
-          line.trimStart().startsWith("{") || line.trimStart().startsWith("[")
+          // RPC messages are JSON objects. Extensions commonly prefix plain logs
+          // with tags such as "[pi-cliproxyapi]", so only object-looking parse
+          // failures are protocol errors. Successfully parsed arrays still fail
+          // the object check below.
+          line.trimStart().startsWith("{")
             ? Queue.offer(events, {
                 _tag: "PiRpcProtocolFailureEvent",
                 reason: "MalformedJson",
