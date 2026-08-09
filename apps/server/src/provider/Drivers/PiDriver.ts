@@ -76,7 +76,7 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
             new ProviderDriverError({
               driver: DRIVER_KIND,
               instanceId,
-              detail: cause.message,
+              detail: "Failed to create the Pi adapter.",
               cause,
             }),
         ),
@@ -104,7 +104,7 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
             new ProviderDriverError({
               driver: DRIVER_KIND,
               instanceId,
-              detail: `Failed to build Pi snapshot: ${String(cause)}`,
+              detail: "Failed to build the Pi provider snapshot.",
               cause,
             }),
         ),
