@@ -490,7 +490,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const method = string(event.method);
     if (method === "notify") {
       const message = trimmedString(event.message);
-      if (message) {
+      const notifyType = trimmedString(event.notifyType) ?? "info";
+      if (message && (notifyType === "warning" || notifyType === "error")) {
         yield* offer({
           type: "runtime.warning",
           ...(yield* base(ctx, ctx.activeTurn)),

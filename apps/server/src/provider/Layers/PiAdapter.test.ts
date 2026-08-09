@@ -423,6 +423,41 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("ignores informational extension notices but preserves warnings", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const warningFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "runtime.warning" }> =>
+              event.type === "runtime.warning",
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Queue.offer(h.client.input, {
+          type: "extension_ui_request",
+          id: "mcp-ready",
+          method: "notify",
+          message: "MCP: 1 servers connected (29 tools)",
+          notifyType: "info",
+        });
+        yield* Queue.offer(h.client.input, {
+          type: "extension_ui_request",
+          id: "mcp-warning",
+          method: "notify",
+          message: "MCP connection is degraded",
+          notifyType: "warning",
+        });
+        const warning = yield* Fiber.join(warningFiber);
+        assert.equal(Option.isSome(warning), true);
+        if (Option.isSome(warning))
+          assert.equal(warning.value.payload.message, "MCP connection is degraded");
+      }),
+    );
+  });
+
   it.effect("answers extension UI requests while prompt preflight is waiting", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
