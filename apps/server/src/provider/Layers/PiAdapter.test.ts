@@ -1101,6 +1101,7 @@ describe("PiAdapter", () => {
             event.type === "task.completed",
         );
         assert.equal(completedTask?.payload.status, "stopped");
+        assert.equal(completedTask?.payload.role, "user");
         const completedTurn = events.find(
           (event): event is Extract<ProviderRuntimeEvent, { type: "turn.completed" }> =>
             event.type === "turn.completed",

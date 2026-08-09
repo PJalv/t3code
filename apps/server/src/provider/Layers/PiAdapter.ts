@@ -854,7 +854,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         let task = ctx.extensionSubagentTasks.get(key);
         const taskId = task?.taskId ?? RuntimeTaskId.make(`pi-subagent:${key}`);
         const model = trimmedString(rawResult.model);
-        const role = trimmedString(rawResult.agentSource) ?? agent;
+        const reportedSource = trimmedString(rawResult.agentSource);
+        const agentScope = trimmedString(details.agentScope);
+        const role =
+          reportedSource && reportedSource !== "unknown"
+            ? reportedSource
+            : agentScope === "user"
+              ? "user"
+              : "unknown";
         const linkage = {
           taskType: "subagent",
           title: agent,
