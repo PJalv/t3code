@@ -33,6 +33,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
@@ -124,6 +125,7 @@ interface SessionContext {
   session: ProviderSession;
   readonly cursor: PiSessionCursor;
   readonly lease: SessionFileLease;
+  readonly mcpConfigFile: string | undefined;
   readonly client: PiRpcClient;
   readonly scope: Scope.Closeable;
   eventFiber: Fiber.Fiber<void>;
@@ -166,6 +168,54 @@ const piToolText = (value: unknown): string | undefined => {
 
 const piToolPath = (args: Record<string, unknown>): string | undefined =>
   trimmedString(args.path) ?? trimmedString(args.file_path);
+
+const JsonUnknown = Schema.fromJsonString(Schema.Unknown);
+const decodeJsonObject = (content: string) =>
+  Schema.decodeUnknownEffect(JsonUnknown)(content).pipe(
+    Effect.map((parsed) => (isRecord(parsed) ? parsed : {})),
+    Effect.orElseSucceed((): Record<string, unknown> => ({})),
+  );
+const encodeJson = Schema.encodeUnknownEffect(JsonUnknown);
+
+const allocateT3McpConfig = Effect.fn("PiAdapter.allocateT3McpConfig")(function* (input: {
+  readonly stateRoot: string;
+  readonly threadId: ThreadId;
+  readonly endpoint: string;
+  readonly authorizationHeader: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = trimmedString(input.environment.HOME);
+  const agentDir =
+    trimmedString(input.environment.PI_CODING_AGENT_DIR) ??
+    (home ? path.join(home, ".pi", "agent") : undefined);
+  const existing = agentDir
+    ? yield* fs.readFileString(path.join(agentDir, "mcp.json")).pipe(
+        Effect.flatMap(decodeJsonObject),
+        Effect.orElseSucceed((): Record<string, unknown> => ({})),
+      )
+    : ({} as Record<string, unknown>);
+  const existingServers = isRecord(existing.mcpServers) ? existing.mcpServers : {};
+  const config = {
+    ...existing,
+    mcpServers: {
+      ...existingServers,
+      "t3-code": {
+        url: input.endpoint,
+        headers: { Authorization: input.authorizationHeader },
+        lifecycle: "keep-alive",
+      },
+    },
+  };
+  const directory = path.resolve(input.stateRoot, "..", "mcp");
+  yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+  yield* fs.chmod(directory, 0o700);
+  const configFile = path.join(directory, `${encodeURIComponent(input.threadId)}.json`);
+  yield* fs.writeFileString(configFile, yield* encodeJson(config), { mode: 0o600 });
+  yield* fs.chmod(configFile, 0o600);
+  return configFile;
+});
 
 const newFilePatch = (file: string, content: string): string | undefined => {
   if (content.length === 0) return undefined;
@@ -632,6 +682,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         ctx.session = { ...session, status: "closed", updatedAt: yield* now };
         yield* ctx.client.close().pipe(Effect.ignore);
         yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore);
+        if (ctx.mcpConfigFile)
+          yield* provideFiles(fs.remove(ctx.mcpConfigFile, { force: true })).pipe(Effect.ignore);
         if (sessions.get(ctx.session.threadId) === ctx) {
           sessions.delete(ctx.session.threadId);
         }
@@ -1409,6 +1461,24 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           sessionFileLeases.set(candidateFile, startupLease);
           leasedFile = candidateFile;
           const factory: PiRpcClientFactory = options.makeRpcClient ?? makePiRpcClient;
+          const spawnEnvironment = options.environment ?? process.env;
+          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const mcpConfigFile = mcpSession
+            ? yield* provideFiles(
+                allocateT3McpConfig({
+                  stateRoot: root,
+                  threadId: input.threadId,
+                  endpoint: mcpSession.endpoint,
+                  authorizationHeader: mcpSession.authorizationHeader,
+                  environment: spawnEnvironment,
+                }),
+              ).pipe(Effect.mapError((cause) => request("mcp/configure", cause)))
+            : undefined;
+          if (mcpConfigFile)
+            yield* Scope.addFinalizer(
+              scope,
+              provideFiles(fs.remove(mcpConfigFile, { force: true })).pipe(Effect.ignore),
+            );
           const spawn = factory({
             command: options.binaryPath,
             args: [
@@ -1418,7 +1488,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               ...DETERMINISTIC_ARGS,
             ],
             cwd,
-            ...(options.environment ? { env: options.environment } : {}),
+            env: {
+              ...spawnEnvironment,
+              ...(mcpConfigFile ? { T3CODE_PI_MCP_CONFIG: mcpConfigFile } : {}),
+            },
           }).pipe(
             Effect.provideService(Scope.Scope, scope),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -1490,6 +1563,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             session,
             cursor,
             lease: startupLease,
+            mcpConfigFile,
             client: started.success.client,
             scope,
             eventFiber: undefined as never,
