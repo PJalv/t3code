@@ -64,6 +64,7 @@ class FakeClient implements PiRpcClient {
   getStateResults: Array<typeof this.state> = [];
   failPrompt = false;
   fatalPrompt = false;
+  fatalPromptError: PiRpcProtocolError | undefined;
   failExtensionUiResponse = false;
   failGetState = false;
   abortBeforeSettle = false;
@@ -136,8 +137,10 @@ class FakeClient implements PiRpcClient {
           requestId: "test",
           detail: "prompt failed",
         });
-      if (self.fatalPrompt)
-        return yield* new PiRpcProtocolError({ detail: "prompt transport failed" });
+      if (self.fatalPrompt) {
+        self.fatalPromptError = new PiRpcProtocolError({ detail: "prompt transport failed" });
+        return yield* self.fatalPromptError;
+      }
     });
   };
   abort = () => {
@@ -290,6 +293,24 @@ describe("PiAdapter", () => {
           "--no-prompt-templates",
         ])
           assert.equal(args.includes(arg), false);
+      }),
+    );
+  });
+
+  it.effect("spawns Pi from the thread working directory", () => {
+    const h = makeHarness();
+    const cwd = path.join(h.stateDir, "workspace");
+    fs.mkdirSync(cwd);
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("pi"),
+          providerInstanceId: instanceId,
+          threadId: ThreadId.make("thread"),
+          cwd,
+          runtimeMode: "full-access",
+        });
+        assert.equal(h.spawns[0]?.cwd, cwd);
       }),
     );
   });
@@ -2048,6 +2069,8 @@ describe("PiAdapter", () => {
           })
           .pipe(Effect.result);
         assert.equal(failed._tag, "Failure");
+        if (failed._tag === "Failure")
+          assert.strictEqual(failed.failure.cause, h.client.fatalPromptError);
         assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
         assert.equal(h.client.calls.close, 1);
       }),
