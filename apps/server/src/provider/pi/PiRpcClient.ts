@@ -160,7 +160,10 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
     });
 
   const end = (error: PiRpcProcessExitedError) =>
-    Ref.modify(pending, (current) => [Array.from(current.values()), new Map()] as const).pipe(
+    Ref.set(closed, true).pipe(
+      Effect.andThen(
+        Ref.modify(pending, (current) => [Array.from(current.values()), new Map()] as const),
+      ),
       Effect.flatMap((waiters) =>
         Effect.forEach(waiters, (waiter) => Deferred.fail(waiter, error), { discard: true }),
       ),
