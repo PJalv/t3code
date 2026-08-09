@@ -89,6 +89,8 @@ interface ActiveTurn {
   assistantText: string;
   assistantStarted: boolean;
   reasoningStarted: boolean;
+  lastAssistantMessageIncomplete: boolean;
+  compactionContinuationPending: boolean;
   interruptRequested: boolean;
   terminal: boolean;
 }
@@ -553,6 +555,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       assistantText: "",
       assistantStarted: false,
       reasoningStarted: false,
+      lastAssistantMessageIncomplete: false,
+      compactionContinuationPending: false,
       interruptRequested: false,
       terminal: false,
     };
@@ -1141,6 +1145,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     }
     if (!turn || turn.terminal) return;
     if (type === "message_update") {
+      turn.compactionContinuationPending = false;
       const update = isRecord(event.assistantMessageEvent)
         ? event.assistantMessageEvent
         : undefined;
@@ -1204,9 +1209,51 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       } else if (message?.role === "assistant" && message.stopReason === "aborted") {
         turn.interruptRequested = true;
       }
+      if (message?.role === "assistant") {
+        turn.lastAssistantMessageIncomplete =
+          message.stopReason === "toolUse" &&
+          Array.isArray(message.content) &&
+          message.content.length === 0;
+      }
+      return;
+    }
+    if (type === "compaction_end") {
+      const successfulThresholdCompaction =
+        event.reason === "threshold" &&
+        isRecord(event.result) &&
+        event.aborted !== true &&
+        event.willRetry !== true;
+      if (
+        successfulThresholdCompaction &&
+        turn.lastAssistantMessageIncomplete &&
+        !turn.compactionContinuationPending &&
+        !turn.interruptRequested
+      ) {
+        turn.lastAssistantMessageIncomplete = false;
+        turn.compactionContinuationPending = true;
+        ctx.steeringPromptsInFlight += 1;
+        ctx.steeringGeneration += 1;
+        const continued = yield* ctx.client
+          .prompt(
+            "Continue the current task after automatic context compaction.",
+            undefined,
+            "followUp",
+          )
+          .pipe(Effect.exit);
+        ctx.steeringPromptsInFlight -= 1;
+        if (Exit.isFailure(continued)) {
+          turn.compactionContinuationPending = false;
+          yield* failActive(
+            ctx,
+            "Pi failed to continue after automatic context compaction.",
+            native,
+          );
+        }
+      }
       return;
     }
     if (type?.startsWith("tool_execution_")) {
+      turn.compactionContinuationPending = false;
       const lifecycle =
         type === "tool_execution_start"
           ? "item.started"
