@@ -90,15 +90,24 @@ describe("PiRpcClient transport", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("tolerates plain extension output before RPC JSON starts", () =>
+  it.effect("tolerates plain and bracket-prefixed extension output before RPC JSON starts", () =>
     Effect.gen(function* () {
       const test = yield* makeIo();
       const client = yield* makePiRpcTransport(test.io);
-      const eventsFiber = yield* Stream.runCollect(client.events.pipe(Stream.take(1))).pipe(
+      const eventsFiber = yield* Stream.runCollect(client.events.pipe(Stream.take(2))).pipe(
         Effect.forkScoped,
       );
-      yield* Queue.offer(test.stdout, bytes("MCP extension initialized\n"));
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          "[pi-cliproxyapi] discovery from cache: 1 builtin, 30 custom\nMCP extension initialized\n",
+        ),
+      );
       expect(Array.from(yield* Fiber.join(eventsFiber))).toEqual([
+        {
+          _tag: "PiRpcOutputLineEvent",
+          line: "[pi-cliproxyapi] discovery from cache: 1 builtin, 30 custom",
+        },
         { _tag: "PiRpcOutputLineEvent", line: "MCP extension initialized" },
       ]);
     }).pipe(Effect.scoped),
