@@ -18,7 +18,12 @@ const decodePiSessionHeader = Schema.decodeUnknownEffect(Schema.fromJsonString(S
 
 export class PiSessionFileError extends Schema.TaggedErrorClass<PiSessionFileError>()(
   "PiSessionFileError",
-  { operation: Schema.String, sessionFile: Schema.String, cause: Schema.Defect() },
+  {
+    operation: Schema.String,
+    sessionFile: Schema.String,
+    detail: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
 ) {}
 
 export const piInstanceStateRoot = Effect.fn("PiSessionFile.piInstanceStateRoot")(
@@ -28,7 +33,7 @@ export const piInstanceStateRoot = Effect.fn("PiSessionFile.piInstanceStateRoot"
       return yield* new PiSessionFileError({
         operation: "instanceId",
         sessionFile: input.stateDir,
-        cause: input.instanceId,
+        detail: "Pi provider instance id must be non-empty and trimmed.",
       });
     }
     return path.resolve(
@@ -64,19 +69,23 @@ export const validatePiResumeSessionFile = Effect.fn("PiSessionFile.validateResu
       return yield* new PiSessionFileError({
         operation: "containment",
         sessionFile: input.cursor.sessionFile,
-        cause: rootReal,
+        detail: "Session file must be an absolute canonical path inside the Pi state root.",
       });
     }
     const fileReal = yield* fs.realPath(sessionFile);
     if (fileReal !== sessionFile || canonicalContainedPath(path, rootReal, fileReal) !== fileReal) {
-      return yield* new PiSessionFileError({ operation: "symlink", sessionFile, cause: fileReal });
+      return yield* new PiSessionFileError({
+        operation: "symlink",
+        sessionFile,
+        detail: "Session file must not resolve through a symlink.",
+      });
     }
     const info = yield* fs.stat(sessionFile);
     if (info.type !== "File")
       return yield* new PiSessionFileError({
         operation: "regularFile",
         sessionFile,
-        cause: info.type,
+        detail: `Expected a regular file, received ${info.type}.`,
       });
     yield* fs.access(sessionFile, { readable: true });
     const headerPrefix = yield* Effect.scoped(
@@ -91,7 +100,13 @@ export const validatePiResumeSessionFile = Effect.fn("PiSessionFile.validateResu
     });
     const header = yield* decodePiSessionHeader(firstLine).pipe(
       Effect.mapError(
-        (cause) => new PiSessionFileError({ operation: "header", sessionFile, cause }),
+        (cause) =>
+          new PiSessionFileError({
+            operation: "header",
+            sessionFile,
+            detail: "Session header is not valid JSON.",
+            cause,
+          }),
       ),
     );
     if (
@@ -105,7 +120,11 @@ export const validatePiResumeSessionFile = Effect.fn("PiSessionFile.validateResu
       typeof header.cwd !== "string" ||
       (yield* fs.realPath(path.resolve(header.cwd))) !== cwdReal
     ) {
-      return yield* new PiSessionFileError({ operation: "header", sessionFile, cause: header });
+      return yield* new PiSessionFileError({
+        operation: "header",
+        sessionFile,
+        detail: "Session header does not match the expected session id and working directory.",
+      });
     }
     return { ...input.cursor, sessionFile };
   },
@@ -123,7 +142,7 @@ export const allocateFreshPiSessionFile = Effect.fn("PiSessionFile.allocateFresh
       return yield* new PiSessionFileError({
         operation: "allocate",
         sessionFile: rootReal,
-        cause: input.fileId,
+        detail: "Pi session file id must be non-empty and trimmed.",
       });
     }
     const sessionFile = path.join(rootReal, `${encodeURIComponent(input.fileId)}.jsonl`);
@@ -131,7 +150,7 @@ export const allocateFreshPiSessionFile = Effect.fn("PiSessionFile.allocateFresh
       return yield* new PiSessionFileError({
         operation: "allocate",
         sessionFile,
-        cause: input.fileId,
+        detail: "Allocated Pi session file escaped the state root.",
       });
     }
     return yield* Effect.acquireUseRelease(
