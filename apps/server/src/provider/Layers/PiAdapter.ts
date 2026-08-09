@@ -397,9 +397,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     return new ProviderAdapterRequestError({
       provider: PROVIDER,
       method,
-      detail: isRecord(cause) && typeof cause.detail === "string" ? cause.detail : String(cause),
+      detail:
+        isRecord(cause) && typeof cause.detail === "string"
+          ? cause.detail
+          : `Pi ${method} request failed.`,
       cause,
     });
+  }
+  function requestMessage(method: string, detail: string) {
+    return new ProviderAdapterRequestError({ provider: PROVIDER, method, detail });
   }
   const offer = (event: ProviderRuntimeEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const base = Effect.fn("PiAdapter.eventBase")(function* (ctx: SessionContext, turn?: ActiveTurn) {
@@ -1703,7 +1709,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               attachment,
             });
             if (!attachmentPath)
-              return Effect.fail(request("prompt", `Invalid attachment id '${attachment.id}'.`));
+              return Effect.fail(
+                requestMessage("prompt", `Invalid attachment id '${attachment.id}'.`),
+              );
             return provideFiles(fs.readFile(attachmentPath)).pipe(
               Effect.map((bytes) => ({
                 type: "image" as const,
@@ -1911,7 +1919,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       // thread lock, so responses must use Pi's own serialized RPC writer.
       const ctx = yield* requireSession(threadId);
       const pending = ctx.pendingUserInputs.get(requestId);
-      if (!pending) return yield* request("extension_ui_response", "Unknown Pi input request.");
+      if (!pending)
+        return yield* requestMessage("extension_ui_response", "Unknown Pi input request.");
       const rawAnswer = answers[pending.questionId];
       const answer = (Array.isArray(rawAnswer) ? rawAnswer[0] : rawAnswer)?.trim();
       if (!answer) return yield* validation("respondToUserInput", "Pi requires an answer.");
@@ -1923,7 +1932,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           : { value: answer };
       const resolved = yield* resolveExtensionInput(ctx, requestId, pending, answers, response);
       if (!resolved)
-        return yield* request("extension_ui_response", "Pi input request already resolved.");
+        return yield* requestMessage("extension_ui_response", "Pi input request already resolved.");
     });
   const stopSession = (threadId: ThreadId) =>
     sessions.has(threadId) ? close(sessions.get(threadId)!) : Effect.void;
