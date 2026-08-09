@@ -1102,6 +1102,89 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("settles Pi subagent tasks cleanly when their tool is aborted", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "delegate this",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "subagent-abort",
+            toolName: "subagent",
+            args: { tasks: [{ agent: "default", task: "Long task" }] },
+          },
+          {
+            type: "tool_execution_update",
+            toolCallId: "subagent-abort",
+            toolName: "subagent",
+            partialResult: {
+              content: [{ type: "text", text: "running" }],
+              details: {
+                mode: "parallel",
+                results: [
+                  {
+                    agent: "default",
+                    agentSource: "user",
+                    task: "Long task",
+                    exitCode: -1,
+                    model: "cliproxy-group/glm-5.2",
+                    usage: {},
+                  },
+                ],
+              },
+            },
+          },
+        ]);
+        yield* adapter.interruptTurn(ThreadId.make("thread"));
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_end",
+            toolCallId: "subagent-abort",
+            toolName: "subagent",
+            result: { content: [{ type: "text", text: "Subagent was aborted" }] },
+            isError: true,
+          },
+          {
+            type: "message_update",
+            assistantMessageEvent: { type: "error", reason: "The operation was aborted." },
+          },
+          {
+            type: "message_end",
+            message: { role: "assistant", content: [], stopReason: "aborted" },
+          },
+          { type: "agent_settled" },
+        ]);
+
+        const events = Array.from(yield* Fiber.join(collected));
+        assert.equal(
+          events.some((event) => event.type === "runtime.error"),
+          false,
+        );
+        const completedTask = events.find(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        assert.equal(completedTask?.payload.status, "stopped");
+        const completedTurn = events.find(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "turn.completed" }> =>
+            event.type === "turn.completed",
+        );
+        assert.equal(completedTurn?.payload.state, "interrupted");
+      }),
+    );
+  });
+
   it.effect("interrupts Pi subagents after the parent turn has settled", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
