@@ -82,12 +82,12 @@ export interface PiAdapterOptions {
 
 interface ActiveTurn {
   readonly id: TurnId;
-  readonly assistantItemId: RuntimeItemId;
-  readonly reasoningItemId: RuntimeItemId;
+  assistantItemId: RuntimeItemId;
+  reasoningItemId: RuntimeItemId;
+  assistantSegment: number;
   readonly toolItemIds: Map<string, RuntimeItemId>;
   readonly toolArgs: Map<string, Record<string, unknown>>;
   readonly fileDiffsByPath: Map<string, string[]>;
-  assistantText: string;
   assistantStarted: boolean;
   reasoningStarted: boolean;
   lastAssistantMessageIncomplete: boolean;
@@ -614,10 +614,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       id: turnId,
       assistantItemId: RuntimeItemId.make(`pi-assistant:${turnId}`),
       reasoningItemId: RuntimeItemId.make(`pi-reasoning:${turnId}`),
+      assistantSegment: 1,
       toolItemIds: new Map(),
       toolArgs: new Map(),
       fileDiffsByPath: new Map(),
-      assistantText: "",
       assistantStarted: false,
       reasoningStarted: false,
       lastAssistantMessageIncomplete: false,
@@ -702,6 +702,44 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         ctx.stopped = true;
       }),
     );
+  });
+
+  const completeAssistantSegment = Effect.fn("PiAdapter.completeAssistantSegment")(function* (
+    ctx: SessionContext,
+    turn: ActiveTurn,
+    native: PiRpcEvent,
+  ) {
+    if (turn.assistantStarted) {
+      yield* offer({
+        type: "item.completed",
+        ...(yield* base(ctx, turn)),
+        itemId: turn.assistantItemId,
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          title: "Assistant message",
+        },
+        raw: raw(native),
+      });
+    }
+    if (turn.reasoningStarted) {
+      yield* offer({
+        type: "item.completed",
+        ...(yield* base(ctx, turn)),
+        itemId: turn.reasoningItemId,
+        payload: {
+          itemType: "reasoning",
+          status: "completed",
+          title: "Reasoning",
+        },
+        raw: raw(native),
+      });
+    }
+    turn.assistantStarted = false;
+    turn.reasoningStarted = false;
+    turn.assistantSegment += 1;
+    turn.assistantItemId = RuntimeItemId.make(`pi-assistant:${turn.id}:${turn.assistantSegment}`);
+    turn.reasoningItemId = RuntimeItemId.make(`pi-reasoning:${turn.id}:${turn.assistantSegment}`);
   });
 
   const failActive = Effect.fn("PiAdapter.failActive")(function* (
@@ -1235,7 +1273,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             raw: raw(native),
           });
         }
-        if (isAssistant) turn.assistantText += delta;
         yield* offer({
           type: "content.delta",
           ...(yield* base(ctx, turn)),
@@ -1260,6 +1297,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     if (type === "message_end") {
       yield* handleSubagentResultMessage(ctx, turn, event, native);
       const message = isRecord(event.message) ? event.message : undefined;
+      if (message?.role === "assistant") {
+        turn.lastAssistantMessageIncomplete =
+          message.stopReason === "toolUse" &&
+          Array.isArray(message.content) &&
+          message.content.length === 0;
+        yield* completeAssistantSegment(ctx, turn, native);
+      }
       if (
         message?.role === "assistant" &&
         message.stopReason === "error" &&
@@ -1273,12 +1317,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         );
       } else if (message?.role === "assistant" && message.stopReason === "aborted") {
         turn.interruptRequested = true;
-      }
-      if (message?.role === "assistant") {
-        turn.lastAssistantMessageIncomplete =
-          message.stopReason === "toolUse" &&
-          Array.isArray(message.content) &&
-          message.content.length === 0;
       }
       return;
     }
