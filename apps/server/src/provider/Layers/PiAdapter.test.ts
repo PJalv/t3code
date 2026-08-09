@@ -1081,7 +1081,12 @@ describe("PiAdapter", () => {
           },
           {
             type: "message_end",
-            message: { role: "assistant", content: [], stopReason: "aborted" },
+            message: {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "The operation was aborted.",
+            },
           },
           { type: "agent_settled" },
         ]);

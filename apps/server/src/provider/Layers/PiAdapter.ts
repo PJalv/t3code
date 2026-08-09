@@ -1183,7 +1183,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     if (type === "message_end") {
       yield* handleSubagentResultMessage(ctx, turn, event, native);
       const message = isRecord(event.message) ? event.message : undefined;
-      if (message?.role === "assistant" && message.stopReason === "error") {
+      if (
+        message?.role === "assistant" &&
+        message.stopReason === "error" &&
+        !turn.interruptRequested
+      ) {
         yield* failActive(
           ctx,
           trimmedString(message.errorMessage) ?? "Pi assistant failed.",

@@ -2149,6 +2149,9 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
   ).length;
   const waiting = agents.filter((agent) => agent.status === "waiting").length;
   const failed = agents.filter((agent) => agent.status === "failed").length;
+  const stopped = agents.filter(
+    (agent) => agent.status === "cancelled" || agent.status === "interrupted",
+  ).length;
   // The coordinator's own status is authoritative for workflows: dynamic
   // spawns mean the member list can be momentarily all-settled while the
   // run is still mid-flight (the "completed" lie from live testing). A
@@ -2186,7 +2189,9 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
         : "working"
     : failed > 0
       ? `${failed} failed`
-      : "✓ completed";
+      : stopped > 0
+        ? `${stopped} stopped`
+        : "✓ completed";
 
   return (
     <button
