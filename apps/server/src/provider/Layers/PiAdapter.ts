@@ -82,6 +82,8 @@ export interface PiAdapterOptions {
 
 interface ActiveTurn {
   readonly id: TurnId;
+  readonly model: string | undefined;
+  readonly effort: string | undefined;
   assistantItemId: RuntimeItemId;
   reasoningItemId: RuntimeItemId;
   assistantSegment: number;
@@ -612,6 +614,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const turnId = TurnId.make(yield* uuid);
     const turn: ActiveTurn = {
       id: turnId,
+      model: payload.model,
+      effort: payload.effort,
       assistantItemId: RuntimeItemId.make(`pi-assistant:${turnId}`),
       reasoningItemId: RuntimeItemId.make(`pi-reasoning:${turnId}`),
       assistantSegment: 1,
@@ -1780,7 +1784,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const parsed = decodePiModelSlug(selectedModel);
         if (!parsed)
           return yield* validation("sendTurn", "A valid Pi model selection is required.");
+        const thinking = selection
+          ? getModelSelectionStringOptionValue(selection, "thinkingLevel")
+          : undefined;
         if (steeringTurn && ctx.activeTurn === steeringTurn) {
+          if (
+            selection &&
+            (selectedModel !== steeringTurn.model ||
+              (thinking !== undefined && thinking !== steeringTurn.effort))
+          )
+            return yield* validation(
+              "sendTurn",
+              "Pi model and thinking level cannot change during an active turn.",
+            );
           ctx.steeringPromptsInFlight += 1;
           ctx.steeringGeneration += 1;
           return {
@@ -1817,21 +1833,33 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           !available.models.some((m) => m.provider === parsed.provider && m.id === parsed.modelId)
         )
           return yield* validation("sendTurn", "Selected Pi model is not currently available.");
+        const thinkingLevel =
+          thinking === undefined
+            ? undefined
+            : yield* decodePiThinkingLevel(thinking).pipe(
+                Effect.mapError((cause) =>
+                  validation("sendTurn", "Invalid Pi thinking level.", cause),
+                ),
+              );
+        const previousModel = ctx.session.model ? decodePiModelSlug(ctx.session.model) : undefined;
         yield* ctx.client
           .setModel(parsed.provider, parsed.modelId)
           .pipe(Effect.mapError((cause) => request("set_model", cause)));
-        ctx.session = { ...ctx.session, model: selectedModel };
-        const thinking = selection
-          ? getModelSelectionStringOptionValue(selection, "thinkingLevel")
-          : undefined;
-        if (thinking !== undefined) {
-          const level = yield* decodePiThinkingLevel(thinking).pipe(
-            Effect.mapError((cause) => validation("sendTurn", "Invalid Pi thinking level.", cause)),
+        if (thinkingLevel !== undefined) {
+          yield* ctx.client.setThinkingLevel(thinkingLevel).pipe(
+            Effect.mapError((cause) => request("set_thinking_level", cause)),
+            Effect.onError(() =>
+              previousModel &&
+              (previousModel.provider !== parsed.provider ||
+                previousModel.modelId !== parsed.modelId)
+                ? ctx.client
+                    .setModel(previousModel.provider, previousModel.modelId)
+                    .pipe(Effect.ignore)
+                : Effect.void,
+            ),
           );
-          yield* ctx.client
-            .setThinkingLevel(level)
-            .pipe(Effect.mapError((cause) => request("set_thinking_level", cause)));
         }
+        ctx.session = { ...ctx.session, model: selectedModel };
         if (
           ctx.closing ||
           ctx.stopped ||
@@ -1917,7 +1945,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         Array.from(ctx.extensionSubagentTasks.values()).some((task) => task.state === "running");
       if (!turn && !hasBackgroundTasks)
         return yield* validation("interruptTurn", "No active Pi work to interrupt.");
-      if (turnId && turn && turn.id !== turnId)
+      if (turnId && (!turn || turn.id !== turnId))
         return yield* validation("interruptTurn", "No matching active Pi turn.");
       if (turn) turn.interruptRequested = true;
       // Pi's subagent extension passes the active tool AbortSignal to every

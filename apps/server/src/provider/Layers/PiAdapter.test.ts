@@ -10,6 +10,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -65,11 +66,16 @@ class FakeClient implements PiRpcClient {
   };
   state: { sessionFile?: string; sessionId?: string; isStreaming?: boolean } = {};
   getStateResults: Array<typeof this.state> = [];
+  availableModels = [
+    { provider: "openai", id: "gpt-5", reasoning: true },
+    { provider: "openai", id: "gpt-5.1", reasoning: true },
+  ];
   failPrompt = false;
   fatalPrompt = false;
   fatalPromptError: PiRpcProtocolError | undefined;
   failExtensionUiResponse = false;
   failGetState = false;
+  failThinking = false;
   abortBeforeSettle = false;
   abortEntered: Deferred.Deferred<void> | undefined;
   getStateEntered: Deferred.Deferred<void> | undefined;
@@ -100,7 +106,7 @@ class FakeClient implements PiRpcClient {
       if (self.getAvailableModelsEntered)
         yield* Deferred.succeed(self.getAvailableModelsEntered, undefined);
       if (self.getAvailableModelsGate) yield* Deferred.await(self.getAvailableModelsGate);
-      return { models: [{ provider: "openai", id: "gpt-5", reasoning: true }] };
+      return { models: self.availableModels };
     });
   };
   getCommands = () => Effect.succeed({ commands: [] });
@@ -115,10 +121,12 @@ class FakeClient implements PiRpcClient {
       this.calls.models.push({ provider, id });
       return { provider, id };
     });
-  setThinkingLevel = (level: PiThinkingLevel) =>
-    Effect.sync(() => {
-      this.calls.thinking.push(level);
-    });
+  setThinkingLevel = (level: PiThinkingLevel) => {
+    this.calls.thinking.push(level);
+    return this.failThinking
+      ? Effect.fail(new PiRpcProtocolError({ detail: "set_thinking_level failed" }))
+      : Effect.void;
+  };
   prompt = (
     message: string,
     images?: ReadonlyArray<PiRpcImage>,
@@ -1201,7 +1209,7 @@ describe("PiAdapter", () => {
           Stream.runHead,
           Effect.forkChild,
         );
-        yield* adapter.sendTurn({
+        const parent = yield* adapter.sendTurn({
           threadId: ThreadId.make("thread"),
           input: "delegate this",
           modelSelection,
@@ -1227,6 +1235,11 @@ describe("PiAdapter", () => {
         ]);
         yield* Fiber.join(settled);
 
+        const stale = yield* adapter
+          .interruptTurn(ThreadId.make("thread"), TurnId.make(`${parent.turnId}-stale`))
+          .pipe(Effect.result);
+        assert.equal(stale._tag, "Failure");
+        assert.equal(h.client.calls.abort, 0);
         yield* adapter.interruptTurn(ThreadId.make("thread"));
         assert.equal(h.client.calls.abort, 1);
       }),
@@ -2144,6 +2157,69 @@ describe("PiAdapter", () => {
           outputTokens: 20,
           compactsAutomatically: true,
         });
+      }),
+    );
+  });
+
+  it.effect("rejects model changes in steering messages", () => {
+    const h = makeHarness();
+    const changedSelection = createModelSelection(instanceId, "openai/gpt-5.1", [
+      { id: "thinkingLevel", value: "high" },
+    ]);
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "first",
+          modelSelection,
+        });
+        const steered = yield* adapter
+          .sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "steer",
+            modelSelection: changedSelection,
+          })
+          .pipe(Effect.result);
+        assert.equal(steered._tag, "Failure");
+        if (steered._tag === "Failure")
+          assert.equal(steered.failure._tag, "ProviderAdapterValidationError");
+        assert.equal(h.client.calls.prompt, 1);
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+      }),
+    );
+  });
+
+  it.effect("rolls back a model switch when the thinking-level update fails", () => {
+    const h = makeHarness();
+    const changedSelection = createModelSelection(instanceId, "openai/gpt-5.1", [
+      { id: "thinkingLevel", value: "high" },
+    ]);
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "first",
+          modelSelection,
+        });
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        while ((yield* adapter.listSessions())[0]?.status === "running") yield* Effect.yieldNow;
+
+        h.client.failThinking = true;
+        const switched = yield* adapter
+          .sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "second",
+            modelSelection: changedSelection,
+          })
+          .pipe(Effect.result);
+        assert.equal(switched._tag, "Failure");
+        assert.equal((yield* adapter.listSessions())[0]?.model, "openai/gpt-5");
+        assert.deepEqual(h.client.calls.models.slice(-2), [
+          { provider: "openai", id: "gpt-5.1" },
+          { provider: "openai", id: "gpt-5" },
+        ]);
       }),
     );
   });

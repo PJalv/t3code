@@ -384,6 +384,44 @@ describe("foldSubagentActivities", () => {
     expect(member.status).toBe("running");
   });
 
+  it("does not let stale lower attempts reopen a settled workflow member", () => {
+    const agents = fold([
+      activity("task.progress", {
+        taskId: "wf-stale:wf:1",
+        status: "failed",
+        parentAgentId: "wf-stale",
+        attempt: 1,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale:wf:1",
+        status: "running",
+        parentAgentId: "wf-stale",
+        attempt: 2,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale:wf:1",
+        status: "completed",
+        parentAgentId: "wf-stale",
+        attempt: 2,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale:wf:1",
+        status: "running",
+        parentAgentId: "wf-stale",
+        attempt: 1,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale:wf:1",
+        status: "running",
+        parentAgentId: "wf-stale",
+        attempt: 2,
+      }),
+    ]);
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.attempt).toBe(2);
+    expect(agents[0]?.status).toBe("completed");
+  });
+
   it("drops non-http(s) session urls at the fold boundary", () => {
     const agents = fold([
       activity("task.started", {
