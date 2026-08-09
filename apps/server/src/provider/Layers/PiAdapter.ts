@@ -118,7 +118,12 @@ interface PiWorkflowTask {
 
 interface PiExtensionSubagentTask {
   readonly taskId: RuntimeTaskId;
-  state: "running" | "completed" | "failed";
+  readonly description: string;
+  readonly title: string;
+  readonly role: string;
+  readonly model: string | undefined;
+  readonly toolUseId: string;
+  state: "running" | "completed" | "failed" | "stopped";
 }
 
 interface SessionContext {
@@ -880,7 +885,31 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       if (type !== "tool_execution_update" && type !== "tool_execution_end") return;
       const toolUseId = string(event.toolCallId) ?? string(event.toolCallID);
       const details = workflowDetails(event);
-      if (!toolUseId || !details || !Array.isArray(details.results)) return;
+      if (!toolUseId) return;
+      if (!details || !Array.isArray(details.results)) {
+        if (type !== "tool_execution_end") return;
+        const summary = piToolText(event.result ?? event.partialResult) ?? "Subagent stopped";
+        for (const [key, task] of ctx.extensionSubagentTasks) {
+          if (!key.startsWith(`${toolUseId}:`) || task.state !== "running") continue;
+          task.state = "stopped";
+          yield* offer({
+            type: "task.completed",
+            ...(yield* base(ctx, turn)),
+            payload: {
+              taskId: task.taskId,
+              status: "stopped",
+              summary,
+              taskType: "subagent",
+              title: task.title,
+              role: task.role,
+              ...(task.model ? { model: task.model } : {}),
+              toolUseId: task.toolUseId,
+            },
+            raw: raw(native),
+          });
+        }
+        return;
+      }
 
       for (const [index, rawResult] of details.results.entries()) {
         if (!isRecord(rawResult)) continue;
@@ -899,7 +928,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           toolUseId,
         } as const;
         if (!task) {
-          task = { taskId, state: "running" };
+          task = { taskId, description, title: agent, role, model, toolUseId, state: "running" };
           ctx.extensionSubagentTasks.set(key, task);
           yield* offer({
             type: "task.started",
@@ -1206,11 +1235,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           raw: raw(native),
         });
       } else if (updateType === "error") {
-        yield* failActive(
-          ctx,
-          string(update?.reason) ?? string(update?.error) ?? "Pi assistant failed.",
-          native,
-        );
+        if (!turn.interruptRequested) {
+          yield* failActive(
+            ctx,
+            string(update?.reason) ?? string(update?.error) ?? "Pi assistant failed.",
+            native,
+          );
+        }
       }
       return;
     }
