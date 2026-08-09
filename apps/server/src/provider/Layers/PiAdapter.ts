@@ -1709,9 +1709,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     Effect.gen(function* () {
       const ctx = yield* requireSession(threadId);
       const turn = ctx.activeTurn;
-      if (!turn || (turnId && turn.id !== turnId))
+      const hasBackgroundTasks =
+        Array.from(ctx.agentTasksById.values()).length > 0 ||
+        Array.from(ctx.workflowTasks.values()).some((task) => task.state === "running") ||
+        Array.from(ctx.extensionSubagentTasks.values()).some((task) => task.state === "running");
+      if (!turn && !hasBackgroundTasks)
+        return yield* validation("interruptTurn", "No active Pi work to interrupt.");
+      if (turnId && turn && turn.id !== turnId)
         return yield* validation("interruptTurn", "No matching active Pi turn.");
-      turn.interruptRequested = true;
+      if (turn) turn.interruptRequested = true;
+      // Pi's subagent extension passes the active tool AbortSignal to every
+      // child process. Background task projections can outlive T3's active
+      // turn, so still send the RPC abort when those tasks are the only live
+      // work in the session.
       yield* ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)));
     });
   const unsupported = (operation: string, threadId: ThreadId) =>

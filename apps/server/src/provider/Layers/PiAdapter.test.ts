@@ -1022,6 +1022,48 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("interrupts Pi subagents after the parent turn has settled", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const settled = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "delegate this",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "spawn-background",
+            toolName: "subagent_spawn",
+            args: { name: "Long review", harness: "pi" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "spawn-background",
+            toolName: "subagent_spawn",
+            result: {
+              content: [{ type: "text", text: "Spawned sa-background" }],
+              details: { id: "sa-background", title: "Long review", harness: "pi" },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Fiber.join(settled);
+
+        yield* adapter.interruptTurn(ThreadId.make("thread"));
+        assert.equal(h.client.calls.abort, 1);
+      }),
+    );
+  });
+
   it.effect("projects background subagents into task lifecycle events and a follow-up turn", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
