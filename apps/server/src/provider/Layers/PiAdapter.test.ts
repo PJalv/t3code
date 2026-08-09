@@ -707,6 +707,86 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("emits cumulative provider-native diffs for Pi write and edit tools", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.diff.updated"),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "write and edit",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "write-1",
+            toolName: "write",
+            args: { path: "src/app.ts", content: "old\n" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "write-1",
+            toolName: "write",
+            result: { content: [{ type: "text", text: "Successfully wrote src/app.ts" }] },
+            isError: false,
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            args: { path: "src/app.ts", edits: [{ oldText: "old", newText: "new" }] },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            result: {
+              content: [{ type: "text", text: "Successfully replaced src/app.ts" }],
+              details: {
+                patch: "--- src/app.ts\n+++ src/app.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+              },
+            },
+            isError: false,
+          },
+        ]);
+
+        const events = Array.from(yield* Fiber.join(collected));
+        const writePatch = [
+          "Index: src/app.ts",
+          "===================================================================",
+          "--- /dev/null",
+          "+++ src/app.ts",
+          "@@ -0,0 +1,1 @@",
+          "+old",
+        ].join("\n");
+        const editPatch = [
+          "Index: src/app.ts",
+          "===================================================================",
+          "--- src/app.ts",
+          "+++ src/app.ts",
+          "@@ -1,1 +1,1 @@",
+          "-old",
+          "+new",
+        ].join("\n");
+        assert.equal(events[0]?.type, "turn.diff.updated");
+        assert.equal(events[1]?.type, "turn.diff.updated");
+        if (events[0]?.type === "turn.diff.updated") {
+          assert.equal(events[0].payload.unifiedDiff, writePatch);
+        }
+        if (events[1]?.type === "turn.diff.updated") {
+          assert.equal(events[1].payload.unifiedDiff, `${writePatch}\n${editPatch}`);
+        }
+      }),
+    );
+  });
+
   it.effect("classifies Pi agent-backed tools as collaboration work", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
