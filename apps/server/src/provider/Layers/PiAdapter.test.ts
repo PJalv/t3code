@@ -1484,6 +1484,114 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("continues an incomplete turn after automatic threshold compaction", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 5).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const turn = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "research the subject",
+          modelSelection,
+        });
+        h.client.promptEntered = yield* Deferred.make<void>();
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: { role: "assistant", content: [], stopReason: "toolUse" },
+          },
+          {
+            type: "compaction_end",
+            reason: "threshold",
+            result: {
+              summary: "Work completed so far",
+              firstKeptEntryId: "entry-1",
+              tokensBefore: 193_444,
+              estimatedTokensAfter: 34_000,
+            },
+            aborted: false,
+            willRetry: false,
+          },
+        ]);
+        yield* Deferred.await(h.client.promptEntered);
+        assert.equal(h.client.calls.prompt, 2);
+        assert.deepEqual(h.client.calls.prompts[1], {
+          message: "Continue the current task after automatic context compaction.",
+          images: undefined,
+          streamingBehavior: "followUp",
+        });
+        yield* Queue.offerAll(h.client.input, [
+          { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "done" } },
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "done" }],
+              stopReason: "stop",
+            },
+          },
+          { type: "agent_settled" },
+        ]);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        assert.deepEqual(
+          events.map((event) => event.type),
+          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+        );
+        assert.equal(
+          events.every((event) => event.turnId === turn.turnId),
+          true,
+        );
+      }),
+    );
+  });
+
+  it.effect("does not add a continuation after a complete threshold compaction", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 2).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "answer normally",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "finished" }],
+              stopReason: "stop",
+            },
+          },
+          {
+            type: "compaction_end",
+            reason: "threshold",
+            result: {
+              summary: "Finished work",
+              firstKeptEntryId: "entry-1",
+              tokensBefore: 193_444,
+              estimatedTokensAfter: 34_000,
+            },
+            aborted: false,
+            willRetry: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Fiber.join(eventsFiber);
+        assert.equal(h.client.calls.prompt, 1);
+      }),
+    );
+  });
+
   it.effect("treats failed and aborted Pi assistant messages as non-successful turns", () => {
     const failedHarness = makeHarness();
     return withAdapter(failedHarness, (adapter) =>
