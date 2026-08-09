@@ -4657,7 +4657,13 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   // One steady in-flight presentation (monitoring-pill rule): waiting and
   // stalled agents read as working; only settled states differentiate.
   const working = running + waiting;
-  const dotClass = live ? "bg-info" : failed > 0 ? "bg-destructive" : "bg-success";
+  const dotClass = live
+    ? "bg-info"
+    : failed > 0
+      ? "bg-destructive"
+      : stopped > 0
+        ? "bg-muted-foreground"
+        : "bg-success";
   const lead = live
     ? `Kicked off ${agentCount} subagent${agentCount === 1 ? "" : "s"}`
     : `Ran ${agentCount} subagent${agentCount === 1 ? "" : "s"}`;
