@@ -66,8 +66,8 @@ export const PROVIDER_OPTIONS: Array<{
     pickerSidebarBadge: "new",
   },
   {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
     available: true,
     pickerSidebarBadge: "new",
   },

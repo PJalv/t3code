@@ -5,17 +5,18 @@ import {
   CursorSettings,
   GrokSettings,
   OpenCodeSettings,
+  PiSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
 import {
-  AntigravityIcon,
   ClaudeAI,
   CursorIcon,
   GrokIcon,
   type Icon,
   OpenAI,
   OpenCodeIcon,
+  PiAgentIcon,
 } from "../Icons";
 
 type ProviderSettingsSchema = {
@@ -77,10 +78,10 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     settingsSchema: OpenCodeSettings,
   },
   {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    icon: AntigravityIcon,
-    settingsSchema: AntigravitySettings,
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    icon: PiAgentIcon,
+    settingsSchema: PiSettings,
   },
 ];
 

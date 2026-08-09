@@ -15,9 +15,12 @@
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
-- [Running in the background](./user/background-service.md)
-- [Updating T3 Code](./user/updating.md)
-- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md)
+- [Keeping app and server in sync](./user/updating.md)
+- [Source control integrations](./user/source-control.md)
+- [Background service (Linux)](./user/background-service.md)
+- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Pi](./user/providers-pi.md)
+
+Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 
 ---
 
