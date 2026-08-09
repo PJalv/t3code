@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ApprovalRequestId,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -18,9 +19,11 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as NodeAssert from "node:assert/strict";
 
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   PiRpcCommandError,
   type PiRpcClient,
@@ -312,6 +315,50 @@ describe("PiAdapter", () => {
         });
         assert.equal(h.spawns[0]?.cwd, cwd);
       }),
+    );
+  });
+
+  it.effect("injects T3 browser MCP into the Pi process without changing project config", () => {
+    const h = makeHarness();
+    const threadId = ThreadId.make("mcp-thread");
+    McpProviderSession.setMcpProviderSession({
+      environmentId: EnvironmentId.make("environment"),
+      threadId,
+      providerSessionId: "provider-session",
+      providerInstanceId: instanceId,
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer secret-token",
+    });
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("pi"),
+          providerInstanceId: instanceId,
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const args = h.spawns[0]?.args ?? [];
+        assert.equal(args.includes("--mcp-config"), false);
+        const configFile = h.spawns[0]?.env?.T3CODE_PI_MCP_CONFIG;
+        assert.ok(configFile);
+        assert.equal(path.resolve(configFile).startsWith(path.resolve(h.stateDir)), true);
+        assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
+        const config = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Struct({ mcpServers: Schema.Record(Schema.String, Schema.Unknown) }),
+          ),
+        )(fs.readFileSync(configFile, "utf8")).pipe(Effect.orDie);
+        assert.deepEqual(config.mcpServers["t3-code"], {
+          url: "http://127.0.0.1:43123/mcp",
+          headers: { Authorization: "Bearer secret-token" },
+          lifecycle: "keep-alive",
+        });
+        yield* adapter.stopSession(threadId);
+        assert.equal(fs.existsSync(configFile), false);
+      }),
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
   });
 
