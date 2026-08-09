@@ -168,6 +168,26 @@ describe("foldSubagentActivities", () => {
     expect(agent.error).toBe("boom");
   });
 
+  it("late running progress does not reactivate a completed task", () => {
+    const agents = fold([
+      activity("task.started", { taskId: "task-late-progress", taskType: "subagent" }),
+      activity("task.completed", {
+        taskId: "task-late-progress",
+        status: "failed",
+        summary: "Unknown agent",
+      }),
+      activity("task.progress", {
+        taskId: "task-late-progress",
+        status: "running",
+        typedUsage: { totalTokens: 0 },
+      }),
+    ]);
+    expect(agents).toHaveLength(1);
+    expect(agents[0]!.status).toBe("failed");
+    expect(agents[0]!.activationCount).toBe(1);
+    expect(agents[0]!.error).toBe("Unknown agent");
+  });
+
   it("duplicate terminal events are idempotent (timestamps do not slide)", () => {
     const agents = fold([
       activity("task.started", { taskId: "task-3", taskType: "local_agent" }),
