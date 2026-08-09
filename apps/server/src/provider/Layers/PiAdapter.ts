@@ -137,6 +137,7 @@ interface SessionContext {
   readonly agentTasksById: Map<string, PiAgentTask>;
   readonly workflowTasks: Map<string, PiWorkflowTask>;
   readonly extensionSubagentTasks: Map<string, PiExtensionSubagentTask>;
+  lastEventCreatedAt: string | undefined;
   closing: boolean;
   stopped: boolean;
 }
@@ -391,7 +392,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   const uuid = crypto.randomUUIDv4.pipe(
     Effect.mapError((cause) => request("crypto/randomUUIDv4", cause)),
   );
-  const stamp = Effect.all({ eventId: Effect.map(uuid, EventId.make), createdAt: now });
 
   function validation(operation: string, issue: string, cause?: unknown) {
     return new ProviderAdapterValidationError({ provider: PROVIDER, operation, issue, cause });
@@ -406,8 +406,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   }
   const offer = (event: ProviderRuntimeEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const base = Effect.fn("PiAdapter.eventBase")(function* (ctx: SessionContext, turn?: ActiveTurn) {
+    const wallTime = yield* DateTime.now;
+    const previousTime = ctx.lastEventCreatedAt
+      ? DateTime.makeUnsafe(ctx.lastEventCreatedAt)
+      : undefined;
+    const createdAt = DateTime.formatIso(
+      previousTime && DateTime.toEpochMillis(previousTime) >= DateTime.toEpochMillis(wallTime)
+        ? DateTime.add(previousTime, { milliseconds: 1 })
+        : wallTime,
+    );
+    ctx.lastEventCreatedAt = createdAt;
     return {
-      ...(yield* stamp),
+      eventId: EventId.make(yield* uuid),
+      createdAt,
       provider: PROVIDER,
       providerInstanceId: options.providerInstanceId,
       threadId: ctx.session.threadId,
@@ -1492,6 +1503,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             agentTasksById: new Map(),
             workflowTasks: new Map(),
             extensionSubagentTasks: new Map(),
+            lastEventCreatedAt: undefined,
             closing: false,
             stopped: false,
           };
