@@ -44,6 +44,11 @@ const instanceId = ProviderInstanceId.make("pi-test");
 const modelSelection = createModelSelection(instanceId, "openai/gpt-5", [
   { id: "thinkingLevel", value: "max" },
 ]);
+const decodeMcpConfig = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ mcpServers: Schema.Record(Schema.String, Schema.Unknown) }),
+  ),
+);
 type Adapter = ProviderAdapterShape<ProviderAdapterError>;
 
 class FakeClient implements PiRpcClient {
@@ -84,6 +89,7 @@ class FakeClient implements PiRpcClient {
   closeGate: Deferred.Deferred<void> | undefined;
 
   getState = () => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       if (self.getStateEntered) yield* Deferred.succeed(self.getStateEntered, undefined);
@@ -95,6 +101,7 @@ class FakeClient implements PiRpcClient {
     });
   };
   getAvailableModels = () => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       if (self.getAvailableModelsEntered)
@@ -124,6 +131,7 @@ class FakeClient implements PiRpcClient {
     images?: ReadonlyArray<PiRpcImage>,
     streamingBehavior?: "steer" | "followUp",
   ) => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       self.calls.prompt += 1;
@@ -147,6 +155,7 @@ class FakeClient implements PiRpcClient {
     });
   };
   abort = () => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       self.calls.abort += 1;
@@ -155,6 +164,7 @@ class FakeClient implements PiRpcClient {
     });
   };
   respondToExtensionUi = (response: Record<string, unknown>) => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       if (self.extensionUiResponseEntered)
@@ -167,6 +177,7 @@ class FakeClient implements PiRpcClient {
     });
   };
   close = () => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return Effect.gen(function* () {
       self.calls.close += 1;
@@ -344,11 +355,9 @@ describe("PiAdapter", () => {
         assert.ok(configFile);
         assert.equal(path.resolve(configFile).startsWith(path.resolve(h.stateDir)), true);
         assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
-        const config = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(
-            Schema.Struct({ mcpServers: Schema.Record(Schema.String, Schema.Unknown) }),
-          ),
-        )(fs.readFileSync(configFile, "utf8")).pipe(Effect.orDie);
+        const config = yield* decodeMcpConfig(fs.readFileSync(configFile, "utf8")).pipe(
+          Effect.orDie,
+        );
         assert.deepEqual(config.mcpServers["t3-code"], {
           url: "http://127.0.0.1:43123/mcp",
           headers: { Authorization: "Bearer secret-token" },

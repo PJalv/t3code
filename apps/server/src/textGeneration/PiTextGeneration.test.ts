@@ -20,6 +20,7 @@ import type { PiRpcEvent, PiThinkingLevel } from "../provider/pi/PiRpcSchema.ts"
 import { makePiTextGeneration } from "./PiTextGeneration.ts";
 
 const assert: typeof NodeAssert = NodeAssert;
+const isTextGenerationError = Schema.is(TextGenerationError);
 
 class FakeClient implements PiRpcClient {
   // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The synchronous fake exposes its queue through the PiRpcClient stream interface.
@@ -50,6 +51,7 @@ class FakeClient implements PiRpcClient {
       this.thinking.push(level);
     });
   prompt = () => {
+    // oxlint-disable-next-line typescript/no-this-alias -- Effect.gen generator callbacks do not preserve lexical this.
     const self = this;
     return self.failPrompt
       ? Effect.fail(
@@ -143,8 +145,7 @@ it.effect("closes the RPC client when generation fails", () => {
     const result = yield* makeHarness(client, []).pipe(Effect.result);
 
     assert.equal(result._tag, "Failure");
-    if (result._tag === "Failure")
-      assert.equal(Schema.is(TextGenerationError)(result.failure), true);
+    if (result._tag === "Failure") assert.equal(isTextGenerationError(result.failure), true);
     assert.equal(client.closeCalls, 1);
   });
 });
@@ -182,7 +183,7 @@ it.effect("fails and closes when the event stream ends before agent settlement",
     const result = yield* makeHarness(client, []).pipe(Effect.result);
     assert.equal(result._tag, "Failure");
     if (result._tag === "Failure") {
-      assert.equal(Schema.is(TextGenerationError)(result.failure), true);
+      assert.equal(isTextGenerationError(result.failure), true);
       assert.match(result.failure.detail, /stream ended/);
     }
     assert.equal(client.closeCalls, 1);

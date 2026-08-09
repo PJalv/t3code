@@ -177,8 +177,9 @@ const piToolPath = (args: Record<string, unknown>): string | undefined =>
   trimmedString(args.path) ?? trimmedString(args.file_path);
 
 const JsonUnknown = Schema.fromJsonString(Schema.Unknown);
+const decodeJsonUnknown = Schema.decodeUnknownEffect(JsonUnknown);
 const decodeJsonObject = (content: string) =>
-  Schema.decodeUnknownEffect(JsonUnknown)(content).pipe(
+  decodeJsonUnknown(content).pipe(
     Effect.map((parsed) => (isRecord(parsed) ? parsed : {})),
     Effect.orElseSucceed((): Record<string, unknown> => ({})),
   );

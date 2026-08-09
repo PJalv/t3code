@@ -58,7 +58,7 @@ describe("PiRpcClient transport", () => {
         Effect.forkScoped,
       );
       yield* Queue.offer(test.stdout, bytes('{"type":"message","text":"a'));
-      yield* Queue.offer(test.stdout, bytes("\u2028b\u2029c" + '"}\r\n'));
+      yield* Queue.offer(test.stdout, bytes('\u2028b\u2029c"}\r\n'));
       const events = yield* Fiber.join(eventFiber);
       expect(Array.from(events)).toEqual([{ type: "message", text: "a\u2028b\u2029c" }]);
     }).pipe(Effect.scoped),
