@@ -1404,6 +1404,72 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("keeps steered Pi responses as separate assistant messages", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const first = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "make the change",
+          modelSelection,
+        });
+        const steering = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "do not make more changes",
+          modelSelection,
+        });
+        assert.equal(steering.turnId, first.turnId);
+        assert.equal(h.client.calls.prompts[1]?.streamingBehavior, "steer");
+        yield* Queue.offerAll(h.client.input, [
+          { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Done." } },
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Done." }],
+              stopReason: "stop",
+            },
+          },
+          {
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "Understood." },
+          },
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Understood." }],
+              stopReason: "stop",
+            },
+          },
+          { type: "agent_settled" },
+        ]);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        assert.deepEqual(
+          events.map((event) => event.type),
+          [
+            "turn.started",
+            "item.started",
+            "content.delta",
+            "item.completed",
+            "item.started",
+            "content.delta",
+            "item.completed",
+            "turn.completed",
+          ],
+        );
+        const assistantStarts = events.filter((event) => event.type === "item.started");
+        assert.equal(assistantStarts.length, 2);
+        assert.notEqual(assistantStarts[0]?.itemId, assistantStarts[1]?.itemId);
+      }),
+    );
+  });
+
   it.effect("continues an incomplete turn after automatic threshold compaction", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
