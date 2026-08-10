@@ -112,8 +112,8 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
                 settled,
                 new TextGenerationError({
                   operation: input.operation,
-                  detail:
-                    typeof native.detail === "string" ? native.detail : "Pi RPC protocol failed.",
+                  detail: "Pi RPC protocol failed before generation settled.",
+                  cause: native,
                 }),
               ).pipe(Effect.asVoid);
             const event = native as Record<string, unknown>;
