@@ -2263,6 +2263,56 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("preserves the thinking level when Pi starts a native retry cycle", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const recoveredTurnFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "turn.started" }> =>
+              event.type === "turn.started",
+          ),
+          Stream.drop(1),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "first",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "Stream ended without finish_reason",
+            },
+          },
+          { type: "agent_start" },
+        ]);
+
+        const recoveredTurn = yield* Fiber.join(recoveredTurnFiber);
+        assert.equal(Option.isSome(recoveredTurn), true);
+        if (Option.isNone(recoveredTurn)) return;
+        assert.equal(recoveredTurn.value.payload.model, modelSelection.model);
+        assert.equal(recoveredTurn.value.payload.effort, "max");
+
+        const steered = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "steer after retry",
+          modelSelection,
+        });
+        assert.equal(steered.turnId, recoveredTurn.value.turnId);
+        assert.equal(h.client.calls.prompts[1]?.streamingBehavior, "steer");
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+      }),
+    );
+  });
+
   it.effect("rolls back a model switch when the thinking-level update fails", () => {
     const h = makeHarness();
     const changedSelection = createModelSelection(instanceId, "openai/gpt-5.1", [
