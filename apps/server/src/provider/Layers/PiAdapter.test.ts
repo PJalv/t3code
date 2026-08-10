@@ -60,6 +60,7 @@ class FakeClient implements PiRpcClient {
     close: 0,
     abort: 0,
     prompt: 0,
+    sessionStats: 0,
     prompts: [] as Array<{
       message: string;
       images: ReadonlyArray<PiRpcImage> | undefined;
@@ -118,10 +119,13 @@ class FakeClient implements PiRpcClient {
   };
   getCommands = () => Effect.succeed({ commands: [] });
   getSessionStats = () =>
-    Effect.succeed({
-      sessionId: this.state.sessionId,
-      tokens: { input: 100, output: 20, cacheRead: 40, cacheWrite: 0, total: 160 },
-      contextUsage: { tokens: 80, contextWindow: 200_000, percent: 0.04 },
+    Effect.sync(() => {
+      this.calls.sessionStats += 1;
+      return {
+        sessionId: this.state.sessionId,
+        tokens: { input: 100, output: 20, cacheRead: 40, cacheWrite: 0, total: 160 },
+        contextUsage: { tokens: 80, contextWindow: 200_000, percent: 0.04 },
+      };
     });
   setModel = (provider: string, id: string) =>
     Effect.sync(() => {
@@ -1477,7 +1481,7 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const eventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -1525,6 +1529,7 @@ describe("PiAdapter", () => {
             "item.started",
             "content.delta",
             "item.completed",
+            "thread.token-usage.updated",
             "item.started",
             "content.delta",
             "item.completed",
@@ -1543,7 +1548,7 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const eventsFiber = yield* Stream.take(adapter.streamEvents, 5).pipe(
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -1593,7 +1598,14 @@ describe("PiAdapter", () => {
         const events = Array.from(yield* Fiber.join(eventsFiber));
         assert.deepEqual(
           events.map((event) => event.type),
-          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+          [
+            "turn.started",
+            "thread.token-usage.updated",
+            "item.started",
+            "content.delta",
+            "item.completed",
+            "turn.completed",
+          ],
         );
         assert.equal(
           events.every((event) => event.turnId === turn.turnId),
@@ -1651,7 +1663,7 @@ describe("PiAdapter", () => {
     return withAdapter(failedHarness, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const failedEventsFiber = yield* Stream.take(adapter.streamEvents, 3).pipe(
+        const failedEventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -1672,9 +1684,9 @@ describe("PiAdapter", () => {
         const failedEvents = Array.from(yield* Fiber.join(failedEventsFiber));
         assert.deepEqual(
           failedEvents.map((event) => event.type),
-          ["turn.started", "runtime.error", "turn.completed"],
+          ["turn.started", "thread.token-usage.updated", "runtime.error", "turn.completed"],
         );
-        const failed = failedEvents[2] as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+        const failed = failedEvents[3] as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
         assert.equal(failed.payload.state, "failed");
         assert.equal(failed.payload.errorMessage, "authentication failed");
       }),
@@ -1685,7 +1697,7 @@ describe("PiAdapter", () => {
           return withAdapter(abortedHarness, (adapter) =>
             Effect.gen(function* () {
               yield* start(adapter);
-              const eventsFiber = yield* Stream.take(adapter.streamEvents, 2).pipe(
+              const eventsFiber = yield* Stream.take(adapter.streamEvents, 3).pipe(
                 Stream.runCollect,
                 Effect.forkChild,
               );
@@ -1702,7 +1714,7 @@ describe("PiAdapter", () => {
                 { type: "agent_settled" },
               ]);
               const events = Array.from(yield* Fiber.join(eventsFiber));
-              const terminal = events[1] as Extract<
+              const terminal = events[2] as Extract<
                 ProviderRuntimeEvent,
                 { type: "turn.completed" }
               >;
@@ -2062,6 +2074,67 @@ describe("PiAdapter", () => {
       );
     }),
   );
+
+  it.effect("refreshes current context usage at assistant response boundaries", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const usageSeen =
+          yield* Deferred.make<
+            Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>
+          >();
+        let turnId: string | undefined;
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.tap((event) =>
+            event.type === "thread.token-usage.updated"
+              ? Deferred.succeed(usageSeen, event)
+              : Effect.void,
+          ),
+          Stream.takeUntil((event) => event.type === "turn.completed" && event.turnId === turnId),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const sent = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "hello",
+          modelSelection,
+        });
+        turnId = sent.turnId;
+        yield* Queue.offer(h.client.input, {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Working on it." }],
+            stopReason: "toolUse",
+          },
+        });
+
+        const usage = yield* Deferred.await(usageSeen);
+        assert.equal(usage.turnId, sent.turnId);
+        assert.deepEqual(usage.payload.usage, {
+          usedTokens: 80,
+          totalProcessedTokens: 160,
+          maxTokens: 200_000,
+          inputTokens: 100,
+          cachedInputTokens: 40,
+          outputTokens: 20,
+          compactsAutomatically: true,
+        });
+        assert.equal(h.client.calls.sessionStats, 1);
+        assert.equal((yield* adapter.listSessions())[0]?.status, "running");
+
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        assert.equal(
+          events.filter((event) => event.type === "thread.token-usage.updated").length,
+          1,
+        );
+        assert.equal(events.at(-1)?.type, "turn.completed");
+        assert.equal(h.client.calls.sessionStats, 2);
+      }),
+    );
+  });
 
   it.effect("serializes concurrent sends into one turn with a steering message", () => {
     const h = makeHarness();

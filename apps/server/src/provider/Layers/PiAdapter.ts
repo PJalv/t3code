@@ -48,7 +48,7 @@ import {
   type PiRpcError,
   type PiRpcSpawnOptions,
 } from "../pi/PiRpcClient.ts";
-import { PiThinkingLevel, type PiRpcEvent } from "../pi/PiRpcSchema.ts";
+import { PiThinkingLevel, type PiRpcEvent, type PiRpcSessionStats } from "../pi/PiRpcSchema.ts";
 import {
   allocateFreshPiSessionFile,
   cleanupFreshPiSessionFile,
@@ -130,6 +130,11 @@ interface PiExtensionSubagentTask {
   state: "running" | "completed" | "failed" | "stopped";
 }
 
+type PiThreadTokenUsage = Extract<
+  ProviderRuntimeEvent,
+  { type: "thread.token-usage.updated" }
+>["payload"]["usage"];
+
 interface SessionContext {
   session: ProviderSession;
   readonly cursor: PiSessionCursor;
@@ -149,6 +154,7 @@ interface SessionContext {
   readonly workflowTasks: Map<string, PiWorkflowTask>;
   readonly extensionSubagentTasks: Map<string, PiExtensionSubagentTask>;
   lastEventCreatedAt: string | undefined;
+  lastTokenUsage: PiThreadTokenUsage | undefined;
   closing: boolean;
   stopped: boolean;
 }
@@ -863,6 +869,63 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   const finiteNonNegative = (value: unknown) =>
     typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 
+  const normalizeTokenUsage = (stats: PiRpcSessionStats): PiThreadTokenUsage | undefined => {
+    const usedTokens = stats.contextUsage?.tokens;
+    const maxTokens = stats.contextUsage?.contextWindow;
+    if (typeof usedTokens !== "number" || !Number.isFinite(usedTokens) || usedTokens < 0) {
+      return undefined;
+    }
+    return {
+      usedTokens: Math.floor(usedTokens),
+      totalProcessedTokens: finiteNonNegative(stats.tokens.total),
+      ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
+        ? { maxTokens: Math.floor(maxTokens) }
+        : {}),
+      inputTokens: finiteNonNegative(stats.tokens.input),
+      cachedInputTokens: finiteNonNegative(stats.tokens.cacheRead),
+      outputTokens: finiteNonNegative(stats.tokens.output),
+      compactsAutomatically: true,
+    };
+  };
+
+  const tokenUsageMatches = (left: PiThreadTokenUsage, right: PiThreadTokenUsage) =>
+    left.usedTokens === right.usedTokens &&
+    left.totalProcessedTokens === right.totalProcessedTokens &&
+    left.maxTokens === right.maxTokens &&
+    left.inputTokens === right.inputTokens &&
+    left.cachedInputTokens === right.cachedInputTokens &&
+    left.outputTokens === right.outputTokens &&
+    left.compactsAutomatically === right.compactsAutomatically;
+
+  const readTokenUsageEvent = Effect.fn("PiAdapter.readTokenUsageEvent")(function* (
+    ctx: SessionContext,
+    turn: ActiveTurn,
+    native: PiRpcEvent,
+  ) {
+    const stats = yield* ctx.client.getSessionStats().pipe(Effect.exit);
+    if (Exit.isFailure(stats) || ctx.activeTurn !== turn || turn.terminal) return undefined;
+    const usage = normalizeTokenUsage(stats.value);
+    if (!usage || (ctx.lastTokenUsage && tokenUsageMatches(ctx.lastTokenUsage, usage))) {
+      return undefined;
+    }
+    ctx.lastTokenUsage = usage;
+    return {
+      type: "thread.token-usage.updated",
+      ...(yield* base(ctx, turn)),
+      payload: { usage },
+      raw: raw(native),
+    } satisfies ProviderRuntimeEvent;
+  });
+
+  const refreshTokenUsage = Effect.fn("PiAdapter.refreshTokenUsage")(function* (
+    ctx: SessionContext,
+    turn: ActiveTurn,
+    native: PiRpcEvent,
+  ) {
+    const event = yield* readTokenUsageEvent(ctx, turn, native);
+    if (event) yield* offer(event);
+  });
+
   const handleExtensionSubagentToolEvent = Effect.fn("PiAdapter.handleExtensionSubagentToolEvent")(
     function* (
       ctx: SessionContext,
@@ -1251,6 +1314,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           Array.isArray(message.content) &&
           message.content.length === 0;
         yield* completeAssistantSegment(ctx, turn, native);
+        // Codex and Claude receive usage at native response boundaries. Pi has
+        // no equivalent push notification, so read its authoritative current
+        // context snapshot as soon as a fresh assistant response is recorded.
+        yield* refreshTokenUsage(ctx, turn, native);
       }
       if (
         message?.role === "assistant" &&
@@ -1368,32 +1435,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       }
       if (state.value.isStreaming === true) return;
       const terminalEvents: ProviderRuntimeEvent[] = [];
-      let usageEvent: ProviderRuntimeEvent | undefined;
-      const stats = yield* ctx.client.getSessionStats().pipe(Effect.exit);
-      if (Exit.isSuccess(stats)) {
-        const usedTokens = stats.value.contextUsage?.tokens;
-        const maxTokens = stats.value.contextUsage?.contextWindow;
-        if (typeof usedTokens === "number" && Number.isFinite(usedTokens) && usedTokens >= 0) {
-          usageEvent = {
-            type: "thread.token-usage.updated",
-            ...(yield* base(ctx, turn)),
-            payload: {
-              usage: {
-                usedTokens: Math.floor(usedTokens),
-                totalProcessedTokens: finiteNonNegative(stats.value.tokens.total),
-                ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
-                  ? { maxTokens: Math.floor(maxTokens) }
-                  : {}),
-                inputTokens: finiteNonNegative(stats.value.tokens.input),
-                cachedInputTokens: finiteNonNegative(stats.value.tokens.cacheRead),
-                outputTokens: finiteNonNegative(stats.value.tokens.output),
-                compactsAutomatically: true,
-              },
-            },
-            raw: raw(native),
-          };
-        }
-      }
+      // Keep settlement as a fallback for turns that produce no assistant
+      // message_end event and for a final snapshot that changed since it.
+      const usageEvent = yield* readTokenUsageEvent(ctx, turn, native);
       if (turn.assistantStarted) {
         terminalEvents.push({
           type: "item.completed",
@@ -1650,6 +1694,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             workflowTasks: new Map(),
             extensionSubagentTasks: new Map(),
             lastEventCreatedAt: undefined,
+            lastTokenUsage: undefined,
             closing: false,
             stopped: false,
           };
