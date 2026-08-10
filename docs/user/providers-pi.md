@@ -41,8 +41,10 @@ tool actions.
 
 Enable a Pi subagent extension for isolated agents. T3 supports Pi's current `subagent` extension
 result format, including single, parallel, and chained work. It also supports the older
-`subagent_spawn` and `workflow` formats. Agent status, model, and token use appear in the Agents
-panel.
+`subagent_spawn` and `workflow` formats. Claude Code-style `Agent` extensions, including
+`@tintinweb/pi-subagents`, can keep background agents running while the main Pi orchestrator
+accepts new messages. T3 tracks their completion notifications and `get_subagent_result` calls.
+Agent status, model, and token use appear in the Agents panel.
 
 T3 reads the user-level Pi command catalog when it checks the provider:
 
