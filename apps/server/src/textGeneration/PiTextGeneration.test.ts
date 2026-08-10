@@ -174,6 +174,27 @@ it.effect("uses only the last completed assistant message across attempts", () =
   });
 });
 
+it.effect("preserves structured Pi protocol failures without exposing raw output", () => {
+  const client = new FakeClient();
+  const protocolFailure = {
+    _tag: "PiRpcProtocolFailureEvent" as const,
+    reason: "MalformedJson" as const,
+    line: '{"private":"output"',
+    detail: "JSON parse failed near private output",
+  };
+  client.promptEvents = [protocolFailure];
+  return Effect.gen(function* () {
+    const result = yield* makeHarness(client, []).pipe(Effect.result);
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.equal(result.failure.detail, "Pi RPC protocol failed before generation settled.");
+      assert.deepEqual(result.failure.cause, protocolFailure);
+      assert.equal(result.failure.message.includes(protocolFailure.detail), false);
+    }
+    assert.equal(client.closeCalls, 1);
+  });
+});
+
 it.effect("fails and closes when the event stream ends before agent settlement", () => {
   const client = new FakeClient();
   client.settle = false;
