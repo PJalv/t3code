@@ -155,6 +155,7 @@ interface SessionContext {
   readonly extensionSubagentTasks: Map<string, PiExtensionSubagentTask>;
   lastEventCreatedAt: string | undefined;
   lastTokenUsage: PiThreadTokenUsage | undefined;
+  thinkingLevel: PiThinkingLevel | undefined;
   closing: boolean;
   stopped: boolean;
 }
@@ -1253,7 +1254,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     let turn = ctx.activeTurn;
     if (type === "agent_start") {
       if (!turn || turn.terminal) {
-        turn = yield* beginTurn(ctx, ctx.session.model ? { model: ctx.session.model } : {});
+        turn = yield* beginTurn(ctx, {
+          ...(ctx.session.model ? { model: ctx.session.model } : {}),
+          ...(ctx.thinkingLevel ? { effort: ctx.thinkingLevel } : {}),
+        });
       }
       return;
     }
@@ -1695,6 +1699,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             extensionSubagentTasks: new Map(),
             lastEventCreatedAt: undefined,
             lastTokenUsage: undefined,
+            thinkingLevel: started.success.state.thinkingLevel,
             closing: false,
             stopped: false,
           };
@@ -1854,6 +1859,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                 : Effect.void,
             ),
           );
+          ctx.thinkingLevel = thinkingLevel;
         }
         ctx.session = { ...ctx.session, model: selectedModel };
         if (
@@ -1868,7 +1874,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           });
         const turn = yield* beginTurn(ctx, {
           model: selectedModel,
-          ...(thinking ? { effort: thinking } : {}),
+          ...(ctx.thinkingLevel ? { effort: ctx.thinkingLevel } : {}),
         });
         createdTurn = turn;
         const turnId = turn.id;
