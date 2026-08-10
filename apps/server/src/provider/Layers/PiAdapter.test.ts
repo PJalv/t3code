@@ -1348,6 +1348,277 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("projects async Agent extension tasks and grouped completion notifications", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        let completedTurns = 0;
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => {
+            if (event.type !== "turn.completed") return false;
+            completedTurns += 1;
+            return completedTurns === 2;
+          }),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "launch background agents",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-fast",
+            toolName: "Agent",
+            args: {
+              description: "Immediate hello",
+              subagent_type: "luna",
+              run_in_background: true,
+              prompt: "Reply immediately",
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-fast",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                displayName: "luna",
+                description: "Immediate hello",
+                subagentType: "luna",
+                status: "background",
+                agentId: "async-fast",
+              },
+            },
+            isError: false,
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-slow",
+            toolName: "Agent",
+            args: {
+              description: "Delayed hello",
+              subagent_type: "luna",
+              run_in_background: true,
+              prompt: "Sleep before replying",
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-slow",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                displayName: "luna",
+                description: "Delayed hello",
+                subagentType: "luna",
+                status: "background",
+                agentId: "async-slow",
+              },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+          { type: "agent_start" },
+          {
+            type: "message_end",
+            message: {
+              role: "custom",
+              customType: "subagent-notification",
+              content: "Background agent group completed: 2 agent(s) finished",
+              details: {
+                id: "async-fast",
+                description: "Immediate hello",
+                status: "completed",
+                toolUses: 2,
+                totalTokens: 120,
+                durationMs: 500,
+                resultPreview: "Hello from A",
+                others: [
+                  {
+                    id: "async-slow",
+                    description: "Delayed hello",
+                    status: "error",
+                    toolUses: 3,
+                    totalTokens: 180,
+                    durationMs: 30_500,
+                    error: "Agent B failed",
+                    resultPreview: "Partial output from B",
+                  },
+                ],
+              },
+            },
+          },
+          {
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "Both agents finished" },
+          },
+          { type: "agent_settled" },
+        ]);
+
+        const events = Array.from(yield* Fiber.join(collected));
+        const tasks = events.filter(
+          (
+            event,
+          ): event is Extract<
+            ProviderRuntimeEvent,
+            { type: "task.started" | "task.progress" | "task.completed" }
+          > =>
+            event.type === "task.started" ||
+            event.type === "task.progress" ||
+            event.type === "task.completed",
+        );
+        assert.deepEqual(
+          tasks.map((event) => event.type),
+          [
+            "task.started",
+            "task.progress",
+            "task.started",
+            "task.progress",
+            "task.completed",
+            "task.completed",
+          ],
+        );
+        assert.equal(new Set(tasks.map((event) => event.payload.taskId)).size, 2);
+        const started = tasks.filter((event) => event.type === "task.started");
+        assert.deepEqual(
+          started.map((event) => [event.payload.title, event.payload.role]),
+          [
+            ["Immediate hello", "luna"],
+            ["Delayed hello", "luna"],
+          ],
+        );
+        const completed = tasks.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        assert.deepEqual(
+          completed.map((event) => [
+            event.payload.status,
+            event.payload.summary,
+            event.payload.typedUsage,
+          ]),
+          [
+            ["completed", "Hello from A", { totalTokens: 120, toolUses: 2, durationMs: 500 }],
+            ["failed", "Agent B failed", { totalTokens: 180, toolUses: 3, durationMs: 30_500 }],
+          ],
+        );
+        const agentItems = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "item.completed" }> =>
+            event.type === "item.completed" && event.payload.title === "Luna agent",
+        );
+        assert.equal(agentItems.length, 2);
+        assert.equal(
+          agentItems.every((event) => event.payload.itemType === "collab_agent_tool_call"),
+          true,
+        );
+        assert.equal(events.filter((event) => event.type === "turn.started").length, 2);
+      }),
+    );
+  });
+
+  it.effect("settles async Agent tasks when get_subagent_result consumes the notification", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        let completedTurns = 0;
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => {
+            if (event.type !== "turn.completed") return false;
+            completedTurns += 1;
+            return completedTurns === 2;
+          }),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "launch one background agent",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-consumed",
+            toolName: "Agent",
+            args: {
+              description: "Consumed result",
+              subagent_type: "luna",
+              run_in_background: true,
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-consumed",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                description: "Consumed result",
+                subagentType: "luna",
+                status: "background",
+                agentId: "async-consumed",
+              },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+          { type: "agent_start" },
+          {
+            type: "tool_execution_start",
+            toolCallId: "get-consumed",
+            toolName: "get_subagent_result",
+            args: { agent_id: "async-consumed", wait: true },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "get-consumed",
+            toolName: "get_subagent_result",
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: "Agent: async-consumed\nType: luna | Status: completed | Tool uses: 2 | 4.3k token\n\nConsumed result OK",
+                },
+              ],
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+
+        const events = Array.from(yield* Fiber.join(collected));
+        const tasks = events.filter(
+          (
+            event,
+          ): event is Extract<
+            ProviderRuntimeEvent,
+            { type: "task.started" | "task.progress" | "task.completed" }
+          > =>
+            event.type === "task.started" ||
+            event.type === "task.progress" ||
+            event.type === "task.completed",
+        );
+        assert.deepEqual(
+          tasks.map((event) => event.type),
+          ["task.started", "task.progress", "task.completed"],
+        );
+        assert.equal(new Set(tasks.map((event) => event.payload.taskId)).size, 1);
+        const completed = tasks[2] as Extract<ProviderRuntimeEvent, { type: "task.completed" }>;
+        assert.equal(completed.payload.status, "completed");
+        assert.equal(completed.payload.summary?.includes("Consumed result OK"), true);
+        assert.deepEqual(completed.payload.typedUsage, { totalTokens: 4_300, toolUses: 2 });
+        assert.equal(events.filter((event) => event.type === "turn.started").length, 2);
+      }),
+    );
+  });
+
   it.effect("projects workflow agent progress into the Agents panel lifecycle", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
