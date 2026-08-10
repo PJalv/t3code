@@ -242,7 +242,11 @@ const piSubagentPresentation = (
   output: Record<string, unknown> | undefined,
 ) => {
   const outputDetails = isRecord(output?.details) ? output.details : undefined;
-  const agent = trimmedString(outputDetails?.agent);
+  const agent =
+    trimmedString(outputDetails?.agent) ??
+    trimmedString(outputDetails?.displayName) ??
+    trimmedString(outputDetails?.subagentType) ??
+    trimmedString(args.subagent_type);
   if (!agent) return undefined;
   const label = agent.replace(/[_-]+/gu, " ");
   const detail =
@@ -746,6 +750,41 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     toolUseId: task.toolUseId,
   });
 
+  const compactTokenCount = (value: unknown) => {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+    const match = trimmedString(value)?.match(/(\d+(?:\.\d+)?)\s*([km])?\s+tokens?\b/iu);
+    if (!match) return undefined;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount < 0) return undefined;
+    const multiplier = match[2]?.toLowerCase() === "m" ? 1_000_000 : match[2] ? 1_000 : 1;
+    return Math.round(amount * multiplier);
+  };
+
+  const agentTextUsage = (details: Record<string, unknown> | undefined, text?: string) => {
+    const totalTokens = compactTokenCount(details?.tokens) ?? compactTokenCount(text);
+    if (totalTokens === undefined) return undefined;
+    const reportedToolUses = details?.toolUses;
+    const textToolUses = text?.match(/\bTool uses:\s*(\d+)/iu)?.[1];
+    const toolUses =
+      typeof reportedToolUses === "number" && Number.isFinite(reportedToolUses)
+        ? Math.max(0, Math.floor(reportedToolUses))
+        : textToolUses
+          ? Number(textToolUses)
+          : undefined;
+    const reportedDuration = details?.durationMs;
+    const durationMs =
+      typeof reportedDuration === "number" && Number.isFinite(reportedDuration)
+        ? Math.max(0, Math.floor(reportedDuration))
+        : undefined;
+    return {
+      totalTokens,
+      ...(toolUses !== undefined ? { toolUses } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  };
+
   const completeAgentTask = Effect.fn("PiAdapter.completeAgentTask")(function* (
     ctx: SessionContext,
     turn: ActiveTurn,
@@ -753,6 +792,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     status: "completed" | "failed" | "stopped",
     summary: string | undefined,
     native: PiRpcEvent,
+    typedUsage?: {
+      readonly totalTokens: number;
+      readonly toolUses?: number;
+      readonly durationMs?: number;
+    },
   ) {
     yield* offer({
       type: "task.completed",
@@ -761,6 +805,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         taskId: task.taskId,
         status,
         ...(summary ? { summary } : {}),
+        ...(typedUsage ? { typedUsage } : {}),
         ...agentTaskLinkage(task),
       },
       raw: raw(native),
@@ -780,8 +825,122 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const type = string(event.type);
     const toolName = string(event.toolName)?.toLowerCase();
     const toolUseId = string(event.toolCallId) ?? string(event.toolCallID);
+    const args = isRecord(event.args) ? event.args : {};
+    const output = event.result ?? event.partialResult;
+    const outputRecord = isRecord(output) ? output : undefined;
+    const details = isRecord(outputRecord?.details) ? outputRecord.details : undefined;
+
+    if (
+      toolName === "agent" &&
+      type === "tool_execution_start" &&
+      toolUseId &&
+      trimmedString(args.subagent_type) &&
+      !trimmedString(args.schedule)
+    ) {
+      const title = trimmedString(args.description) ?? "Subagent";
+      const task: PiAgentTask = {
+        taskId: RuntimeTaskId.make(`pi-subagent:${toolUseId}`),
+        toolUseId,
+        title,
+        role: trimmedString(args.subagent_type) ?? "unknown",
+        model: trimmedString(args.model),
+        effort: trimmedString(args.thinking),
+      };
+      ctx.agentTasksByToolCall.set(toolUseId, task);
+      yield* offer({
+        type: "task.started",
+        ...(yield* base(ctx, turn)),
+        payload: { taskId: task.taskId, description: title, ...agentTaskLinkage(task) },
+        raw: raw(native),
+      });
+      return;
+    }
+
+    if (
+      toolName === "agent" &&
+      (type === "tool_execution_update" || type === "tool_execution_end") &&
+      toolUseId
+    ) {
+      const task = ctx.agentTasksByToolCall.get(toolUseId);
+      if (!task) return;
+      task.title = trimmedString(details?.description) ?? task.title;
+      task.role = trimmedString(details?.subagentType) ?? task.role;
+      task.model = trimmedString(details?.modelName) ?? task.model;
+      const id = trimmedString(details?.agentId);
+      if (id) ctx.agentTasksById.set(id, task);
+      const status = trimmedString(details?.status);
+      const summary =
+        trimmedString(details?.activity) ??
+        (status === "background" || status === "queued"
+          ? undefined
+          : piToolText(output)?.slice(0, 2_000));
+      const typedUsage = agentTextUsage(details, summary);
+      if (type === "tool_execution_update") {
+        yield* offer({
+          type: "task.progress",
+          ...(yield* base(ctx, turn)),
+          payload: {
+            taskId: task.taskId,
+            description: task.title,
+            status: "running",
+            ...(summary ? { summary } : {}),
+            ...(typedUsage ? { typedUsage } : {}),
+            ...agentTaskLinkage(task),
+          },
+          raw: raw(native),
+        });
+      } else if (event.isError === true || status === "error") {
+        yield* completeAgentTask(ctx, turn, task, "failed", summary, native, typedUsage);
+      } else if (status === "stopped" || status === "aborted") {
+        yield* completeAgentTask(ctx, turn, task, "stopped", summary, native, typedUsage);
+      } else if (status === "completed" || status === "steered") {
+        yield* completeAgentTask(ctx, turn, task, "completed", summary, native, typedUsage);
+      } else if (type === "tool_execution_end" && (!details || !status)) {
+        yield* completeAgentTask(
+          ctx,
+          turn,
+          task,
+          "failed",
+          piToolText(output)?.slice(0, 2_000) ?? "Agent did not start.",
+          native,
+        );
+      } else {
+        yield* offer({
+          type: "task.progress",
+          ...(yield* base(ctx, turn)),
+          payload: {
+            taskId: task.taskId,
+            description: task.title,
+            status: "running",
+            ...(summary ? { summary } : {}),
+            ...(typedUsage ? { typedUsage } : {}),
+            ...agentTaskLinkage(task),
+          },
+          raw: raw(native),
+        });
+      }
+      return;
+    }
+
+    if (toolName === "get_subagent_result" && type === "tool_execution_end") {
+      const id = trimmedString(args.agent_id);
+      const task = id ? ctx.agentTasksById.get(id) : undefined;
+      if (!task) return;
+      const outputText = piToolText(output)?.slice(0, 2_000);
+      const status = outputText?.match(/\bStatus:\s*([a-z]+)/iu)?.[1]?.toLowerCase();
+      const typedUsage = agentTextUsage(undefined, outputText);
+      const summary = outputText?.match(/\r?\n\r?\n([\s\S]+)$/u)?.[1]?.trim() ?? outputText;
+      if (event.isError === true || status === "error") {
+        yield* completeAgentTask(ctx, turn, task, "failed", summary, native, typedUsage);
+      } else if (status === "stopped" || status === "aborted") {
+        yield* completeAgentTask(ctx, turn, task, "stopped", summary, native, typedUsage);
+      } else if (status === "completed" || status === "steered") {
+        yield* completeAgentTask(ctx, turn, task, "completed", summary, native, typedUsage);
+      }
+      return;
+    }
+
     if (toolName === "subagent_spawn" && type === "tool_execution_start" && toolUseId) {
-      const args = isRecord(event.args) ? event.args : {};
       const title = trimmedString(args.name) ?? "Subagent";
       const task: PiAgentTask = {
         taskId: RuntimeTaskId.make(`pi-subagent:${toolUseId}`),
@@ -805,9 +964,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       return;
     }
 
-    const output = event.result ?? event.partialResult;
-    const outputRecord = isRecord(output) ? output : undefined;
-    const details = isRecord(outputRecord?.details) ? outputRecord.details : undefined;
     if (toolName === "subagent_spawn" && type === "tool_execution_end" && toolUseId) {
       const task = ctx.agentTasksByToolCall.get(toolUseId);
       if (!task) return;
@@ -1209,24 +1365,52 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     native: PiRpcEvent,
   ) {
     const message = isRecord(event.message) ? event.message : undefined;
-    if (message?.role !== "custom" || message.customType !== "subagent-result") return false;
+    if (
+      message?.role !== "custom" ||
+      (message.customType !== "subagent-result" && message.customType !== "subagent-notification")
+    )
+      return false;
     const details = isRecord(message.details) ? message.details : undefined;
-    const id = trimmedString(details?.id);
-    if (!id) return true;
-    const task = ctx.agentTasksById.get(id);
-    if (!task) return true;
-    task.title = trimmedString(details?.title) ?? task.title;
+    if (!details) return true;
     const content =
       trimmedString(message.content) ??
       (Array.isArray(message.content) ? piToolText({ content: message.content }) : undefined);
-    yield* completeAgentTask(
-      ctx,
-      turn,
-      task,
-      details?.status === "error" ? "failed" : "completed",
-      content?.slice(0, 2_000),
-      native,
-    );
+    const results = [details, ...(Array.isArray(details.others) ? details.others : [])];
+    for (const rawResult of results) {
+      if (!isRecord(rawResult)) continue;
+      const id = trimmedString(rawResult.id);
+      if (!id) continue;
+      const task = ctx.agentTasksById.get(id);
+      if (!task) continue;
+      task.title =
+        trimmedString(rawResult.title) ?? trimmedString(rawResult.description) ?? task.title;
+      const status = trimmedString(rawResult.status);
+      const summary =
+        trimmedString(rawResult.error) ??
+        trimmedString(rawResult.resultPreview) ??
+        trimmedString(rawResult.description) ??
+        content;
+      const totalTokens = finiteNonNegative(rawResult.totalTokens);
+      const toolUses = finiteNonNegative(rawResult.toolUses);
+      const durationMs = finiteNonNegative(rawResult.durationMs);
+      yield* completeAgentTask(
+        ctx,
+        turn,
+        task,
+        status === "error"
+          ? "failed"
+          : status === "stopped" || status === "aborted"
+            ? "stopped"
+            : "completed",
+        summary?.slice(0, 2_000),
+        native,
+        {
+          totalTokens,
+          ...(toolUses > 0 ? { toolUses } : {}),
+          ...(durationMs > 0 ? { durationMs } : {}),
+        },
+      );
+    }
     return true;
   });
 
