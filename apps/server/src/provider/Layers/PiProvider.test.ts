@@ -23,6 +23,8 @@ const unusedClientMethods = {
     Effect.succeed({
       tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     }),
+  getEntries: () => Effect.die("unused"),
+  fork: () => Effect.die("unused"),
   setModel: () => Effect.die("unused"),
   setThinkingLevel: () => Effect.die("unused"),
   prompt: () => Effect.die("unused"),

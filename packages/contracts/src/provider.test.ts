@@ -58,6 +58,25 @@ describe("ProviderSessionStartInput", () => {
     ).toThrow();
   });
 
+  it("accepts only explicit strict or fresh resume policies", () => {
+    const fresh = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "pi",
+      runtimeMode: "full-access",
+      resumeCursor: { schemaVersion: 1, sessionFile: "/old", sessionId: "old" },
+      resumePolicy: "fresh",
+    });
+    expect(fresh.resumePolicy).toBe("fresh");
+    expect(() =>
+      decodeProviderSessionStartInput({
+        threadId: "thread-1",
+        provider: "pi",
+        runtimeMode: "full-access",
+        resumePolicy: "discard",
+      }),
+    ).toThrow();
+  });
+
   it("accepts claude runtime knobs", () => {
     const parsed = decodeProviderSessionStartInput({
       threadId: "thread-1",

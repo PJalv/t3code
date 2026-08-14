@@ -57,6 +57,21 @@ export const PiRpcSessionStats = Schema.Struct({
 });
 export type PiRpcSessionStats = typeof PiRpcSessionStats.Type;
 
+export const PiRpcSessionEntry = Schema.Record(Schema.String, Schema.Unknown);
+export type PiRpcSessionEntry = typeof PiRpcSessionEntry.Type;
+
+export const PiRpcEntries = Schema.Struct({
+  entries: Schema.Array(PiRpcSessionEntry),
+  leafId: Schema.NullOr(Schema.String),
+});
+export type PiRpcEntries = typeof PiRpcEntries.Type;
+
+export const PiRpcForkResult = Schema.Struct({
+  text: Schema.String,
+  cancelled: Schema.Boolean,
+});
+export type PiRpcForkResult = typeof PiRpcForkResult.Type;
+
 export const PiRpcCommand = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),

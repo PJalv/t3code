@@ -2458,6 +2458,26 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, initial.threadId);
       }
 
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(initial.threadId, {
+          provider: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: claudeAgentInstanceId,
+          threadId: initial.threadId,
+          cwd: "/tmp/project-claude-start",
+          runtimeMode: "full-access",
+          resumeCursor: initial.resumeCursor,
+          resumePolicy: "fresh",
+        });
+      }).pipe(Effect.provide(secondProviderLayer));
+      const freshStartInput = secondClaude.startSession.mock.calls.at(-1)?.[0];
+      assert.equal(
+        typeof freshStartInput === "object" &&
+          freshStartInput !== null &&
+          freshStartInput.resumeCursor === undefined,
+        true,
+      );
+
       NodeFS.rmSync(tempDir, { recursive: true, force: true });
     }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -4410,45 +4430,43 @@ const makePublicationRollbackHarness = (options?: {
   return { codex, claude, layer: providerLayer };
 };
 
-it.effect(
-  "rolls back a newly started session when the adapter identity mismatches",
-  () =>
-    Effect.gen(function* () {
-      const { codex, layer } = makePublicationRollbackHarness();
-      const threadId = asThreadId("thread-identity-mismatch");
-      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
-        Effect.sync(() => {
-          const now = "2026-01-01T00:00:00.000Z";
-          return {
-            provider: CLAUDE_AGENT_DRIVER,
-            status: "ready",
-            threadId: input.threadId,
-            runtimeMode: input.runtimeMode,
-            cwd: input.cwd ?? process.cwd(),
-            createdAt: now,
-            updatedAt: now,
-          } satisfies ProviderSession;
-        }),
-      );
+it.effect("rolls back a newly started session when the adapter identity mismatches", () =>
+  Effect.gen(function* () {
+    const { codex, layer } = makePublicationRollbackHarness();
+    const threadId = asThreadId("thread-identity-mismatch");
+    codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+      Effect.sync(() => {
+        const now = "2026-01-01T00:00:00.000Z";
+        return {
+          provider: CLAUDE_AGENT_DRIVER,
+          status: "ready",
+          threadId: input.threadId,
+          runtimeMode: input.runtimeMode,
+          cwd: input.cwd ?? process.cwd(),
+          createdAt: now,
+          updatedAt: now,
+        } satisfies ProviderSession;
+      }),
+    );
 
-      const failure = yield* Effect.flip(
-        Effect.gen(function* () {
-          const provider = yield* ProviderService.ProviderService;
-          return yield* provider.startSession(threadId, {
-            provider: ProviderDriverKind.make("codex"),
-            providerInstanceId: codexInstanceId,
-            threadId,
-            runtimeMode: "full-access",
-          });
-        }).pipe(Effect.provide(layer)),
-      );
+    const failure = yield* Effect.flip(
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        return yield* provider.startSession(threadId, {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(layer)),
+    );
 
-      assert.instanceOf(failure, ProviderValidationError);
-      assert.include(failure.issue, "Adapter/provider mismatch");
-      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
-      assert.equal(yield* codex.hasSession(threadId), false);
-      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    assert.instanceOf(failure, ProviderValidationError);
+    assert.include(failure.issue, "Adapter/provider mismatch");
+    assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+    assert.equal(yield* codex.hasSession(threadId), false);
+    assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect(
@@ -4495,9 +4513,7 @@ it.effect(
       const threadId = asThreadId("thread-replacement-rollback");
       const scope = yield* Scope.make();
       const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
-      const provider = yield* ProviderService.ProviderService.pipe(
-        Effect.provide(runtimeServices),
-      );
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
 
       const codexSession = yield* provider.startSession(threadId, {
         provider: ProviderDriverKind.make("codex"),
@@ -4548,144 +4564,134 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
-  "preserves the original error when rollback cleanup itself fails",
-  () =>
-    Effect.gen(function* () {
-      const { codex, layer } = makePublicationRollbackHarness({
-        failUpsert: () => true,
-        stopSessionError: new ProviderAdapterRequestError({
+it.effect("preserves the original error when rollback cleanup itself fails", () =>
+  Effect.gen(function* () {
+    const { codex, layer } = makePublicationRollbackHarness({
+      failUpsert: () => true,
+      stopSessionError: new ProviderAdapterRequestError({
+        provider: String(CODEX_DRIVER),
+        method: "stopSession",
+        detail: "simulated rollback stop failure",
+      }),
+    });
+    const threadId = asThreadId("thread-cleanup-failure");
+
+    const failure = yield* Effect.flip(
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        return yield* provider.startSession(threadId, {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
+    assert.include(failure.detail, "simulated directory upsert failure");
+    assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("keeps a replacement session live when stale-session cleanup fails after binding", () =>
+  Effect.gen(function* () {
+    const { codex, claude, layer } = makePublicationRollbackHarness();
+    const threadId = asThreadId("thread-stale-cleanup-failure");
+    const scope = yield* Scope.make();
+    const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+    const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
+
+    yield* provider.startSession(threadId, {
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codexInstanceId,
+      threadId,
+      runtimeMode: "full-access",
+    });
+
+    codex.stopSession.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
           provider: String(CODEX_DRIVER),
           method: "stopSession",
-          detail: "simulated rollback stop failure",
+          detail: "simulated stale stop failure",
         }),
-      });
-      const threadId = asThreadId("thread-cleanup-failure");
+      ),
+    );
 
-      const failure = yield* Effect.flip(
-        Effect.gen(function* () {
-          const provider = yield* ProviderService.ProviderService;
-          return yield* provider.startSession(threadId, {
-            provider: ProviderDriverKind.make("codex"),
-            providerInstanceId: codexInstanceId,
-            threadId,
-            runtimeMode: "full-access",
-          });
-        }).pipe(Effect.provide(layer)),
-      );
+    const claudeSession = yield* provider.startSession(threadId, {
+      provider: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: claudeAgentInstanceId,
+      threadId,
+      runtimeMode: "full-access",
+    });
 
-      assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
-      assert.include(failure.detail, "simulated directory upsert failure");
-      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    assert.equal(claudeSession.provider, "claudeAgent");
+    assert.equal(yield* claude.hasSession(threadId), true);
+    assert.equal(codex.stopSession.mock.calls.length, 1);
+
+    yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
-  "keeps a replacement session live when stale-session cleanup fails after binding",
-  () =>
-    Effect.gen(function* () {
-      const { codex, claude, layer } = makePublicationRollbackHarness();
-      const threadId = asThreadId("thread-stale-cleanup-failure");
-      const scope = yield* Scope.make();
-      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
-      const provider = yield* ProviderService.ProviderService.pipe(
-        Effect.provide(runtimeServices),
-      );
+it.effect("rolls back a resumed session when recovery identity mismatches", () =>
+  Effect.gen(function* () {
+    const { codex, layer } = makePublicationRollbackHarness();
+    const threadId = asThreadId("thread-recovery-mismatch");
+    const scope = yield* Scope.make();
+    const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+    const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
 
-      yield* provider.startSession(threadId, {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+    const initial = yield* provider.startSession(threadId, {
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codexInstanceId,
+      threadId,
+      runtimeMode: "full-access",
+    });
+    assert.equal(initial.provider, "codex");
+    // The committed start leaves a committed in-memory MCP config behind.
+    const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
+    assert.notEqual(committedConfig, undefined);
+
+    yield* codex.stopAll();
+    codex.startSession.mockClear();
+    codex.stopSession.mockClear();
+    codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+      Effect.sync(() => {
+        const now = "2026-01-01T00:00:00.000Z";
+        return {
+          provider: CLAUDE_AGENT_DRIVER,
+          status: "ready",
+          threadId: input.threadId,
+          runtimeMode: input.runtimeMode,
+          cwd: input.cwd ?? process.cwd(),
+          createdAt: now,
+          updatedAt: now,
+        } satisfies ProviderSession;
+      }),
+    );
+
+    const failure = yield* Effect.flip(
+      provider.sendTurn({
         threadId,
-        runtimeMode: "full-access",
-      });
+        input: "resume",
+        attachments: [],
+      }),
+    );
 
-      codex.stopSession.mockImplementation(() =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: String(CODEX_DRIVER),
-            method: "stopSession",
-            detail: "simulated stale stop failure",
-          }),
-        ),
-      );
+    assert.instanceOf(failure, ProviderValidationError);
+    assert.include(failure.issue, "Adapter/provider mismatch while recovering");
+    assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+    assert.equal(yield* codex.hasSession(threadId), false);
+    // A failed replacement restores the prior committed in-memory config
+    // instead of wiping it: the previous session keeps its credential.
+    assert.equal(
+      McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
+      committedConfig?.providerSessionId,
+    );
 
-      const claudeSession = yield* provider.startSession(threadId, {
-        provider: ProviderDriverKind.make("claudeAgent"),
-        providerInstanceId: claudeAgentInstanceId,
-        threadId,
-        runtimeMode: "full-access",
-      });
-
-      assert.equal(claudeSession.provider, "claudeAgent");
-      assert.equal(yield* claude.hasSession(threadId), true);
-      assert.equal(codex.stopSession.mock.calls.length, 1);
-
-      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
-    }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect(
-  "rolls back a resumed session when recovery identity mismatches",
-  () =>
-    Effect.gen(function* () {
-      const { codex, layer } = makePublicationRollbackHarness();
-      const threadId = asThreadId("thread-recovery-mismatch");
-      const scope = yield* Scope.make();
-      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
-      const provider = yield* ProviderService.ProviderService.pipe(
-        Effect.provide(runtimeServices),
-      );
-
-      const initial = yield* provider.startSession(threadId, {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
-        threadId,
-        runtimeMode: "full-access",
-      });
-      assert.equal(initial.provider, "codex");
-      // The committed start leaves a committed in-memory MCP config behind.
-      const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
-      assert.notEqual(committedConfig, undefined);
-
-      yield* codex.stopAll();
-      codex.startSession.mockClear();
-      codex.stopSession.mockClear();
-      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
-        Effect.sync(() => {
-          const now = "2026-01-01T00:00:00.000Z";
-          return {
-            provider: CLAUDE_AGENT_DRIVER,
-            status: "ready",
-            threadId: input.threadId,
-            runtimeMode: input.runtimeMode,
-            cwd: input.cwd ?? process.cwd(),
-            createdAt: now,
-            updatedAt: now,
-          } satisfies ProviderSession;
-        }),
-      );
-
-      const failure = yield* Effect.flip(
-        provider.sendTurn({
-          threadId,
-          input: "resume",
-          attachments: [],
-        }),
-      );
-
-      assert.instanceOf(failure, ProviderValidationError);
-      assert.include(failure.issue, "Adapter/provider mismatch while recovering");
-      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
-      assert.equal(yield* codex.hasSession(threadId), false);
-      // A failed replacement restores the prior committed in-memory config
-      // instead of wiping it: the previous session keeps its credential.
-      assert.equal(
-        McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
-        committedConfig?.providerSessionId,
-      );
-
-      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect(
@@ -4699,9 +4705,7 @@ it.effect(
       const threadId = asThreadId("thread-recovery-upsert-failure");
       const scope = yield* Scope.make();
       const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
-      const provider = yield* ProviderService.ProviderService.pipe(
-        Effect.provide(runtimeServices),
-      );
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
 
       const initial = yield* provider.startSession(threadId, {
         provider: ProviderDriverKind.make("codex"),
@@ -4873,67 +4877,65 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
-  "serializes concurrent start publication per thread",
-  () =>
-    Effect.gen(function* () {
-      const { codex, claude, layer } = makePublicationRollbackHarness();
-      const threadId = asThreadId("thread-concurrent-starts");
-      const scope = yield* Scope.make();
-      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
-      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
+it.effect("serializes concurrent start publication per thread", () =>
+  Effect.gen(function* () {
+    const { codex, claude, layer } = makePublicationRollbackHarness();
+    const threadId = asThreadId("thread-concurrent-starts");
+    const scope = yield* Scope.make();
+    const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+    const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
 
-      const entered = yield* Deferred.make<void>();
-      const startGate = yield* Deferred.make<void>();
-      const originalCodexStart = codex.startSession.getMockImplementation()!;
-      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
-        Deferred.succeed(entered, void 0).pipe(
-          Effect.andThen(Deferred.await(startGate)),
-          Effect.andThen(() => originalCodexStart(input)),
-        ),
-      );
+    const entered = yield* Deferred.make<void>();
+    const startGate = yield* Deferred.make<void>();
+    const originalCodexStart = codex.startSession.getMockImplementation()!;
+    codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+      Deferred.succeed(entered, void 0).pipe(
+        Effect.andThen(Deferred.await(startGate)),
+        Effect.andThen(() => originalCodexStart(input)),
+      ),
+    );
 
-      const first = yield* Effect.forkChild(
-        provider.startSession(threadId, {
-          provider: CODEX_DRIVER,
-          providerInstanceId: codexInstanceId,
-          threadId,
-          runtimeMode: "full-access",
-        }),
-      );
-      const second = yield* Effect.forkChild(
-        provider.startSession(threadId, {
-          provider: CLAUDE_AGENT_DRIVER,
-          providerInstanceId: claudeAgentInstanceId,
-          threadId,
-          runtimeMode: "full-access",
-        }),
-      );
+    const first = yield* Effect.forkChild(
+      provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      }),
+    );
+    const second = yield* Effect.forkChild(
+      provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      }),
+    );
 
-      // Deterministic: the first start holds the per-thread permit and is
-      // blocked inside the adapter; the second start cannot begin its adapter
-      // until the first publication completes.
-      yield* Deferred.await(entered);
-      assert.equal(claude.startSession.mock.calls.length, 0);
+    // Deterministic: the first start holds the per-thread permit and is
+    // blocked inside the adapter; the second start cannot begin its adapter
+    // until the first publication completes.
+    yield* Deferred.await(entered);
+    assert.equal(claude.startSession.mock.calls.length, 0);
 
-      yield* Deferred.succeed(startGate, void 0);
-      yield* Effect.exit(Fiber.join(first));
-      yield* Effect.exit(Fiber.join(second));
+    yield* Deferred.succeed(startGate, void 0);
+    yield* Effect.exit(Fiber.join(first));
+    yield* Effect.exit(Fiber.join(second));
 
-      // Both started in order, the second binding won, and the first (stale)
-      // session was stopped only after the second publication committed.
-      assert.equal(codex.startSession.mock.calls.length, 1);
-      assert.equal(claude.startSession.mock.calls.length, 1);
-      assert.equal(yield* codex.hasSession(threadId), false);
-      assert.equal(yield* claude.hasSession(threadId), true);
-      const sessions = yield* provider.listSessions();
-      assert.deepEqual(
-        sessions
-          .filter((session) => session.threadId === threadId)
-          .map((session) => session.provider),
-        ["claudeAgent"],
-      );
+    // Both started in order, the second binding won, and the first (stale)
+    // session was stopped only after the second publication committed.
+    assert.equal(codex.startSession.mock.calls.length, 1);
+    assert.equal(claude.startSession.mock.calls.length, 1);
+    assert.equal(yield* codex.hasSession(threadId), false);
+    assert.equal(yield* claude.hasSession(threadId), true);
+    const sessions = yield* provider.listSessions();
+    assert.deepEqual(
+      sessions
+        .filter((session) => session.threadId === threadId)
+        .map((session) => session.provider),
+      ["claudeAgent"],
+    );
 
-      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

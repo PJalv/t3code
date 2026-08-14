@@ -60,7 +60,7 @@ function makeThreadCheckpointContext(input: {
 }
 
 describe("CheckpointDiffQuery.layer", () => {
-  it.effect("returns a provider-native diff without consulting Git or projection state", () =>
+  it.effect("returns a provider-native diff when no Git checkpoint context exists", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-provider-diff");
       const diff = [
@@ -109,8 +109,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getProjectShellById: () => Effect.die("provider diff should not query projections"),
             getFirstActiveThreadIdByProjectId: () =>
               Effect.die("provider diff should not query projections"),
-            getThreadCheckpointContext: () =>
-              Effect.die("provider diff should not query projections"),
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
             getFullThreadDiffContext: () =>
               Effect.die("provider diff should not query projections"),
             getThreadShellById: () => Effect.die("provider diff should not query projections"),
@@ -245,7 +244,7 @@ describe("CheckpointDiffQuery.layer", () => {
     }),
   );
 
-  it.effect("computes diffs using canonical turn-0 checkpoint refs", () =>
+  it.effect("prefers authoritative Git checkpoints over a provider-native blob", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.make("project-1");
       const threadId = ThreadId.make("thread-1");
@@ -285,7 +284,19 @@ describe("CheckpointDiffQuery.layer", () => {
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
-        Layer.provideMerge(makeProjectionTurnRepositoryLayer()),
+        Layer.provideMerge(
+          makeProjectionTurnRepositoryLayer(() =>
+            Effect.succeed(
+              Option.some({
+                threadId,
+                fromTurnCount: 0,
+                toTurnCount: 1,
+                diff: "partial provider patch",
+                createdAt: "2026-01-01T00:00:00.000Z",
+              }),
+            ),
+          ),
+        ),
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
