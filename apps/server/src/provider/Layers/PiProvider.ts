@@ -2,6 +2,7 @@ import { PiSettings } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -26,6 +27,7 @@ const PRESENTATION = {
   requiresNewThreadForModelChange: false,
 } as const;
 const DETERMINISTIC_ARGS = ["--no-session", "--offline"] as const;
+const PROVIDER_PROBE_TIMEOUT = "5 seconds";
 
 type PiRpcClientFactory = (
   options: PiRpcSpawnOptions,
@@ -116,7 +118,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         commands: client.getCommands(),
       });
     }),
-  ).pipe(Effect.exit);
+  ).pipe(Effect.timeoutOption(PROVIDER_PROBE_TIMEOUT), Effect.exit);
   if (discovery._tag === "Failure") {
     const error = Cause.squash(discovery.cause);
     return buildServerProvider({
@@ -133,25 +135,39 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
       },
     });
   }
+  if (Option.isNone(discovery.value)) {
+    return buildServerProvider({
+      presentation: PRESENTATION,
+      enabled: true,
+      checkedAt,
+      models: models(settings),
+      probe: {
+        installed: true,
+        version: null,
+        status: "error",
+        auth: { status: "unknown" },
+        message: `Pi model discovery timed out after ${PROVIDER_PROBE_TIMEOUT}.`,
+      },
+    });
+  }
+  const snapshot = discovery.value.value;
   const discovered = mapPiDiscoveredModels(
-    discovery.value.inventory.models.map((model) => ({
+    snapshot.inventory.models.map((model) => ({
       provider: model.provider,
       id: model.id,
       name: model.name?.trim() || model.id,
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
     })),
-    discovery.value.state.model
+    snapshot.state.model
       ? {
-          provider: discovery.value.state.model.provider,
-          modelId: discovery.value.state.model.id,
-          ...(discovery.value.state.thinkingLevel
-            ? { thinkingLevel: discovery.value.state.thinkingLevel }
-            : {}),
+          provider: snapshot.state.model.provider,
+          modelId: snapshot.state.model.id,
+          ...(snapshot.state.thinkingLevel ? { thinkingLevel: snapshot.state.thinkingLevel } : {}),
         }
       : undefined,
   );
-  const commands = mapPiCommands(discovery.value.commands.commands);
-  const hasMcp = discovery.value.commands.commands.some(
+  const commands = mapPiCommands(snapshot.commands.commands);
+  const hasMcp = snapshot.commands.commands.some(
     (command) => command.source === "extension" && command.name.trim() === "mcp",
   );
   return buildServerProvider({

@@ -4,9 +4,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { PiSettings } from "@t3tools/contracts";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import { PiRpcCommandError, PiRpcProtocolError, type PiRpcClient } from "../pi/PiRpcClient.ts";
 import { checkPiProviderStatus } from "./PiProvider.ts";
@@ -151,6 +153,19 @@ it.effect("reports a binary missing error wrapped by the Pi RPC protocol as not 
 
     assert.equal(snapshot.installed, false);
     assert.equal(snapshot.status, "error");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("bounds a stalled Pi provider probe", () =>
+  Effect.gen(function* () {
+    const checking = yield* checkPiProviderStatus(settings, {}, () => Effect.never).pipe(
+      Effect.forkChild,
+    );
+    yield* TestClock.adjust("5 seconds");
+    const snapshot = yield* Fiber.join(checking);
+    assert.equal(snapshot.status, "error");
+    assert.equal(snapshot.installed, true);
+    assert.match(snapshot.message ?? "", /timed out after 5 seconds/u);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
