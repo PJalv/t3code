@@ -1847,6 +1847,20 @@ describe("PiAdapter", () => {
           { type: "agent_settled" },
           {
             type: "extension_ui_request",
+            id: "bridge-progress",
+            method: "notify",
+            message: bridgeMessage({
+              version: 1,
+              kind: "task.progress",
+              invocationId: "agent-bridge",
+              agentId: "bridge-agent-id",
+              title: "Bridge agent",
+              role: "luna",
+              usage: { totalTokens: 123, toolUses: 2, durationMs: 450 },
+            }),
+          },
+          {
+            type: "extension_ui_request",
             id: "bridge-completed",
             method: "notify",
             message: bridgeMessage({
@@ -1863,6 +1877,15 @@ describe("PiAdapter", () => {
           },
         ]);
         const events = Array.from(yield* Fiber.join(collected));
+        const progress = events.find(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.progress" }> =>
+            event.type === "task.progress" && event.payload.typedUsage?.totalTokens === 123,
+        );
+        assert.deepEqual(progress?.payload.typedUsage, {
+          totalTokens: 123,
+          toolUses: 2,
+          durationMs: 450,
+        });
         const completed = events.find(
           (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
             event.type === "task.completed",
