@@ -144,6 +144,15 @@ class FakeClient implements PiRpcClient {
     });
   };
   getCommands = () => Effect.succeed({ commands: [] });
+  entries: Array<Record<string, unknown>> = [];
+  leafId: string | null = null;
+  getEntries = () => Effect.succeed({ entries: this.entries, leafId: this.leafId });
+  fork = (entryId: string) => {
+    const target = this.entries.find((entry) => entry.id === entryId);
+    const parentId = typeof target?.parentId === "string" ? target.parentId : null;
+    this.leafId = parentId;
+    return Effect.succeed({ text: "forked prompt", cancelled: false });
+  };
   getSessionStats = () => {
     const self = this;
     return Effect.gen(function* () {
@@ -1094,6 +1103,53 @@ describe("PiAdapter", () => {
         }
         if (events[1]?.type === "turn.diff.updated") {
           assert.equal(events[1].payload.unifiedDiff, `${writePatch}\n${editPatch}`);
+        }
+      }),
+    );
+  });
+
+  it.effect("distinguishes Pi write overwrites from new files", () => {
+    const h = makeHarness();
+    const file = path.join(h.stateDir, "existing.txt");
+    fs.writeFileSync(file, "before\n");
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const diffFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "turn.diff.updated" }> =>
+              event.type === "turn.diff.updated",
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "overwrite file",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "write-existing",
+            toolName: "write",
+            args: { path: file, content: "after\n" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "write-existing",
+            toolName: "write",
+            result: { content: [{ type: "text", text: "Successfully wrote file" }] },
+            isError: false,
+          },
+        ]);
+        const diff = yield* Fiber.join(diffFiber);
+        assert.equal(Option.isSome(diff), true);
+        if (Option.isSome(diff)) {
+          assert.match(diff.value.payload.unifiedDiff, /--- .*existing\.txt/u);
+          assert.doesNotMatch(diff.value.payload.unifiedDiff, /--- \/dev\/null/u);
+          assert.match(diff.value.payload.unifiedDiff, /-before/u);
+          assert.match(diff.value.payload.unifiedDiff, /\+after/u);
         }
       }),
     );
@@ -4462,6 +4518,84 @@ describe("PiAdapter", () => {
       );
     },
   );
+
+  it.effect("reads and rolls back the durable Pi active branch", () => {
+    const h = makeHarness();
+    h.client.entries = [
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        message: { role: "user", content: "First prompt" },
+      },
+      {
+        type: "message",
+        id: "assistant-1",
+        parentId: "user-1",
+        message: { role: "assistant", content: [{ type: "text", text: "First answer" }] },
+      },
+      {
+        type: "message",
+        id: "user-2",
+        parentId: "assistant-1",
+        message: { role: "user", content: "Second prompt" },
+      },
+      {
+        type: "message",
+        id: "assistant-2",
+        parentId: "user-2",
+        message: { role: "assistant", content: [{ type: "text", text: "Second answer" }] },
+      },
+      {
+        type: "message",
+        id: "abandoned",
+        parentId: "user-1",
+        message: { role: "assistant", content: [{ type: "text", text: "Old branch" }] },
+      },
+    ];
+    h.client.leafId = "assistant-2";
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const before = yield* adapter.readThread(ThreadId.make("thread"));
+        assert.deepEqual(
+          before.turns.map((turn) => [turn.id, turn.items.length]),
+          [
+            ["pi-entry:user-1", 2],
+            ["pi-entry:user-2", 2],
+          ],
+        );
+        const after = yield* adapter.rollbackThread(ThreadId.make("thread"), 1);
+        assert.deepEqual(
+          after.turns.map((turn) => turn.id),
+          ["pi-entry:user-1"],
+        );
+        assert.equal(h.client.leafId, "assistant-1");
+      }),
+    );
+  });
+
+  it.effect("rejects Pi rollback while work is active", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "still running",
+          modelSelection,
+        });
+        const result = yield* adapter
+          .rollbackThread(ThreadId.make("thread"), 1)
+          .pipe(Effect.result);
+        assert.equal(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.equal(result.failure._tag, "ProviderAdapterValidationError");
+        }
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+      }),
+    );
+  });
 
   it.effect(
     "drains buffered terminal events to a delayed streamEvents consumer on adapter scope close",
