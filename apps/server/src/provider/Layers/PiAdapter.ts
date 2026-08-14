@@ -42,6 +42,12 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import {
+  allocateT3PiBridgeExtension,
+  decodePiBridgeNotification,
+  PI_BRIDGE_PREFIX,
+  type PiBridgeEnvelope,
+} from "../pi/PiBridgeProtocol.ts";
 import { decodePiModelSlug, encodePiModelSlug } from "../pi/PiModel.ts";
 import {
   makePiRpcClient,
@@ -81,7 +87,7 @@ export interface PiAdapterOptions {
   readonly makeRpcClient?: PiRpcClientFactory;
   readonly onSessionPublished?: () => Effect.Effect<void>;
   /** Test seam for deterministic attachment-read cancellation coverage. */
-  readonly readAttachment?: (path: string) => Effect.Effect<Uint8Array, unknown>;
+  readonly readAttachment?: (path: string) => Effect.Effect<Uint8Array>;
   /** Test seam for the turn-start to prompt-submission cancellation boundary. */
   readonly onBeforePrompt?: () => Effect.Effect<void>;
 }
@@ -116,9 +122,12 @@ interface PendingPreflight {
   readonly cancelled: Deferred.Deferred<void>;
 }
 
+type PiBridgeControlResult = Extract<PiBridgeEnvelope, { kind: "control.result" }>;
+
 interface PiAgentTask {
   readonly taskId: RuntimeTaskId;
   readonly toolUseId: string;
+  readonly bridgeControllable: boolean;
   title: string;
   role: string | undefined;
   model: string | undefined;
@@ -164,6 +173,12 @@ interface SessionContext {
   readonly agentTasksById: Map<string, PiAgentTask>;
   readonly workflowTasks: Map<string, PiWorkflowTask>;
   readonly extensionSubagentTasks: Map<string, PiExtensionSubagentTask>;
+  readonly bridgeControlRequests: Map<
+    string,
+    { readonly agentId: string; readonly deferred: Deferred.Deferred<PiBridgeControlResult> }
+  >;
+  bridgeTargetedStop: boolean;
+  bridgeRpcVersion: number | undefined;
   lastEventCreatedAt: string | undefined;
   lastTokenUsage: PiThreadTokenUsage | undefined;
   thinkingLevel: PiThinkingLevel | undefined;
@@ -455,6 +470,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     stateDir: options.stateDir,
     instanceId: options.providerInstanceId,
   }).pipe(Effect.mapError((cause) => validation("startSession", "Invalid Pi state root.", cause)));
+  const bridgeExtensionPath = yield* provideFiles(allocateT3PiBridgeExtension(root)).pipe(
+    Effect.mapError((cause) =>
+      validation("startSession", "Could not prepare the T3 Pi bridge extension.", cause),
+    ),
+  );
   const sessions = new Map<ThreadId, SessionContext>();
   const sessionFileLeases = new Map<string, SessionFileLease>();
   const threadLocks = yield* SynchronizedRef.make(new Map<ThreadId, Semaphore.Semaphore>());
@@ -584,6 +604,78 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     };
   };
 
+  const handleBridgeEnvelope = Effect.fn("PiAdapter.handleBridgeEnvelope")(function* (
+    ctx: SessionContext,
+    envelope: PiBridgeEnvelope,
+    native: Record<string, unknown>,
+  ) {
+    if (envelope.kind === "bridge.ready") {
+      ctx.bridgeRpcVersion = envelope.subagentsRpcVersion;
+      ctx.bridgeTargetedStop = envelope.targetedStop;
+      return;
+    }
+    if (envelope.kind === "control.result") {
+      const pending = ctx.bridgeControlRequests.get(envelope.requestId);
+      if (pending && pending.agentId === envelope.agentId) {
+        ctx.bridgeControlRequests.delete(envelope.requestId);
+        yield* Deferred.succeed(pending.deferred, envelope);
+      }
+      return;
+    }
+    const task =
+      ctx.agentTasksById.get(envelope.agentId) ??
+      ctx.agentTasksByToolCall.get(envelope.invocationId);
+    // The bridge observes extension-wide lifecycle events, including scheduled
+    // and RPC-created agents. Only project agents that originated from a T3-
+    // visible Agent tool call; unknown lifecycle rows stay extension-owned.
+    if (!task) return;
+    task.title = envelope.title || task.title;
+    task.role = envelope.role ?? task.role;
+    ctx.agentTasksById.set(envelope.agentId, task);
+    if (envelope.kind === "task.registered") return;
+    if (envelope.kind === "task.running") {
+      yield* offer({
+        type: "task.progress",
+        ...(yield* base(ctx)),
+        payload: {
+          taskId: task.taskId,
+          description: task.title,
+          status: "running",
+          ...agentTaskLinkage(task),
+        },
+        raw: raw(native),
+      });
+      return;
+    }
+    const typedUsage = envelope.usage
+      ? {
+          totalTokens: Math.max(0, Math.floor(envelope.usage.totalTokens)),
+          ...(envelope.usage.toolUses !== undefined
+            ? { toolUses: Math.max(0, Math.floor(envelope.usage.toolUses)) }
+            : {}),
+          ...(envelope.usage.durationMs !== undefined
+            ? { durationMs: Math.max(0, Math.floor(envelope.usage.durationMs)) }
+            : {}),
+        }
+      : undefined;
+    yield* offer({
+      type: "task.completed",
+      ...(yield* base(ctx)),
+      payload: {
+        taskId: task.taskId,
+        status: envelope.status,
+        ...(envelope.summary ? { summary: envelope.summary.slice(0, 2_000) } : {}),
+        ...(typedUsage ? { typedUsage } : {}),
+        ...agentTaskLinkage(task),
+      },
+      raw: raw(native),
+    });
+    for (const [id, candidate] of ctx.agentTasksById) {
+      if (candidate === task) ctx.agentTasksById.delete(id);
+    }
+    ctx.agentTasksByToolCall.delete(task.toolUseId);
+  });
+
   const handleExtensionUiRequest = Effect.fn("PiAdapter.handleExtensionUiRequest")(function* (
     ctx: SessionContext,
     event: Record<string, unknown>,
@@ -591,6 +683,20 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const method = string(event.method);
     if (method === "notify") {
       const message = trimmedString(event.message);
+      if (message?.startsWith(PI_BRIDGE_PREFIX)) {
+        const decoded = yield* decodePiBridgeNotification(message).pipe(Effect.result);
+        if (Result.isSuccess(decoded) && decoded.success) {
+          yield* handleBridgeEnvelope(ctx, decoded.success, event);
+        } else if (Result.isFailure(decoded)) {
+          yield* offer({
+            type: "runtime.warning",
+            ...(yield* base(ctx, ctx.activeTurn)),
+            payload: { message: "Ignored an invalid T3 Pi bridge notification." },
+            raw: raw(event),
+          });
+        }
+        return;
+      }
       const notifyType = trimmedString(event.notifyType) ?? "info";
       if (message && (notifyType === "warning" || notifyType === "error")) {
         yield* offer({
@@ -745,6 +851,17 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         if (ctx.pendingPreflight) {
           yield* Deferred.succeed(ctx.pendingPreflight.cancelled, undefined);
         }
+        for (const [requestId, pending] of ctx.bridgeControlRequests) {
+          yield* Deferred.succeed(pending.deferred, {
+            version: 1,
+            kind: "control.result",
+            requestId,
+            agentId: pending.agentId,
+            success: false,
+            error: "Pi session closed before bridge control completed.",
+          });
+        }
+        ctx.bridgeControlRequests.clear();
         // Cancel interactive extension inputs before the session disappears so
         // the client never waits on a request that can no longer be answered.
         yield* Effect.forEach(
@@ -1030,6 +1147,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       const task: PiAgentTask = {
         taskId: RuntimeTaskId.make(`pi-subagent:${toolUseId}`),
         toolUseId,
+        bridgeControllable: true,
         title,
         role: trimmedString(args.subagent_type) ?? "unknown",
         model: trimmedString(args.model),
@@ -1134,6 +1252,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       const task: PiAgentTask = {
         taskId: RuntimeTaskId.make(`pi-subagent:${toolUseId}`),
         toolUseId,
+        bridgeControllable: false,
         title,
         role: trimmedString(args.harness),
         model: trimmedString(args.model),
@@ -2029,11 +2148,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               ...(options.args ?? []),
               "--session",
               cursor?.sessionFile ?? freshFile!.sessionFile,
+              "--extension",
+              bridgeExtensionPath,
               ...DETERMINISTIC_ARGS,
             ],
             cwd,
             env: {
               ...spawnEnvironment,
+              T3CODE_PI_BRIDGE: "1",
               ...(mcpConfigFile ? { T3CODE_PI_MCP_CONFIG: mcpConfigFile } : {}),
             },
           }).pipe(
@@ -2131,6 +2253,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             agentTasksById: new Map(),
             workflowTasks: new Map(),
             extensionSubagentTasks: new Map(),
+            bridgeControlRequests: new Map(),
+            bridgeTargetedStop: false,
+            bridgeRpcVersion: undefined,
             lastEventCreatedAt: undefined,
             lastTokenUsage: undefined,
             thinkingLevel: started.success.state.thinkingLevel,
@@ -2400,7 +2525,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         Effect.ensuring(
           Effect.sync(() => {
             const ctx = sessions.get(input.threadId);
-            if (ctx?.pendingPreflight === pendingPreflight) ctx.pendingPreflight = undefined;
+            if (ctx && ctx.pendingPreflight === pendingPreflight) ctx.pendingPreflight = undefined;
           }),
         ),
       ),
@@ -2417,6 +2542,60 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     );
   };
 
+  const stopBridgeAgent = Effect.fn("PiAdapter.stopBridgeAgent")(function* (
+    ctx: SessionContext,
+    agentId: string,
+    task: PiAgentTask,
+  ) {
+    const requestId = yield* uuid;
+    const deferred = yield* Deferred.make<PiBridgeControlResult>();
+    ctx.bridgeControlRequests.set(requestId, { agentId, deferred });
+    const commandPayload = yield* encodeJson({
+      version: 1,
+      operation: "stop-subagent",
+      requestId,
+      agentId,
+    }).pipe(Effect.orDie);
+    const command = Buffer.from(commandPayload).toString("base64url");
+    const submitted = yield* ctx.client.prompt(`/t3code-control ${command}`).pipe(Effect.result);
+    if (Result.isFailure(submitted)) {
+      ctx.bridgeControlRequests.delete(requestId);
+      return yield* request("t3code-control", submitted.failure);
+    }
+    const result = yield* Deferred.await(deferred).pipe(
+      Effect.timeout(Duration.seconds(3)),
+      Effect.mapError(() =>
+        requestMessage("t3code-control", `Timed out while stopping Pi subagent '${agentId}'.`),
+      ),
+      Effect.ensuring(Effect.sync(() => ctx.bridgeControlRequests.delete(requestId))),
+    );
+    if (!result.success) {
+      return yield* requestMessage(
+        "t3code-control",
+        result.error ?? `Could not stop Pi subagent '${agentId}'.`,
+      );
+    }
+    // A successful targeted-stop acknowledgement is authoritative. In
+    // particular, pi-subagents does not emit onComplete for a queued stop.
+    const current = ctx.agentTasksById.get(agentId);
+    if (current === task) {
+      yield* offer({
+        type: "task.completed",
+        ...(yield* base(ctx)),
+        payload: {
+          taskId: task.taskId,
+          status: "stopped",
+          summary: "Subagent stop confirmed.",
+          ...agentTaskLinkage(task),
+        },
+      });
+      for (const [id, candidate] of ctx.agentTasksById) {
+        if (candidate === task) ctx.agentTasksById.delete(id);
+      }
+      ctx.agentTasksByToolCall.delete(task.toolUseId);
+    }
+  });
+
   const interruptTurn: ProviderAdapterShape<ProviderAdapterError>["interruptTurn"] = (
     threadId,
     turnId,
@@ -2428,20 +2607,52 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         yield* Deferred.succeed(ctx.pendingPreflight.cancelled, undefined);
         return;
       }
-      const hasBackgroundTasks =
-        Array.from(ctx.agentTasksById.values()).length > 0 ||
+      const detachedAgents = new Map<PiAgentTask, string>();
+      let hasLegacyAgentTasks = false;
+      for (const [agentId, task] of ctx.agentTasksById) {
+        if (task.bridgeControllable) {
+          if (!detachedAgents.has(task)) detachedAgents.set(task, agentId);
+        } else {
+          hasLegacyAgentTasks = true;
+        }
+      }
+      const hasOtherBackgroundTasks =
+        hasLegacyAgentTasks ||
         Array.from(ctx.workflowTasks.values()).some((task) => task.state === "running") ||
         Array.from(ctx.extensionSubagentTasks.values()).some((task) => task.state === "running");
+      const hasBackgroundTasks = detachedAgents.size > 0 || hasOtherBackgroundTasks;
       if (!turn && !hasBackgroundTasks)
         return yield* validation("interruptTurn", "No active Pi work to interrupt.");
       if (turnId && (!turn || turn.id !== turnId))
         return yield* validation("interruptTurn", "No matching active Pi turn.");
       if (turn) turn.interruptRequested = true;
-      // Pi's subagent extension passes the active tool AbortSignal to every
-      // child process. Background task projections can outlive T3's active
-      // turn, so still send the RPC abort when those tasks are the only live
-      // work in the session.
-      yield* ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)));
+
+      let targetedStop: Result.Result<void, ProviderAdapterError> | undefined;
+      if (detachedAgents.size > 0) {
+        targetedStop = ctx.bridgeTargetedStop
+          ? yield* Effect.forEach(
+              detachedAgents,
+              ([task, agentId]) => stopBridgeAgent(ctx, agentId, task),
+              { discard: true, concurrency: "unbounded" },
+            ).pipe(Effect.result)
+          : Result.fail(
+              validation(
+                "interruptTurn",
+                `Targeted Pi subagent stop is unavailable${
+                  ctx.bridgeRpcVersion === undefined
+                    ? "."
+                    : ` for bridge RPC protocol ${ctx.bridgeRpcVersion}.`
+                }`,
+              ),
+            );
+      }
+
+      // Abort remains correct for the active parent and for reference Pi
+      // subagent/workflow extensions that inherit the parent AbortSignal.
+      if (turn || hasOtherBackgroundTasks) {
+        yield* ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)));
+      }
+      if (targetedStop && Result.isFailure(targetedStop)) return yield* targetedStop.failure;
     });
   const unsupported = (operation: string, threadId: ThreadId) =>
     requireSession(threadId).pipe(

@@ -34,6 +34,7 @@ import {
   PiRpcProtocolError,
   type PiRpcSpawnOptions,
 } from "../pi/PiRpcClient.ts";
+import { PI_BRIDGE_PREFIX } from "../pi/PiBridgeProtocol.ts";
 import type { PiRpcEvent, PiRpcModel, PiThinkingLevel } from "../pi/PiRpcSchema.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
@@ -47,6 +48,19 @@ const instanceId = ProviderInstanceId.make("pi-test");
 const modelSelection = createModelSelection(instanceId, "openai/gpt-5", [
   { id: "thinkingLevel", value: "max" },
 ]);
+const JsonUnknown = Schema.fromJsonString(Schema.Unknown);
+const encodeUnknownJson = Schema.encodeSync(JsonUnknown);
+const bridgeMessage = (payload: unknown) => PI_BRIDGE_PREFIX + encodeUnknownJson(payload);
+const decodeBridgeControlCommand = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      version: Schema.Number,
+      operation: Schema.String,
+      requestId: Schema.String,
+      agentId: Schema.String,
+    }),
+  ),
+);
 type Adapter = ProviderAdapterShape<ProviderAdapterError>;
 
 class FakeClient implements PiRpcClient {
@@ -369,6 +383,10 @@ describe("PiAdapter", () => {
         ]);
         assert.equal(args.includes("--no-session"), false);
         assert.equal(args.includes("--offline"), true);
+        const extensionIndex = args.indexOf("--extension");
+        assert.ok(extensionIndex >= 0);
+        assert.match(args[extensionIndex + 1] ?? "", /t3code-pi-bridge\.mjs$/u);
+        assert.equal(h.spawns[0]?.env?.T3CODE_PI_BRIDGE, "1");
         for (const arg of [
           "--no-context-files",
           "--no-extensions",
@@ -1691,6 +1709,228 @@ describe("PiAdapter", () => {
           true,
         );
         assert.equal(events.filter((event) => event.type === "turn.started").length, 2);
+      }),
+    );
+  });
+
+  it.effect("uses bridge lifecycle to settle detached Agent tasks without a follow-up turn", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "task.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "launch bridge agent",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "extension_ui_request",
+            id: "bridge-ready",
+            method: "notify",
+            message: bridgeMessage({
+              version: 1,
+              kind: "bridge.ready",
+              subagentsRpcVersion: 2,
+              targetedStop: true,
+            }),
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-bridge",
+            toolName: "Agent",
+            args: { description: "Bridge agent", subagent_type: "luna" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-bridge",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                description: "Bridge agent",
+                subagentType: "luna",
+                status: "background",
+                agentId: "bridge-agent-id",
+              },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+          {
+            type: "extension_ui_request",
+            id: "bridge-completed",
+            method: "notify",
+            message: bridgeMessage({
+              version: 1,
+              kind: "task.completed",
+              invocationId: "agent-bridge",
+              agentId: "bridge-agent-id",
+              title: "Bridge agent",
+              role: "luna",
+              status: "completed",
+              summary: "Bridge result",
+              usage: { totalTokens: 321, toolUses: 4, durationMs: 900 },
+            }),
+          },
+        ]);
+        const events = Array.from(yield* Fiber.join(collected));
+        const completed = events.find(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        assert.equal(completed?.payload.status, "completed");
+        assert.equal(completed?.payload.summary, "Bridge result");
+        assert.deepEqual(completed?.payload.typedUsage, {
+          totalTokens: 321,
+          toolUses: 4,
+          durationMs: 900,
+        });
+        assert.equal(events.filter((event) => event.type === "turn.started").length, 1);
+      }),
+    );
+  });
+
+  it.effect("stops a detached Agent through the bridge and trusts the acknowledgement", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const settled = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "launch stoppable agent",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "extension_ui_request",
+            id: "bridge-ready-stop",
+            method: "notify",
+            message: bridgeMessage({
+              version: 1,
+              kind: "bridge.ready",
+              subagentsRpcVersion: 2,
+              targetedStop: true,
+            }),
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-stop",
+            toolName: "Agent",
+            args: { description: "Stoppable agent", subagent_type: "luna" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-stop",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                description: "Stoppable agent",
+                subagentType: "luna",
+                status: "background",
+                agentId: "stoppable-agent-id",
+              },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Fiber.join(settled);
+        const completed = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "task.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        h.client.promptEntered = yield* Deferred.make<void>();
+        const stopping = yield* adapter
+          .interruptTurn(ThreadId.make("thread"))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(h.client.promptEntered);
+        const command = h.client.calls.prompts.at(-1)?.message ?? "";
+        assert.match(command, /^\/t3code-control /u);
+        const request = decodeBridgeControlCommand(
+          Buffer.from(command.slice(command.indexOf(" ") + 1), "base64url").toString("utf8"),
+        );
+        assert.equal(request.agentId, "stoppable-agent-id");
+        yield* Queue.offer(h.client.input, {
+          type: "extension_ui_request",
+          id: "bridge-stop-result",
+          method: "notify",
+          message: bridgeMessage({
+            version: 1,
+            kind: "control.result",
+            requestId: request.requestId,
+            agentId: request.agentId,
+            success: true,
+          }),
+        });
+        yield* Fiber.join(stopping);
+        const completedEvent = yield* Fiber.join(completed);
+        assert.equal(Option.isSome(completedEvent), true);
+        if (Option.isSome(completedEvent)) {
+          assert.equal(completedEvent.value.payload.status, "stopped");
+          assert.equal(completedEvent.value.payload.summary, "Subagent stop confirmed.");
+        }
+        assert.equal(h.client.calls.abort, 0);
+      }),
+    );
+  });
+
+  it.effect("reports detached Agent stop as unsupported without the bridge", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const settled = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "launch unsupported agent",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-unsupported",
+            toolName: "Agent",
+            args: { description: "Unsupported agent", subagent_type: "luna" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-unsupported",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                description: "Unsupported agent",
+                subagentType: "luna",
+                status: "background",
+                agentId: "unsupported-agent-id",
+              },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Fiber.join(settled);
+        const result = yield* adapter.interruptTurn(ThreadId.make("thread")).pipe(Effect.result);
+        assert.equal(result._tag, "Failure");
+        assert.equal(h.client.calls.abort, 0);
+        assert.equal(h.client.calls.prompt, 1);
       }),
     );
   });
