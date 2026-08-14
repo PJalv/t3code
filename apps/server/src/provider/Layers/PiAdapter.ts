@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -40,7 +41,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
-import { decodePiModelSlug } from "../pi/PiModel.ts";
+import { decodePiModelSlug, encodePiModelSlug } from "../pi/PiModel.ts";
 import {
   makePiRpcClient,
   PiRpcCommandError,
@@ -457,7 +458,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     });
   const withThreadLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
     Effect.flatMap(getThreadLock(threadId), (lock) => lock.withPermit(effect));
-  const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const events = yield* Queue.unbounded<ProviderRuntimeEvent, Cause.Done<void>>();
   const now = Effect.map(DateTime.now, DateTime.formatIso);
   const uuid = crypto.randomUUIDv4.pipe(
     Effect.mapError((cause) => request("crypto/randomUUIDv4", cause)),
@@ -710,9 +711,22 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     return { agentTasks, workflowTasks, extensionSubagentTasks };
   };
 
+  const isIdle = (ctx: SessionContext): boolean =>
+    ctx.activeTurn === undefined &&
+    ctx.steeringPromptsInFlight === 0 &&
+    ctx.deferredSettlement === undefined &&
+    ctx.pendingUserInputs.size === 0 &&
+    ctx.resolvingUserInputs.size === 0 &&
+    ctx.agentTasksByToolCall.size === 0 &&
+    ctx.agentTasksById.size === 0 &&
+    ![...ctx.workflowTasks.values()].some((task) => task.state === "running") &&
+    ![...ctx.extensionSubagentTasks.values()].some((task) => task.state === "running") &&
+    !ctx.closing &&
+    !ctx.stopped;
+
   const close = Effect.fn("PiAdapter.close")(function* (
     ctx: SessionContext,
-    mode: "explicit" | "unexpected" = "explicit",
+    mode: "explicit" | "unexpected" | "replacement" = "explicit",
   ) {
     yield* Effect.uninterruptible(
       Effect.gen(function* () {
@@ -730,9 +744,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         );
         const turn = ctx.activeTurn;
         if (turn && !turn.terminal) {
-          if (mode === "explicit") {
+          if (mode === "explicit" || mode === "replacement") {
             // The user (or the adapter scope) asked to stop: report the turn
-            // as interrupted, never as a transport failure.
+            // as interrupted, never as a transport failure. Replacement closes
+            // only idle contexts, so this is defensive.
             const completedEvent = {
               type: "turn.completed",
               ...(yield* base(ctx, turn)),
@@ -745,15 +760,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             yield* failActive(ctx, "Pi RPC event stream ended unexpectedly.", undefined, true);
           }
         }
-        const taskStatus = mode === "explicit" ? "stopped" : "failed";
+        const taskStatus = mode === "unexpected" ? "failed" : "stopped";
         const taskSummary =
-          mode === "explicit" ? "Session stopped." : "Session exited unexpectedly.";
+          mode === "unexpected" ? "Session exited unexpectedly." : "Session stopped.";
         const { agentTasks, workflowTasks, extensionSubagentTasks } =
           collectActiveTaskEntries(ctx);
+        // Session destruction terminalizes every live task at session scope.
+        // These events must not borrow the id of an unrelated current turn, so
+        // they carry no turnId at all; only the turn-level terminal events
+        // above keep the id of the turn they belong to.
         for (const task of agentTasks) {
           yield* offer({
             type: "task.completed",
-            ...(yield* base(ctx, turn)),
+            ...(yield* base(ctx)),
             payload: {
               taskId: task.taskId,
               status: taskStatus,
@@ -765,14 +784,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         for (const task of workflowTasks) {
           yield* offer({
             type: "task.completed",
-            ...(yield* base(ctx, turn)),
+            ...(yield* base(ctx)),
             payload: { taskId: task.taskId, status: taskStatus, summary: taskSummary },
           });
         }
         for (const task of extensionSubagentTasks) {
           yield* offer({
             type: "task.completed",
-            ...(yield* base(ctx, turn)),
+            ...(yield* base(ctx)),
             payload: {
               taskId: task.taskId,
               status: taskStatus,
@@ -789,19 +808,23 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         ctx.agentTasksById.clear();
         ctx.workflowTasks.clear();
         ctx.extensionSubagentTasks.clear();
-        // Emit exactly one canonical exit event, after every terminal turn and
-        // task event, so runtime ingestion can stop the session and clear
-        // stale active-turn, plan, and background-liveness state.
-        yield* offer({
-          type: "session.exited",
-          ...(yield* base(ctx)),
-          payload: {
-            reason:
-              mode === "explicit" ? "Session stopped." : "Pi session exited unexpectedly.",
-            recoverable: false,
-            exitKind: mode === "explicit" ? "graceful" : "error",
-          },
-        });
+        if (mode !== "replacement") {
+          // Emit exactly one canonical exit event, after every terminal turn and
+          // task event, so runtime ingestion can stop the session and clear
+          // stale active-turn, plan, and background-liveness state. A session
+          // replaced in place by a fresh process for the same thread does not
+          // exit: it is torn down silently and republished by the replacement.
+          yield* offer({
+            type: "session.exited",
+            ...(yield* base(ctx)),
+            payload: {
+              reason:
+                mode === "explicit" ? "Session stopped." : "Pi session exited unexpectedly.",
+              recoverable: false,
+              exitKind: mode === "explicit" ? "graceful" : "error",
+            },
+          });
+        }
         const { activeTurnId: _, ...session } = ctx.session;
         ctx.session = { ...session, status: "closed", updatedAt: yield* now };
         yield* ctx.client.close().pipe(Effect.ignore);
@@ -1853,11 +1876,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               "startSession",
               "Provider instance does not match this Pi adapter.",
             );
-          if (sessions.has(input.threadId))
-            return yield* validation(
-              "startSession",
-              `Thread '${input.threadId}' is already active.`,
-            );
           const cwd = yield* provideFiles(
             fs.realPath(path.resolve(input.cwd ?? process.cwd())),
           ).pipe(
@@ -1868,6 +1886,50 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           const fresh = input.resumeCursor === undefined;
           let cursor: PiSessionCursor | undefined;
           let freshFile: { readonly sessionFile: string } | undefined;
+          let replacingOld: SessionContext | undefined;
+          const existing = sessions.get(input.threadId);
+          if (existing) {
+            // Same-thread replacement is allowed only when the old context is
+            // idle, the supplied cursor is the exact durable cursor, and the
+            // working directory is compatible with the active session.
+            if (input.resumeCursor === undefined)
+              return yield* validation(
+                "startSession",
+                `Thread '${input.threadId}' is already active and requires an exact resume cursor to replace.`,
+              );
+            if (!isIdle(existing))
+              return yield* validation(
+                "startSession",
+                `Thread '${input.threadId}' has active Pi work and cannot be replaced.`,
+              );
+            if (cwd !== existing.session.cwd)
+              return yield* validation(
+                "startSession",
+                "Pi session working directory changed; the active session cannot be resumed in a different directory.",
+              );
+            const candidate = yield* decodePiSessionCursor(input.resumeCursor).pipe(
+              Effect.mapError((cause) =>
+                validation("startSession", "Invalid Pi resume cursor.", cause),
+              ),
+            );
+            cursor = yield* provideFiles(
+              validatePiResumeSessionFile({ stateRoot: root, cursor: candidate, cwd }),
+            ).pipe(
+              Effect.mapError((cause) =>
+                validation("startSession", "Invalid Pi resume session file.", cause),
+              ),
+            );
+            if (
+              cursor.sessionFile !== existing.cursor.sessionFile ||
+              cursor.sessionId !== existing.cursor.sessionId ||
+              cursor.schemaVersion !== existing.cursor.schemaVersion
+            )
+              return yield* validation(
+                "startSession",
+                "Resume cursor does not match the active Pi session.",
+              );
+            replacingOld = existing;
+          }
           const scope = yield* Scope.make();
           let transferred = false;
           let leasedFile: string | undefined;
@@ -1898,11 +1960,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                   }),
                 ),
           );
+          if (replacingOld) {
+            // Tear the idle old context down as a replacement: no session.exited
+            // is emitted and its durable lease is released so the replacement
+            // below can take over the same session file. If the replacement
+            // fails afterwards, the old process is not resurrected and the
+            // durable cursor remains recoverable from disk.
+            yield* close(replacingOld, "replacement");
+          }
           if (fresh) {
             freshFile = yield* provideFiles(
               allocateFreshPiSessionFile({ stateRoot: root, fileId: yield* uuid }),
             ).pipe(Effect.mapError((cause) => request("session/allocate", cause)));
-          } else {
+          } else if (cursor === undefined) {
             cursor = yield* decodePiSessionCursor(input.resumeCursor).pipe(
               Effect.mapError((cause) =>
                 validation("startSession", "Invalid Pi resume cursor.", cause),
@@ -2010,6 +2080,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             ),
           );
           const createdAt = yield* now;
+          // Pi's get_state reports the authoritative loaded model. Prefer that
+          // over the requested selection, which is only a fallback for
+          // providers that do not report the loaded model. The thinking level
+          // is already taken from get_state below.
+          const startedState = started.success.state;
+          const authoritativeModel = startedState.model
+            ? encodePiModelSlug(startedState.model.provider, startedState.model.id)
+            : undefined;
+          const sessionModel = authoritativeModel ?? input.modelSelection?.model;
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: options.providerInstanceId,
@@ -2017,7 +2096,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             status: "ready",
             runtimeMode: "full-access",
             cwd,
-            ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
+            ...(sessionModel ? { model: sessionModel } : {}),
             resumeCursor: cursor,
             createdAt,
             updatedAt: createdAt,
@@ -2321,7 +2400,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   const stopAll = () =>
     Effect.forEach([...sessions.keys()], stopSession, { discard: true, concurrency: "unbounded" });
   yield* Effect.addFinalizer(() =>
-    stopAll().pipe(Effect.ignore, Effect.ensuring(Queue.shutdown(events))),
+    stopAll().pipe(Effect.ignore, Effect.ensuring(Queue.end(events))),
   );
 
   return {
