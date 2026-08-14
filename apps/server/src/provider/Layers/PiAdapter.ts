@@ -109,6 +109,7 @@ interface ActiveTurn {
   readonly toolItemIds: Map<string, RuntimeItemId>;
   readonly toolArgs: Map<string, Record<string, unknown>>;
   readonly fileDiffsByPath: Map<string, string[]>;
+  readonly writeContentsBeforeTool: Map<string, string | null>;
   assistantStarted: boolean;
   reasoningStarted: boolean;
   lastAssistantMessageIncomplete: boolean;
@@ -292,22 +293,77 @@ const newFilePatch = (file: string, content: string): string | undefined => {
   ].join("\n");
 };
 
+const replacementFilePatch = (
+  file: string,
+  previousContent: string,
+  nextContent: string,
+): string | undefined => {
+  if (previousContent === nextContent) return undefined;
+  const lines = (content: string) => {
+    const normalized = content.replaceAll("\r\n", "\n");
+    const hasFinalNewline = normalized.endsWith("\n");
+    const values = normalized.length === 0 ? [] : normalized.split("\n");
+    if (hasFinalNewline) values.pop();
+    return { values, hasFinalNewline };
+  };
+  const previous = lines(previousContent);
+  const next = lines(nextContent);
+  const removed = previous.values.map((line) => `-${line}`);
+  if (previous.values.length > 0 && !previous.hasFinalNewline) {
+    removed.push("\\ No newline at end of file");
+  }
+  const added = next.values.map((line) => `+${line}`);
+  if (next.values.length > 0 && !next.hasFinalNewline) {
+    added.push("\\ No newline at end of file");
+  }
+  return [
+    `Index: ${file}`,
+    "===================================================================",
+    `--- ${file}`,
+    `+++ ${file}`,
+    `@@ -1,${previous.values.length} +1,${next.values.length} @@`,
+    ...removed,
+    ...added,
+  ].join("\n");
+};
+
 const piFileDiff = (
   event: Record<string, unknown>,
+  previousWriteContent?: string | null,
 ): { readonly file: string; readonly patch: string } | undefined => {
   if (event.type !== "tool_execution_end" || event.isError === true) return undefined;
   const toolName = trimmedString(event.toolName)?.toLowerCase();
   const args = isRecord(event.args) ? event.args : undefined;
   const file = args ? piToolPath(args) : undefined;
   if (!file) return undefined;
-  if (toolName === "write") {
-    const content = typeof args?.content === "string" ? args.content : undefined;
-    const patch = content === undefined ? undefined : newFilePatch(file, content);
-    return patch ? { file, patch } : undefined;
-  }
-  if (toolName !== "edit") return undefined;
   const result = isRecord(event.result) ? event.result : undefined;
   const details = isRecord(result?.details) ? result.details : undefined;
+  if (toolName === "write") {
+    const content = typeof args?.content === "string" ? args.content : undefined;
+    const detailPatch = trimmedString(details?.patch);
+    const patch =
+      detailPatch ??
+      (content === undefined
+        ? undefined
+        : previousWriteContent === null
+          ? newFilePatch(file, content)
+          : previousWriteContent === undefined
+            ? undefined
+            : replacementFilePatch(file, previousWriteContent, content));
+    if (!patch) return undefined;
+    return {
+      file,
+      patch:
+        patch.startsWith("Index: ") || patch.startsWith("diff --git ")
+          ? patch
+          : [
+              `Index: ${file}`,
+              "===================================================================",
+              patch,
+            ].join("\n"),
+    };
+  }
+  if (toolName !== "edit") return undefined;
   const patch = trimmedString(details?.patch);
   if (!patch) return undefined;
   return {
@@ -771,6 +827,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       toolItemIds: new Map(),
       toolArgs: new Map(),
       fileDiffsByPath: new Map(),
+      writeContentsBeforeTool: new Map(),
       assistantStarted: false,
       reasoningStarted: false,
       lastAssistantMessageIncomplete: false,
@@ -1954,6 +2011,20 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       const toolKey = toolEventKey(event);
       const eventArgs = isRecord(event.args) ? event.args : undefined;
       if (eventArgs) turn.toolArgs.set(toolKey, eventArgs);
+      if (
+        type === "tool_execution_start" &&
+        trimmedString(event.toolName)?.toLowerCase() === "write" &&
+        eventArgs
+      ) {
+        const file = piToolPath(eventArgs);
+        if (file) {
+          const absoluteFile = path.isAbsolute(file)
+            ? file
+            : path.resolve(ctx.session.cwd ?? process.cwd(), file);
+          const previous = yield* provideFiles(fs.readFileString(absoluteFile)).pipe(Effect.option);
+          turn.writeContentsBeforeTool.set(toolKey, Option.getOrNull(previous));
+        }
+      }
       const presentationEvent =
         eventArgs || !turn.toolArgs.has(toolKey)
           ? event
@@ -1973,7 +2044,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         },
         raw: raw(native),
       } as ProviderRuntimeEvent);
-      const fileDiff = piFileDiff(presentationEvent);
+      const fileDiff = piFileDiff(presentationEvent, turn.writeContentsBeforeTool.get(toolKey));
+      if (type === "tool_execution_end") turn.writeContentsBeforeTool.delete(toolKey);
       if (fileDiff) {
         yield* offer({
           type: "turn.diff.updated",
@@ -2086,6 +2158,66 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         Effect.annotateLogs({ provider: "pi", eventType: type ?? "missing" }),
       );
     }
+  });
+
+  const piThreadSnapshot = (
+    threadId: ThreadId,
+    entries: ReadonlyArray<Record<string, unknown>>,
+    leafId: string | null,
+  ) => {
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const entry of entries) {
+      const id = trimmedString(entry.id);
+      if (id && !byId.has(id)) byId.set(id, entry);
+    }
+    const reversed: Record<string, unknown>[] = [];
+    const visited = new Set<string>();
+    let id: string | null = leafId;
+    while (id) {
+      if (visited.has(id)) return undefined;
+      visited.add(id);
+      const entry = byId.get(id);
+      if (!entry) return undefined;
+      reversed.push(entry);
+      id = trimmedString(entry.parentId) ?? null;
+    }
+    const turns: Array<{
+      readonly id: TurnId;
+      readonly items: unknown[];
+      readonly userEntryId: string;
+    }> = [];
+    for (const entry of reversed.reverse()) {
+      if (entry.type !== "message" || !isRecord(entry.message)) continue;
+      const entryId = trimmedString(entry.id);
+      if (!entryId) continue;
+      if (entry.message.role === "user") {
+        turns.push({
+          id: TurnId.make(`pi-entry:${entryId}`),
+          items: [entry.message],
+          userEntryId: entryId,
+        });
+      } else {
+        turns.at(-1)?.items.push(entry.message);
+      }
+    }
+    return {
+      snapshot: {
+        threadId,
+        turns: turns.map(({ id: turnId, items }) => ({ id: turnId, items })),
+      },
+      userEntryIds: turns.map((turn) => turn.userEntryId),
+    };
+  };
+
+  const readPiThread = Effect.fn("PiAdapter.readPiThread")(function* (ctx: SessionContext) {
+    const entries = yield* ctx.client
+      .getEntries()
+      .pipe(Effect.mapError((cause) => request("get_entries", cause)));
+    const projected = piThreadSnapshot(ctx.session.threadId, entries.entries, entries.leafId);
+    if (!projected) {
+      return yield* validation("readThread", "Pi returned a malformed active session branch.");
+    }
+    return projected;
   });
 
   const requireSession = (threadId: ThreadId) => {
@@ -2811,6 +2943,52 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       if (!resolved)
         return yield* requestMessage("extension_ui_response", "Pi input request already resolved.");
     });
+  const readThread: ProviderAdapterShape<ProviderAdapterError>["readThread"] = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap(readPiThread),
+      Effect.map((result) => result.snapshot),
+    );
+  const rollbackThread: ProviderAdapterShape<ProviderAdapterError>["rollbackThread"] = (
+    threadId,
+    numTurns,
+  ) => {
+    if (!Number.isInteger(numTurns) || numTurns < 1) {
+      return Effect.fail(validation("rollbackThread", "numTurns must be an integer >= 1."));
+    }
+    return withThreadLock(
+      threadId,
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        if (!isIdle(ctx)) {
+          return yield* validation(
+            "rollbackThread",
+            "Pi rollback requires an idle session with no active background work.",
+          );
+        }
+        const before = yield* readPiThread(ctx);
+        if (before.userEntryIds.length === 0) return before.snapshot;
+        const targetIndex = Math.max(0, before.userEntryIds.length - numTurns);
+        const entryId = before.userEntryIds[targetIndex]!;
+        const forked = yield* ctx.client
+          .fork(entryId)
+          .pipe(Effect.mapError((cause) => request("fork", cause)));
+        if (forked.cancelled) {
+          return yield* validation("rollbackThread", "A Pi extension cancelled the rollback.");
+        }
+        const state = yield* ctx.client
+          .getState()
+          .pipe(Effect.mapError((cause) => request("get_state", cause)));
+        if (!piStateMatchesCursor(state, ctx.cursor)) {
+          yield* close(ctx, "unexpected");
+          return yield* validation(
+            "rollbackThread",
+            "Pi session identity changed during rollback.",
+          );
+        }
+        return (yield* readPiThread(ctx)).snapshot;
+      }),
+    );
+  };
   const stopSession = (threadId: ThreadId) =>
     sessions.has(threadId) ? close(sessions.get(threadId)!, "explicit") : Effect.void;
   const stopAll = () =>
@@ -2827,8 +3005,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     interruptTurn,
     respondToRequest: (threadId) => unsupported("respondToRequest", threadId),
     respondToUserInput,
-    readThread: (threadId) => unsupported("readThread", threadId),
-    rollbackThread: (threadId) => unsupported("rollbackThread", threadId),
+    readThread,
+    rollbackThread,
     stopSession,
     listSessions: () =>
       Effect.sync(() => [...sessions.values()].map((ctx) => ({ ...ctx.session }))),

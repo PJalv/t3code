@@ -40,6 +40,8 @@ class FakeClient implements PiRpcClient {
     Effect.succeed({
       tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     });
+  getEntries = () => Effect.succeed({ entries: [], leafId: null });
+  fork = () => Effect.succeed({ text: "", cancelled: false });
   setModel = (provider: string, modelId: string) =>
     Effect.sync(() => {
       this.models.push([provider, modelId]);
