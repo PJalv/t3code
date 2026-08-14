@@ -96,6 +96,7 @@ export default function t3codePiBridge(pi) {
 
   let currentCtx;
   let subagentsRpcVersion;
+  let negotiation;
   const invocationByAgent = new Map();
   const pendingByAgent = new Map();
   const unsubscribers = [];
@@ -106,7 +107,7 @@ export default function t3codePiBridge(pi) {
     currentCtx.ui.notify(PREFIX + JSON.stringify({ version: VERSION, ...payload }), "info");
   };
 
-  const rpc = (channel, payload) => new Promise((resolve) => {
+  const rpc = (channel, payload, timeoutMs = rpcTimeoutMs) => new Promise((resolve) => {
     const requestId = payload.requestId;
     const replyChannel = channel + ":reply:" + requestId;
     let settled = false;
@@ -122,7 +123,7 @@ export default function t3codePiBridge(pi) {
       settled = true;
       unsubscribe();
       resolve({ success: false, error: "Subagent RPC timed out." });
-    }, rpcTimeoutMs);
+    }, timeoutMs);
     timer.unref?.();
     pi.events.emit(channel, payload);
   });
@@ -184,7 +185,7 @@ export default function t3codePiBridge(pi) {
 
   const ping = async () => {
     const requestId = crypto.randomUUID();
-    const reply = await rpc("subagents:rpc:ping", { requestId });
+    const reply = await rpc("subagents:rpc:ping", { requestId }, Math.min(rpcTimeoutMs, 250));
     subagentsRpcVersion = reply?.success && typeof reply.data?.version === "number"
       ? reply.data.version
       : undefined;
@@ -193,11 +194,26 @@ export default function t3codePiBridge(pi) {
       ...(subagentsRpcVersion !== undefined ? { subagentsRpcVersion } : {}),
       targetedStop: subagentsRpcVersion === SUPPORTED_SUBAGENTS_RPC,
     });
+    return subagentsRpcVersion === SUPPORTED_SUBAGENTS_RPC;
+  };
+
+  const negotiate = () => {
+    if (negotiation) return negotiation;
+    negotiation = (async () => {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        if (await ping()) return;
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 200);
+          timer.unref?.();
+        });
+      }
+    })().finally(() => { negotiation = undefined; });
+    return negotiation;
   };
 
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
-    if (ctx.mode === "rpc") void ping();
+    if (ctx.mode === "rpc") void negotiate();
   });
 
   pi.on("tool_result", (event, ctx) => {
@@ -222,7 +238,7 @@ export default function t3codePiBridge(pi) {
     flushPending(details.agentId);
   });
 
-  unsubscribers.push(pi.events.on("subagents:ready", () => { void ping(); }));
+  unsubscribers.push(pi.events.on("subagents:ready", () => { void negotiate(); }));
   unsubscribers.push(pi.events.on("subagents:started", (data) => emitLifecycle("started", data)));
   unsubscribers.push(pi.events.on("subagents:completed", (data) => emitLifecycle("completed", data)));
   unsubscribers.push(pi.events.on("subagents:failed", (data) => emitLifecycle("failed", data)));
