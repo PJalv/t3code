@@ -14,7 +14,9 @@ import {
   isPiRpcResponse,
   PiRpcAvailableModels,
   PiRpcCommands,
+  PiRpcEntries,
   type PiRpcEvent,
+  PiRpcForkResult,
   PiRpcModel,
   type PiRpcRawEvent,
   type PiRpcResponse,
@@ -60,6 +62,8 @@ const decodePiRpcState = Schema.decodeUnknownEffect(PiRpcState);
 const decodePiRpcAvailableModels = Schema.decodeUnknownEffect(PiRpcAvailableModels);
 const decodePiRpcCommands = Schema.decodeUnknownEffect(PiRpcCommands);
 const decodePiRpcSessionStats = Schema.decodeUnknownEffect(PiRpcSessionStats);
+const decodePiRpcEntries = Schema.decodeUnknownEffect(PiRpcEntries);
+const decodePiRpcForkResult = Schema.decodeUnknownEffect(PiRpcForkResult);
 const decodePiRpcModel = Schema.decodeUnknownEffect(PiRpcModel);
 
 export interface PiRpcTransportIo {
@@ -85,6 +89,8 @@ export interface PiRpcClient {
   readonly getAvailableModels: () => Effect.Effect<PiRpcAvailableModels, PiRpcError>;
   readonly getCommands: () => Effect.Effect<PiRpcCommands, PiRpcError>;
   readonly getSessionStats: () => Effect.Effect<PiRpcSessionStats, PiRpcError>;
+  readonly getEntries: () => Effect.Effect<PiRpcEntries, PiRpcError>;
+  readonly fork: (entryId: string) => Effect.Effect<PiRpcForkResult, PiRpcError>;
   readonly setModel: (provider: string, modelId: string) => Effect.Effect<PiRpcModel, PiRpcError>;
   readonly setThinkingLevel: (level: PiThinkingLevel) => Effect.Effect<void, PiRpcError>;
   readonly prompt: (
@@ -143,6 +149,18 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
       Effect.mapError(
         (cause) =>
           new PiRpcProtocolError({ detail: "invalid get_session_stats response data", cause }),
+      ),
+    );
+  const decodeEntries = (data: unknown) =>
+    decodePiRpcEntries(data).pipe(
+      Effect.mapError(
+        (cause) => new PiRpcProtocolError({ detail: "invalid get_entries response data", cause }),
+      ),
+    );
+  const decodeForkResult = (data: unknown) =>
+    decodePiRpcForkResult(data).pipe(
+      Effect.mapError(
+        (cause) => new PiRpcProtocolError({ detail: "invalid fork response data", cause }),
       ),
     );
   const decodeModel = (data: unknown) =>
@@ -331,6 +349,8 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
     getAvailableModels: () => request("get_available_models", {}, decodeModels),
     getCommands: () => request("get_commands", {}, decodeCommands),
     getSessionStats: () => request("get_session_stats", {}, decodeSessionStats),
+    getEntries: () => request("get_entries", {}, decodeEntries),
+    fork: (entryId) => request("fork", { entryId }, decodeForkResult),
     setModel: (provider, modelId) => request("set_model", { provider, modelId }, decodeModel),
     setThinkingLevel: (level) => request("set_thinking_level", { level }, () => Effect.void),
     prompt: (message, images, streamingBehavior) =>
