@@ -139,6 +139,7 @@ describe("PiBridgeProtocol", () => {
     });
     (await loadBridge())(h.pi);
     await h.emitHook("session_start");
+    await Effect.runPromise(Effect.yieldNow);
     h.pi.events.emit("subagents:completed", {
       id: "agent-1",
       type: "Explore",
@@ -191,6 +192,7 @@ describe("PiBridgeProtocol", () => {
     });
     (await loadBridge())(h.pi);
     await h.emitHook("session_start");
+    await Effect.runPromise(Effect.yieldNow);
     const command = h.commands.get("t3code-control");
     assert.ok(command);
     const encode = (request: unknown) =>
@@ -233,6 +235,7 @@ describe("PiBridgeProtocol", () => {
     const h = makeFakePi();
     (await loadBridge())(h.pi);
     await h.emitHook("session_start");
+    await Effect.runPromise(Effect.sleep("20 millis"));
     const events = await decodedNotifications(h.notifications);
     assert.deepEqual(events, [{ version: 1, kind: "bridge.ready", targetedStop: false }]);
 
