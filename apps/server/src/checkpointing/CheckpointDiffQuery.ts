@@ -182,6 +182,18 @@ export const make = Effect.gen(function* () {
         });
       }
 
+      // Provider-native refs are projection placeholders, not Git refs. They
+      // remain visible while Git checkpoint capture is pending, disabled, or
+      // unavailable. Never pass them to `git diff`; use the persisted provider
+      // patch until canonical Git refs replace them.
+      if (
+        providerFallback &&
+        (String(fromCheckpointRef).startsWith("provider-diff:") ||
+          String(toCheckpointRef).startsWith("provider-diff:"))
+      ) {
+        return providerFallback;
+      }
+
       const diff = yield* checkpointStore
         .diffCheckpoints({
           cwd: workspaceCwd,
