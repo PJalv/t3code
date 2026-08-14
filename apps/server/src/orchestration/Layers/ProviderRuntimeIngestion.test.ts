@@ -226,8 +226,7 @@ function createProviderSessionDirectoryHarness() {
         const binding = bindings.get(threadId);
         return binding === undefined ? Option.none<ProviderRuntimeBinding>() : Option.some(binding);
       }),
-    listThreadIds: () =>
-      Effect.sync(() => Array.from(bindings.keys()) as ReadonlyArray<ThreadId>),
+    listThreadIds: () => Effect.sync(() => Array.from(bindings.keys()) as ReadonlyArray<ThreadId>),
     listBindings: () =>
       Effect.sync(
         () =>
@@ -341,9 +340,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ThreadPlanProgress.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
-      Layer.provideMerge(
-        Layer.succeed(ProviderSessionDirectory, sessionDirectory.service),
-      ),
+      Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, sessionDirectory.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
@@ -4278,10 +4275,7 @@ describe("ProviderRuntimeIngestion", () => {
       threadId,
       createdAt: now,
     });
-    await waitForThread(
-      harness.readModel,
-      (entry) => entry.session?.status === "stopped",
-    );
+    await waitForThread(harness.readModel, (entry) => entry.session?.status === "stopped");
   });
 
   it("applies session.exited when no binding exists for the thread", async () => {
@@ -4300,9 +4294,6 @@ describe("ProviderRuntimeIngestion", () => {
       threadId,
       createdAt: now,
     });
-    await waitForThread(
-      harness.readModel,
-      (entry) => entry.session?.status === "stopped",
-    );
+    await waitForThread(harness.readModel, (entry) => entry.session?.status === "stopped");
   });
 });
