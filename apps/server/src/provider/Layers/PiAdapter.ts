@@ -704,7 +704,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     task.role = envelope.role ?? task.role;
     ctx.agentTasksById.set(envelope.agentId, task);
     if (envelope.kind === "task.registered") return;
-    if (envelope.kind === "task.running") {
+    if (envelope.kind === "task.running" || envelope.kind === "task.progress") {
+      const typedUsage =
+        envelope.kind === "task.progress"
+          ? {
+              totalTokens: Math.max(0, Math.floor(envelope.usage.totalTokens)),
+              ...(envelope.usage.toolUses !== undefined
+                ? { toolUses: Math.max(0, Math.floor(envelope.usage.toolUses)) }
+                : {}),
+              ...(envelope.usage.durationMs !== undefined
+                ? { durationMs: Math.max(0, Math.floor(envelope.usage.durationMs)) }
+                : {}),
+            }
+          : undefined;
       yield* offer({
         type: "task.progress",
         ...(yield* base(ctx)),
@@ -712,6 +724,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           taskId: task.taskId,
           description: task.title,
           status: "running",
+          ...(typedUsage ? { typedUsage } : {}),
           ...agentTaskLinkage(task),
         },
         raw: raw(native),
