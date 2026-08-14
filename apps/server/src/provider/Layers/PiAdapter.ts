@@ -17,6 +17,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -79,6 +80,10 @@ export interface PiAdapterOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly makeRpcClient?: PiRpcClientFactory;
   readonly onSessionPublished?: () => Effect.Effect<void>;
+  /** Test seam for deterministic attachment-read cancellation coverage. */
+  readonly readAttachment?: (path: string) => Effect.Effect<Uint8Array, unknown>;
+  /** Test seam for the turn-start to prompt-submission cancellation boundary. */
+  readonly onBeforePrompt?: () => Effect.Effect<void>;
 }
 
 interface ActiveTurn {
@@ -105,6 +110,10 @@ interface PendingExtensionInput {
   readonly extensionRequestId: string;
   readonly method: PiInteractiveExtensionMethod;
   readonly questionId: string;
+}
+
+interface PendingPreflight {
+  readonly cancelled: Deferred.Deferred<void>;
 }
 
 interface PiAgentTask {
@@ -145,6 +154,7 @@ interface SessionContext {
   readonly scope: Scope.Closeable;
   eventFiber: Fiber.Fiber<void>;
   activeTurn: ActiveTurn | undefined;
+  pendingPreflight: PendingPreflight | undefined;
   steeringPromptsInFlight: number;
   steeringGeneration: number;
   deferredSettlement: PiRpcEvent | undefined;
@@ -732,6 +742,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       Effect.gen(function* () {
         if (ctx.stopped || ctx.closing) return;
         ctx.closing = true;
+        if (ctx.pendingPreflight) {
+          yield* Deferred.succeed(ctx.pendingPreflight.cancelled, undefined);
+        }
         // Cancel interactive extension inputs before the session disappears so
         // the client never waits on a request that can no longer be answered.
         yield* Effect.forEach(
@@ -763,8 +776,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const taskStatus = mode === "unexpected" ? "failed" : "stopped";
         const taskSummary =
           mode === "unexpected" ? "Session exited unexpectedly." : "Session stopped.";
-        const { agentTasks, workflowTasks, extensionSubagentTasks } =
-          collectActiveTaskEntries(ctx);
+        const { agentTasks, workflowTasks, extensionSubagentTasks } = collectActiveTaskEntries(ctx);
         // Session destruction terminalizes every live task at session scope.
         // These events must not borrow the id of an unrelated current turn, so
         // they carry no turnId at all; only the turn-level terminal events
@@ -818,8 +830,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             type: "session.exited",
             ...(yield* base(ctx)),
             payload: {
-              reason:
-                mode === "explicit" ? "Session stopped." : "Pi session exited unexpectedly.",
+              reason: mode === "explicit" ? "Session stopped." : "Pi session exited unexpectedly.",
               recoverable: false,
               exitKind: mode === "explicit" ? "graceful" : "error",
             },
@@ -2110,6 +2121,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             scope,
             eventFiber: undefined as never,
             activeTurn: undefined,
+            pendingPreflight: undefined,
             steeringPromptsInFlight: 0,
             steeringGeneration: 0,
             deferredSettlement: undefined,
@@ -2150,8 +2162,24 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       ),
     );
 
+  const runPreflight = <A, E, R>(
+    pending: PendingPreflight | undefined,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | ProviderAdapterRequestError, R> =>
+    pending
+      ? Effect.raceFirst(
+          effect,
+          Deferred.await(pending.cancelled).pipe(
+            Effect.andThen(
+              Effect.fail(requestMessage("prompt", "Pi prompt preparation was interrupted.")),
+            ),
+          ),
+        )
+      : effect;
+
   const sendTurn: ProviderAdapterShape<ProviderAdapterError>["sendTurn"] = (input) => {
     let createdTurn: ActiveTurn | undefined;
+    let pendingPreflight: PendingPreflight | undefined;
     return withThreadLock(
       input.threadId,
       Effect.gen(function* () {
@@ -2161,27 +2189,37 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           return yield* validation("sendTurn", "Pi session must be idle before prompting.");
         if (!input.input && (!input.attachments || input.attachments.length === 0))
           return yield* validation("sendTurn", "Pi requires non-empty text or attachments.");
-        const images = yield* Effect.forEach(
-          input.attachments ?? [],
-          (attachment) => {
-            const attachmentPath = resolveAttachmentPath({
-              attachmentsDir: options.attachmentsDir,
-              attachment,
-            });
-            if (!attachmentPath)
-              return Effect.fail(
-                requestMessage("prompt", `Invalid attachment id '${attachment.id}'.`),
+        if (!steeringTurn) {
+          pendingPreflight = { cancelled: yield* Deferred.make<void>() };
+          ctx.pendingPreflight = pendingPreflight;
+        }
+        const images = yield* runPreflight(
+          pendingPreflight,
+          Effect.forEach(
+            input.attachments ?? [],
+            (attachment) => {
+              const attachmentPath = resolveAttachmentPath({
+                attachmentsDir: options.attachmentsDir,
+                attachment,
+              });
+              if (!attachmentPath)
+                return Effect.fail(
+                  requestMessage("prompt", `Invalid attachment id '${attachment.id}'.`),
+                );
+              const read = options.readAttachment
+                ? options.readAttachment(attachmentPath)
+                : provideFiles(fs.readFile(attachmentPath));
+              return read.pipe(
+                Effect.map((bytes) => ({
+                  type: "image" as const,
+                  data: Buffer.from(bytes).toString("base64"),
+                  mimeType: attachment.mimeType,
+                })),
+                Effect.mapError((cause) => request("prompt", cause)),
               );
-            return provideFiles(fs.readFile(attachmentPath)).pipe(
-              Effect.map((bytes) => ({
-                type: "image" as const,
-                data: Buffer.from(bytes).toString("base64"),
-                mimeType: attachment.mimeType,
-              })),
-              Effect.mapError((cause) => request("prompt", cause)),
-            );
-          },
-          { concurrency: 1 },
+            },
+            { concurrency: 1 },
+          ),
         );
         const selection = input.modelSelection;
         if (selection && selection.instanceId !== options.providerInstanceId)
@@ -2237,9 +2275,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             ),
           };
         }
-        const available = yield* ctx.client
-          .getAvailableModels()
-          .pipe(Effect.mapError((cause) => request("get_available_models", cause)));
+        const available = yield* runPreflight(
+          pendingPreflight,
+          ctx.client
+            .getAvailableModels()
+            .pipe(Effect.mapError((cause) => request("get_available_models", cause))),
+        );
         if (
           !available.models.some((m) => m.provider === parsed.provider && m.id === parsed.modelId)
         )
@@ -2253,20 +2294,26 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                 ),
               );
         const previousModel = ctx.session.model ? decodePiModelSlug(ctx.session.model) : undefined;
-        yield* ctx.client
-          .setModel(parsed.provider, parsed.modelId)
-          .pipe(Effect.mapError((cause) => request("set_model", cause)));
+        yield* runPreflight(
+          pendingPreflight,
+          ctx.client
+            .setModel(parsed.provider, parsed.modelId)
+            .pipe(Effect.mapError((cause) => request("set_model", cause))),
+        );
         if (thinkingLevel !== undefined) {
-          yield* ctx.client.setThinkingLevel(thinkingLevel).pipe(
-            Effect.mapError((cause) => request("set_thinking_level", cause)),
-            Effect.onError(() =>
-              previousModel &&
-              (previousModel.provider !== parsed.provider ||
-                previousModel.modelId !== parsed.modelId)
-                ? ctx.client
-                    .setModel(previousModel.provider, previousModel.modelId)
-                    .pipe(Effect.ignore)
-                : Effect.void,
+          yield* runPreflight(
+            pendingPreflight,
+            ctx.client.setThinkingLevel(thinkingLevel).pipe(
+              Effect.mapError((cause) => request("set_thinking_level", cause)),
+              Effect.onError(() =>
+                previousModel &&
+                (previousModel.provider !== parsed.provider ||
+                  previousModel.modelId !== parsed.modelId)
+                  ? ctx.client
+                      .setModel(previousModel.provider, previousModel.modelId)
+                      .pipe(Effect.ignore)
+                  : Effect.void,
+              ),
             ),
           );
           ctx.thinkingLevel = thinkingLevel;
@@ -2282,12 +2329,31 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             provider: PROVIDER,
             threadId: input.threadId,
           });
+        if (options.onBeforePrompt) yield* options.onBeforePrompt();
+        if (pendingPreflight && (yield* Deferred.isDone(pendingPreflight.cancelled))) {
+          return yield* requestMessage("prompt", "Pi prompt preparation was interrupted.");
+        }
         const turn = yield* beginTurn(ctx, {
           model: selectedModel,
           ...(ctx.thinkingLevel ? { effort: ctx.thinkingLevel } : {}),
         });
         createdTurn = turn;
         const turnId = turn.id;
+        if (turn.interruptRequested) {
+          yield* publishTerminal(
+            ctx,
+            turn,
+            [
+              {
+                type: "turn.completed",
+                ...(yield* base(ctx, turn)),
+                payload: { state: "interrupted", stopReason: "abort" },
+              },
+            ],
+            "ready",
+          );
+          return yield* requestMessage("prompt", "Pi prompt preparation was interrupted.");
+        }
         const prompted = yield* ctx.client.prompt(input.input ?? "", images).pipe(Effect.result);
         if (Result.isFailure(prompted)) {
           const reusable = isPiRpcCommandError(prompted.failure);
@@ -2330,7 +2396,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           _tag: "Started" as const,
           result: { threadId: input.threadId, turnId, resumeCursor: ctx.cursor },
         };
-      }),
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            const ctx = sessions.get(input.threadId);
+            if (ctx?.pendingPreflight === pendingPreflight) ctx.pendingPreflight = undefined;
+          }),
+        ),
+      ),
     ).pipe(
       Effect.flatMap((action) =>
         action._tag === "Steer" ? action.effect : Effect.succeed(action.result),
@@ -2351,6 +2424,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     Effect.gen(function* () {
       const ctx = yield* requireSession(threadId);
       const turn = ctx.activeTurn;
+      if (!turn && ctx.pendingPreflight) {
+        yield* Deferred.succeed(ctx.pendingPreflight.cancelled, undefined);
+        return;
+      }
       const hasBackgroundTasks =
         Array.from(ctx.agentTasksById.values()).length > 0 ||
         Array.from(ctx.workflowTasks.values()).some((task) => task.state === "running") ||
