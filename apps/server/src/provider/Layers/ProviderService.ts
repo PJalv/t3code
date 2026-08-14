@@ -1646,10 +1646,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
         }
         const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          input.resumePolicy === "fresh"
+            ? undefined
+            : (input.resumeCursor ??
+              (persistedBinding?.providerInstanceId === resolvedInstanceId
+                ? persistedBinding.resumeCursor
+                : undefined));
         const effectiveCwd =
           input.cwd ??
           (persistedBinding?.providerInstanceId === resolvedInstanceId
@@ -1658,12 +1660,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
-            input.resumeCursor !== undefined
-              ? "request"
-              : effectiveResumeCursor !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
-                ? "persisted"
-                : "none",
+            input.resumePolicy === "fresh"
+              ? "explicit-fresh"
+              : input.resumeCursor !== undefined
+                ? "request"
+                : effectiveResumeCursor !== undefined &&
+                    persistedBinding?.providerInstanceId === resolvedInstanceId
+                  ? "persisted"
+                  : "none",
           "provider.resume_cursor.present": effectiveResumeCursor !== undefined,
           "provider.cwd.source":
             input.cwd !== undefined
@@ -1702,9 +1706,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 ...input,
                 providerInstanceId: resolvedInstanceId,
                 ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
-                ...(effectiveResumeCursor !== undefined
-                  ? { resumeCursor: effectiveResumeCursor }
-                  : {}),
+                resumeCursor: effectiveResumeCursor,
               }),
               upsertExtra: {
                 modelSelection: input.modelSelection,

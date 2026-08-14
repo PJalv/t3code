@@ -167,6 +167,43 @@ describe("PiRpcClient transport", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reads durable entries and forks by entry id", () =>
+    Effect.gen(function* () {
+      const test = yield* makeIo();
+      const client = yield* makePiRpcTransport(test.io);
+      const entriesFiber = yield* client.getEntries().pipe(Effect.forkScoped);
+      expect(yield* Queue.take(test.writes)).toContain('"type":"get_entries"');
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          '{"type":"response","command":"get_entries","success":true,"id":"t3-pi-1","data":{"entries":[{"type":"message","id":"user-1","parentId":null,"message":{"role":"user","content":"hello"}}],"leafId":"user-1"}}\n',
+        ),
+      );
+      expect(yield* Fiber.join(entriesFiber)).toEqual({
+        entries: [
+          {
+            type: "message",
+            id: "user-1",
+            parentId: null,
+            message: { role: "user", content: "hello" },
+          },
+        ],
+        leafId: "user-1",
+      });
+      const forkFiber = yield* client.fork("user-1").pipe(Effect.forkScoped);
+      const forkRequest = yield* Queue.take(test.writes);
+      expect(forkRequest).toContain('"type":"fork"');
+      expect(forkRequest).toContain('"entryId":"user-1"');
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          '{"type":"response","command":"fork","success":true,"id":"t3-pi-2","data":{"text":"hello","cancelled":false}}\n',
+        ),
+      );
+      expect(yield* Fiber.join(forkFiber)).toEqual({ text: "hello", cancelled: false });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("bounds oversized remainders and resumes at the next line", () =>
     Effect.gen(function* () {
       const test = yield* makeIo();
