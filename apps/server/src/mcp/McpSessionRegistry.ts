@@ -33,6 +33,16 @@ export interface McpSessionRegistryShape {
   readonly touch: (threadId: ThreadId) => Effect.Effect<void>;
   readonly revokeProviderSession: (providerSessionId: string) => Effect.Effect<void>;
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void>;
+  /**
+   * Revokes every credential bound to `threadId` except the one issued for
+   * `keepProviderSessionId`. Used to retire a superseded committed credential
+   * only after a replacement candidate has been published, without touching
+   * the candidate itself.
+   */
+  readonly revokeThreadExcept: (
+    threadId: ThreadId,
+    keepProviderSessionId: string,
+  ) => Effect.Effect<void>;
   readonly revokeAll: Effect.Effect<void>;
 }
 
@@ -198,6 +208,15 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
     revokeThread: Effect.fn("McpSessionRegistry.revokeThread")(function* (threadId) {
       yield* revokeWhere((record) => record.scope.threadId === threadId);
     }),
+    revokeThreadExcept: Effect.fn("McpSessionRegistry.revokeThreadExcept")(
+      function* (threadId, keepProviderSessionId) {
+        yield* revokeWhere(
+          (record) =>
+            record.scope.threadId === threadId &&
+            record.scope.providerSessionId !== keepProviderSessionId,
+        );
+      },
+    ),
     revokeAll: SynchronizedRef.set(state, { records: new Map() }),
   });
 });
@@ -222,14 +241,34 @@ const make = Effect.acquireRelease(
 
 export const layer = Layer.effect(McpSessionRegistry, make);
 
+/**
+ * Issues a candidate credential for a thread without revoking any existing
+ * committed credential. ProviderService decides when a candidate is safe to
+ * retire the prior credential (after publication) or when only the candidate
+ * must be revoked (on rollback). A fresh start with no prior credential is
+ * unaffected because there is nothing to retire.
+ */
 export const issueActiveMcpCredential = (
   request: McpCredentialRequest,
 ): Effect.Effect<McpIssuedCredential | undefined> =>
   activeMcpSessionRegistry
-    ? activeMcpSessionRegistry
-        .revokeThread(request.threadId)
-        .pipe(Effect.andThen(activeMcpSessionRegistry.issue(request)))
+    ? activeMcpSessionRegistry.issue(request)
     : Effect.sync((): McpIssuedCredential | undefined => undefined);
+
+/** Revokes exactly one candidate credential by its provider session id. */
+export const revokeActiveMcpProviderSession = (providerSessionId: string): Effect.Effect<void> =>
+  activeMcpSessionRegistry
+    ? activeMcpSessionRegistry.revokeProviderSession(providerSessionId)
+    : Effect.void;
+
+/** Revokes a thread's credentials except the one kept for the candidate. */
+export const revokeActiveMcpThreadExcept = (
+  threadId: ThreadId,
+  keepProviderSessionId: string,
+): Effect.Effect<void> =>
+  activeMcpSessionRegistry
+    ? activeMcpSessionRegistry.revokeThreadExcept(threadId, keepProviderSessionId)
+    : Effect.void;
 
 /**
  * Refreshes the liveness of a thread's MCP credential. Called on every provider
@@ -247,4 +286,16 @@ export const revokeAllActiveMcpCredentials = (): Effect.Effect<void> =>
 /** Exposed for tests. */
 export const __testing = {
   make: makeWithOptions,
+  /**
+   * Resolves a raw bearer token against the currently active registry without
+   * exposing registry internals or token material. Used by ProviderService
+   * tests to prove that a prior committed credential survives a failed
+   * replacement while the candidate credential is revoked.
+   */
+  resolveActive: (
+    rawToken: string,
+  ): Effect.Effect<McpInvocationContext.McpInvocationScope | undefined> =>
+    activeMcpSessionRegistry
+      ? activeMcpSessionRegistry.resolve(rawToken)
+      : Effect.succeed(undefined),
 };

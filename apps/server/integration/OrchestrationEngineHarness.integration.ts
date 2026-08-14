@@ -325,6 +325,7 @@ export const makeOrchestrationIntegrationHarness = (
     const serverSettingsLayer = ServerSettingsService.layerTest();
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(serverSettingsLayer),
     );
     const gitWorkflowLayer = Layer.mock(GitWorkflowService)({

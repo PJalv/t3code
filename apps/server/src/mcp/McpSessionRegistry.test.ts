@@ -127,3 +127,39 @@ it.effect("does not keep credentials of other threads alive", () =>
     expect(yield* registry.resolve(token)).toBeUndefined();
   }),
 );
+
+it.effect("revokeThreadExcept retains only the named provider session", () =>
+  Effect.gen(function* () {
+    let timestamp = 1_000;
+    const registry = yield* makeRegistry(() => timestamp);
+    const threadId = ThreadId.make("thread-5");
+    const first = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    });
+    const second = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make("claude"),
+    });
+    const firstToken = first.config.authorizationHeader.replace(/^Bearer\s+/, "");
+    const secondToken = second.config.authorizationHeader.replace(/^Bearer\s+/, "");
+
+    yield* registry.revokeThreadExcept(threadId, first.config.providerSessionId);
+
+    expect((yield* registry.resolve(firstToken))?.providerSessionId).toBe(
+      first.config.providerSessionId,
+    );
+    expect(yield* registry.resolve(secondToken)).toBeUndefined();
+
+    // A different thread's credentials are untouched.
+    const other = yield* registry.issue({
+      threadId: ThreadId.make("thread-other"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    });
+    yield* registry.revokeThreadExcept(threadId, first.config.providerSessionId);
+    const otherToken = other.config.authorizationHeader.replace(/^Bearer\s+/, "");
+    expect((yield* registry.resolve(otherToken))?.threadId).toBe(ThreadId.make("thread-other"));
+
+    timestamp += 2_000;
+  }),
+);

@@ -4324,14 +4324,21 @@ const fakeMcpEnvironment = ServerEnvironment.ServerEnvironment.of({
 /**
  * Builds an isolated ProviderService harness for publication-rollback tests.
  *
- * The directory `upsert` can be made to fail per binding, and the codex
- * adapter `stopSession` can be forced to fail so cleanup failure behavior is
- * observable. The real `McpSessionRegistry` layer is wired in so MCP session
- * state can be asserted before and after a rollback.
+ * The directory `upsert` can be made to fail per binding, the codex adapter
+ * `stopSession` can be forced to fail so cleanup failure behavior is
+ * observable, and an optional two-stage gate can pause publication between
+ * adapter start and binding commit so tests can observe the candidate state
+ * deterministically without sleeps. The real `McpSessionRegistry` layer is
+ * wired in so MCP session state can be asserted before and after a rollback.
  */
 const makePublicationRollbackHarness = (options?: {
   readonly failUpsert?: (binding: ProviderRuntimeBinding) => boolean;
   readonly stopSessionError?: ProviderAdapterError;
+  readonly upsertGate?: {
+    readonly shouldGate: (binding: ProviderRuntimeBinding) => boolean;
+    readonly enter: Deferred.Deferred<void>;
+    readonly release: Deferred.Deferred<void>;
+  };
 }) => {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
@@ -4350,24 +4357,30 @@ const makePublicationRollbackHarness = (options?: {
     Layer.provide(SqlitePersistenceMemory),
   );
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
-  let resolvedDirectoryLayer = directoryLayer;
-  if (options?.failUpsert !== undefined) {
-    const failure = new ProviderSessionDirectoryPersistenceError({
-      operation: "ProviderSessionDirectory.upsert",
-      detail: "simulated directory upsert failure",
-    });
-    resolvedDirectoryLayer = Layer.effect(
-      ProviderSessionDirectory.ProviderSessionDirectory,
-      Effect.gen(function* () {
-        const base = yield* ProviderSessionDirectory.ProviderSessionDirectory;
-        return {
-          ...base,
-          upsert: (binding: ProviderRuntimeBinding) =>
-            options.failUpsert!(binding) ? Effect.fail(failure) : base.upsert(binding),
-        };
-      }),
-    ).pipe(Layer.provide(directoryLayer));
-  }
+  const failure = new ProviderSessionDirectoryPersistenceError({
+    operation: "ProviderSessionDirectory.upsert",
+    detail: "simulated directory upsert failure",
+  });
+  const resolvedDirectoryLayer = Layer.effect(
+    ProviderSessionDirectory.ProviderSessionDirectory,
+    Effect.gen(function* () {
+      const base = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      return {
+        ...base,
+        upsert: (binding: ProviderRuntimeBinding) =>
+          (options?.upsertGate && options.upsertGate.shouldGate(binding)
+            ? Deferred.succeed(options.upsertGate.enter, void 0).pipe(
+                Effect.andThen(Deferred.await(options.upsertGate.release)),
+              )
+            : Effect.void
+          ).pipe(
+            Effect.andThen(() =>
+              options?.failUpsert?.(binding) ? Effect.fail(failure) : base.upsert(binding),
+            ),
+          ),
+      };
+    }),
+  ).pipe(Layer.provide(directoryLayer));
   const providerLayer = Layer.mergeAll(
     makeProviderServiceLive().pipe(
       Layer.provide(providerAdapterLayer),
@@ -4630,6 +4643,9 @@ it.effect(
         runtimeMode: "full-access",
       });
       assert.equal(initial.provider, "codex");
+      // The committed start leaves a committed in-memory MCP config behind.
+      const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(committedConfig, undefined);
 
       yield* codex.stopAll();
       codex.startSession.mockClear();
@@ -4661,7 +4677,12 @@ it.effect(
       assert.include(failure.issue, "Adapter/provider mismatch while recovering");
       assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
       assert.equal(yield* codex.hasSession(threadId), false);
-      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+      // A failed replacement restores the prior committed in-memory config
+      // instead of wiping it: the previous session keeps its credential.
+      assert.equal(
+        McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
+        committedConfig?.providerSessionId,
+      );
 
       yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -4689,6 +4710,8 @@ it.effect(
         runtimeMode: "full-access",
       });
       assert.equal(initial.provider, "codex");
+      const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(committedConfig, undefined);
 
       yield* codex.stopAll();
       codex.startSession.mockClear();
@@ -4707,7 +4730,209 @@ it.effect(
       assert.include(failure.detail, "simulated directory upsert failure");
       assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
       assert.equal(yield* codex.hasSession(threadId), false);
-      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+      assert.equal(
+        McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
+        committedConfig?.providerSessionId,
+      );
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "keeps the prior committed MCP credential valid when a replacement start is rolled back",
+  () =>
+    Effect.gen(function* () {
+      let failClaudeUpserts = false;
+      const upsertGate = {
+        shouldGate: (binding: ProviderRuntimeBinding) => binding.provider === CLAUDE_AGENT_DRIVER,
+        enter: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+      };
+      const { codex, claude, layer } = makePublicationRollbackHarness({
+        failUpsert: (binding) => binding.provider === CLAUDE_AGENT_DRIVER && failClaudeUpserts,
+        upsertGate,
+      });
+      const threadId = asThreadId("thread-mcp-prior-token");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
+      const resolveActive = McpSessionRegistry.__testing.resolveActive;
+
+      // Commit a codex session and its credential.
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(committedConfig, undefined);
+      const priorToken = committedConfig!.authorizationHeader.replace(/^Bearer\s+/, "");
+
+      // Attempt a claude replacement that will fail at publication.
+      failClaudeUpserts = true;
+      const replacement = yield* Effect.forkChild(
+        provider.startSession(threadId, {
+          provider: CLAUDE_AGENT_DRIVER,
+          providerInstanceId: claudeAgentInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        }),
+      );
+      // Deterministic: the replacement adapter started and the candidate was
+      // exposed to it before publication blocks on the gate.
+      yield* Deferred.await(upsertGate.enter);
+      const candidateConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(candidateConfig, undefined);
+      assert.notEqual(candidateConfig!.providerSessionId, committedConfig!.providerSessionId);
+      const candidateToken = candidateConfig!.authorizationHeader.replace(/^Bearer\s+/, "");
+
+      // Release the gate: publication fails and the candidate is rolled back.
+      yield* Deferred.succeed(upsertGate.release, void 0);
+      const exit = yield* Effect.exit(Fiber.join(replacement));
+      assert.equal(Exit.isFailure(exit), true);
+      assert.equal(yield* claude.hasSession(threadId), false);
+
+      // The candidate credential was revoked while the prior committed
+      // credential still resolves, and the in-memory config was restored.
+      assert.equal(yield* resolveActive(candidateToken), undefined);
+      const priorScope = yield* resolveActive(priorToken);
+      assert.notEqual(priorScope, undefined);
+      assert.equal(priorScope?.providerSessionId, committedConfig!.providerSessionId);
+      assert.equal(
+        McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
+        committedConfig!.providerSessionId,
+      );
+      // The prior codex session was never stopped.
+      assert.equal(yield* codex.hasSession(threadId), true);
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "revokes the candidate MCP credential and restores the prior config when publication is interrupted",
+  () =>
+    Effect.gen(function* () {
+      const upsertGate = {
+        shouldGate: (binding: ProviderRuntimeBinding) => binding.provider === CLAUDE_AGENT_DRIVER,
+        enter: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+      };
+      const { codex, claude, layer } = makePublicationRollbackHarness({ upsertGate });
+      const threadId = asThreadId("thread-mcp-interrupt-publish");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
+      const resolveActive = McpSessionRegistry.__testing.resolveActive;
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const committedConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(committedConfig, undefined);
+      const priorToken = committedConfig!.authorizationHeader.replace(/^Bearer\s+/, "");
+
+      const replacement = yield* Effect.forkChild(
+        provider.startSession(threadId, {
+          provider: CLAUDE_AGENT_DRIVER,
+          providerInstanceId: claudeAgentInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        }),
+      );
+      // Adapter start succeeded; publication is paused at the gate.
+      yield* Deferred.await(upsertGate.enter);
+      const candidateConfig = McpProviderSession.readMcpProviderSession(threadId);
+      assert.notEqual(candidateConfig, undefined);
+      const candidateToken = candidateConfig!.authorizationHeader.replace(/^Bearer\s+/, "");
+
+      // Interrupting after adapter start but before publication must clean up
+      // the candidate session and credential and restore the prior config.
+      yield* Fiber.interrupt(replacement);
+      const exit = yield* Effect.exit(Fiber.join(replacement));
+      assert.equal(Exit.isFailure(exit), true);
+      assert.equal(yield* claude.hasSession(threadId), false);
+      assert.deepEqual(claude.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* resolveActive(candidateToken), undefined);
+      assert.equal(
+        (yield* resolveActive(priorToken))?.providerSessionId,
+        committedConfig!.providerSessionId,
+      );
+      assert.equal(
+        McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
+        committedConfig!.providerSessionId,
+      );
+      assert.equal(yield* codex.hasSession(threadId), true);
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "serializes concurrent start publication per thread",
+  () =>
+    Effect.gen(function* () {
+      const { codex, claude, layer } = makePublicationRollbackHarness();
+      const threadId = asThreadId("thread-concurrent-starts");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(runtimeServices));
+
+      const entered = yield* Deferred.make<void>();
+      const startGate = yield* Deferred.make<void>();
+      const originalCodexStart = codex.startSession.getMockImplementation()!;
+      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+        Deferred.succeed(entered, void 0).pipe(
+          Effect.andThen(Deferred.await(startGate)),
+          Effect.andThen(() => originalCodexStart(input)),
+        ),
+      );
+
+      const first = yield* Effect.forkChild(
+        provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        }),
+      );
+      const second = yield* Effect.forkChild(
+        provider.startSession(threadId, {
+          provider: CLAUDE_AGENT_DRIVER,
+          providerInstanceId: claudeAgentInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        }),
+      );
+
+      // Deterministic: the first start holds the per-thread permit and is
+      // blocked inside the adapter; the second start cannot begin its adapter
+      // until the first publication completes.
+      yield* Deferred.await(entered);
+      assert.equal(claude.startSession.mock.calls.length, 0);
+
+      yield* Deferred.succeed(startGate, void 0);
+      yield* Effect.exit(Fiber.join(first));
+      yield* Effect.exit(Fiber.join(second));
+
+      // Both started in order, the second binding won, and the first (stale)
+      // session was stopped only after the second publication committed.
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      assert.equal(claude.startSession.mock.calls.length, 1);
+      assert.equal(yield* codex.hasSession(threadId), false);
+      assert.equal(yield* claude.hasSession(threadId), true);
+      const sessions = yield* provider.listSessions();
+      assert.deepEqual(
+        sessions
+          .filter((session) => session.threadId === threadId)
+          .map((session) => session.provider),
+        ["claudeAgent"],
+      );
 
       yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
     }).pipe(Effect.provide(NodeServices.layer)),

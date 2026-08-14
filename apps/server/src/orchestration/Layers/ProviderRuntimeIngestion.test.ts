@@ -30,6 +30,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -44,6 +45,12 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
+import {
+  ProviderSessionDirectory,
+  type ProviderRuntimeBinding,
+  type ProviderRuntimeBindingWithMetadata,
+  type ProviderSessionDirectoryShape,
+} from "../../provider/Services/ProviderSessionDirectory.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -198,6 +205,53 @@ function createProviderServiceHarness() {
   };
 }
 
+function createProviderSessionDirectoryHarness() {
+  const bindings = new Map<ThreadId, ProviderRuntimeBinding>();
+  const nowIso = "2026-01-01T00:00:00.000Z";
+  const service: ProviderSessionDirectoryShape = {
+    upsert: (binding) =>
+      Effect.sync(() => {
+        bindings.set(binding.threadId, binding);
+      }),
+    getProvider: (threadId) =>
+      Effect.sync(() => {
+        const binding = bindings.get(threadId);
+        if (!binding) {
+          throw new Error(`No binding for thread '${threadId}'`);
+        }
+        return binding.provider;
+      }),
+    getBinding: (threadId) =>
+      Effect.sync(() => {
+        const binding = bindings.get(threadId);
+        return binding === undefined ? Option.none<ProviderRuntimeBinding>() : Option.some(binding);
+      }),
+    listThreadIds: () =>
+      Effect.sync(() => Array.from(bindings.keys()) as ReadonlyArray<ThreadId>),
+    listBindings: () =>
+      Effect.sync(
+        () =>
+          Array.from(bindings.entries()).map(
+            ([threadId, binding]): ProviderRuntimeBindingWithMetadata => ({
+              ...binding,
+              threadId,
+              lastSeenAt: nowIso,
+            }),
+          ) as ReadonlyArray<ProviderRuntimeBindingWithMetadata>,
+      ),
+  };
+
+  return {
+    service,
+    setBinding: (binding: ProviderRuntimeBinding): void => {
+      bindings.set(binding.threadId, binding);
+    },
+    clearBindings: (): void => {
+      bindings.clear();
+    },
+  };
+}
+
 type ProviderRuntimeTestReadModel = OrchestrationReadModel;
 type ProviderRuntimeTestThread = ProviderRuntimeTestReadModel["threads"][number];
 type ProviderRuntimeTestMessage = ProviderRuntimeTestThread["messages"][number];
@@ -265,7 +319,7 @@ describe("ProviderRuntimeIngestion", () => {
       NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
     }
     const provider = createProviderServiceHarness();
-    const sqlCounter = makeSqlStatementCounter();
+    const sessionDirectory = createProviderSessionDirectoryHarness();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -287,6 +341,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ThreadPlanProgress.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(
+        Layer.succeed(ProviderSessionDirectory, sessionDirectory.service),
+      ),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
@@ -368,6 +425,8 @@ describe("ProviderRuntimeIngestion", () => {
       emitAndDrain,
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
+      setBinding: sessionDirectory.setBinding,
+      clearBindings: sessionDirectory.clearBindings,
       drain,
     };
   }
@@ -4146,5 +4205,104 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("runtime still processed");
+  });
+
+  it("ignores session.exited from a superseded provider instance while a replacement is bound", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const threadId = asThreadId("thread-1");
+    const replacementInstanceId = ProviderInstanceId.make("claudeAgent");
+
+    // The thread is bound to the replacement instance and actively running.
+    harness.setBinding({
+      threadId,
+      provider: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: replacementInstanceId,
+      status: "running",
+    });
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-running-replacement"),
+      threadId,
+      session: {
+        threadId,
+        status: "running",
+        providerName: "claudeAgent",
+        providerInstanceId: replacementInstanceId,
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: now,
+      },
+      createdAt: now,
+    });
+
+    // A stale exit from the superseded codex instance must not stop the
+    // replacement session.
+    harness.emit({
+      type: "session.exited",
+      eventId: asEventId("evt-stale-exit-codex"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      threadId,
+      createdAt: now,
+    });
+    // Marker event processed after the stale exit proves the exit was handled
+    // (and ignored) rather than stuck in the queue.
+    harness.emit({
+      type: "task.started",
+      eventId: asEventId("evt-marker-after-stale-exit"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: replacementInstanceId,
+      threadId,
+      createdAt: now,
+      payload: { taskId: "task-marker", description: "marker", status: "running" },
+    });
+    await waitForThread(harness.readModel, (entry) =>
+      entry.activities?.some((activity) => activity.kind === "task.started"),
+    );
+
+    const afterStaleExit = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "running",
+    );
+    expect(afterStaleExit.session?.status).toBe("running");
+    expect(afterStaleExit.session?.providerInstanceId).toBe(String(replacementInstanceId));
+
+    // An exit from the currently bound instance still stops the session.
+    harness.emit({
+      type: "session.exited",
+      eventId: asEventId("evt-bound-exit-claude"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: replacementInstanceId,
+      threadId,
+      createdAt: now,
+    });
+    await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "stopped",
+    );
+  });
+
+  it("applies session.exited when no binding exists for the thread", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const threadId = asThreadId("thread-1");
+
+    // No persisted binding: a startup must not be broadly rejected, and an
+    // exit cannot be proven stale, so it is applied normally.
+    harness.clearBindings();
+    harness.emit({
+      type: "session.exited",
+      eventId: asEventId("evt-exit-no-binding"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      threadId,
+      createdAt: now,
+    });
+    await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "stopped",
+    );
   });
 });

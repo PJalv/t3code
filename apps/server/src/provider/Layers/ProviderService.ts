@@ -41,7 +41,9 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -55,8 +57,11 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../Errors.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  type ProviderAdapterError,
+  ProviderSessionDirectoryPersistenceError,
+  ProviderValidationError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
@@ -729,26 +734,70 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         // model) re-prepares without stopping, so it relies on this.
         yield* revokeMcpCredential(threadId);
         yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
-        return undefined;
+        return { threadId, prior: undefined, credential: undefined } as const;
       }
-      const credential = yield* issueMcpCredential({ threadId, providerInstanceId });
+      // Capture the committed in-memory config before issuing a candidate so
+      // a failed replacement can restore it exactly. The candidate is issued
+      // alongside the prior credential (never in place of it) and is the only
+      // config exposed while the new adapter starts.
+      const prior = McpProviderSession.readMcpProviderSession(threadId);
+      const credential = yield* McpSessionRegistry.issueActiveMcpCredential({
+        threadId,
+        providerInstanceId,
+      });
       if (credential) {
         yield* Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config));
       }
-      return credential;
+      return { threadId, prior, credential } as const;
     });
+  const rollbackCandidateMcpSession = (prepared: {
+    readonly threadId: ThreadId;
+    readonly prior: McpProviderSession.McpProviderSessionConfig | undefined;
+    readonly credential: McpSessionRegistry.McpIssuedCredential | undefined;
+  }) =>
+    Effect.gen(function* () {
+      if (prepared.credential) {
+        yield* McpSessionRegistry.revokeActiveMcpProviderSession(
+          prepared.credential.config.providerSessionId,
+        );
+      }
+      // Restore the committed in-memory config so the prior session keeps its
+      // credential visible; a fresh start with no prior clears the candidate.
+      if (prepared.prior) {
+        const prior = prepared.prior;
+        yield* Effect.sync(() => McpProviderSession.setMcpProviderSession(prior));
+      } else {
+        yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(prepared.threadId));
+      }
+    });
+  const commitCandidateMcpSession = (prepared: {
+    readonly threadId: ThreadId;
+    readonly credential: McpSessionRegistry.McpIssuedCredential | undefined;
+  }) =>
+    prepared.credential
+      ? McpSessionRegistry.revokeActiveMcpThreadExcept(
+          prepared.threadId,
+          prepared.credential.config.providerSessionId,
+        )
+      : Effect.void;
   const clearMcpSession = (threadId: ThreadId) =>
     McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
       Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
 
   // A session that finished starting but whose publication failed (identity
-  // validation or binding persistence) must not remain live holding provider
-  // resources or an MCP credential. Cleanup failures are logged and swallowed
-  // so the original publication error is preserved for the caller.
+  // validation, binding persistence, or interruption) must not remain live
+  // holding provider resources or an MCP credential. Cleanup failures are
+  // logged and swallowed so the original publication error is preserved for
+  // the caller.
   const rollbackUnpublishedSession = (input: {
     readonly threadId: ThreadId;
     readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+    readonly preparedMcp: {
+      readonly threadId: ThreadId;
+      readonly prior: McpProviderSession.McpProviderSessionConfig | undefined;
+      readonly credential: McpSessionRegistry.McpIssuedCredential | undefined;
+    };
   }) =>
     Effect.gen(function* () {
       yield* input.adapter.stopSession(input.threadId).pipe(
@@ -760,7 +809,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }),
         ),
       );
-      yield* clearMcpSession(input.threadId).pipe(
+      yield* rollbackCandidateMcpSession(input.preparedMcp).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("provider.session.rollback-mcp-clear-failed", {
             threadId: input.threadId,
@@ -883,6 +932,87 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
         runtimePayload: toRuntimePayloadFromSession(session, extra),
       });
+    });
+
+  // Start and recovery publication is serialized per thread: concurrent
+  // starts for the same thread must not interleave candidate issuance,
+  // adapter startup, or binding persistence. Different threads proceed in
+  // parallel because each gets its own permit.
+  const threadStartLocks = yield* SynchronizedRef.make(new Map<ThreadId, Semaphore.Semaphore>());
+  const getThreadStartLock = (threadId: ThreadId) =>
+    SynchronizedRef.modifyEffect(threadStartLocks, (locks) => {
+      const existing = locks.get(threadId);
+      if (existing) return Effect.succeed([existing, locks] as const);
+      return Semaphore.make(1).pipe(
+        Effect.map((lock) => [lock, new Map(locks).set(threadId, lock)] as const),
+      );
+    });
+  const withThreadStartLock = <A, E, R>(
+    threadId: ThreadId,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.flatMap(getThreadStartLock(threadId), (lock) => lock.withPermit(effect));
+
+  /**
+   * Interruption-safe acquire/use/rollback for publishing a newly started
+   * adapter session:
+   *
+   * - acquire: the adapter starts a candidate session; a candidate MCP
+   *   credential was issued alongside any committed credential beforehand and
+   *   is revoked if startup itself fails;
+   * - use: identity validation and binding persistence commit the candidate;
+   *   only then is the superseded committed credential retired;
+   * - release: on failure or interruption before commit, the exact candidate
+   *   session is stopped and only the candidate credential is revoked, with
+   *   the prior in-memory config restored.
+   */
+  const publishStartedSession = (input: {
+    readonly threadId: ThreadId;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+    readonly operation: string;
+    readonly expectedProvider: ProviderDriverKind;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly start: Effect.Effect<ProviderSession, ProviderAdapterError>;
+    readonly upsertExtra?: {
+      readonly modelSelection?: unknown;
+      readonly lastRuntimeEvent?: string;
+      readonly lastRuntimeEventAt?: string;
+    };
+    readonly mismatchIssue: (received: ProviderDriverKind) => string;
+  }): Effect.Effect<
+    ProviderSession,
+    ProviderAdapterError | ProviderValidationError | ProviderSessionDirectoryPersistenceError
+  > =>
+    Effect.gen(function* () {
+      const preparedMcp = yield* prepareMcpSession(input.threadId, input.providerInstanceId);
+      const committed = yield* Ref.make(false);
+      return yield* Effect.acquireUseRelease(
+        input.start.pipe(Effect.onError(() => rollbackCandidateMcpSession(preparedMcp))),
+        (session) =>
+          Effect.gen(function* () {
+            if (session.provider !== input.expectedProvider) {
+              return yield* Effect.fail(
+                toValidationError(input.operation, input.mismatchIssue(session.provider)),
+              );
+            }
+            const sessionWithInstance = {
+              ...session,
+              providerInstanceId: input.providerInstanceId,
+            };
+            yield* upsertSessionBinding(sessionWithInstance, input.threadId, input.upsertExtra);
+            yield* Ref.set(committed, true);
+            yield* commitCandidateMcpSession(preparedMcp);
+            return sessionWithInstance;
+          }),
+        (started, exit) =>
+          Effect.gen(function* () {
+            if (yield* Ref.get(committed)) return;
+            yield* rollbackUnpublishedSession({
+              threadId: input.threadId,
+              adapter: input.adapter,
+              preparedMcp,
+            });
+          }),
+      );
     });
 
   const processRuntimeEvent = (
@@ -1015,84 +1145,68 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.instance_id": bindingInstanceId,
       "provider.thread_id": input.binding.threadId,
     });
-    return yield* Effect.gen(function* () {
-      const adapter = yield* registry.getByInstance(bindingInstanceId);
-      const hasResumeCursor =
-        input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
-      const hasActiveSession = yield* adapter.hasSession(input.binding.threadId);
-      if (hasActiveSession) {
-        const activeSessions = yield* adapter.listSessions();
-        const existing = activeSessions.find(
-          (session) => session.threadId === input.binding.threadId,
-        );
-        if (existing) {
-          yield* upsertSessionBinding(
-            { ...existing, providerInstanceId: bindingInstanceId },
-            input.binding.threadId,
+    return yield* withThreadStartLock(
+      input.binding.threadId,
+      Effect.gen(function* () {
+        const adapter = yield* registry.getByInstance(bindingInstanceId);
+        const hasResumeCursor =
+          input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
+        const hasActiveSession = yield* adapter.hasSession(input.binding.threadId);
+        if (hasActiveSession) {
+          const activeSessions = yield* adapter.listSessions();
+          const existing = activeSessions.find(
+            (session) => session.threadId === input.binding.threadId,
           );
-          yield* analytics.record("provider.session.recovered", {
-            provider: existing.provider,
-            strategy: "adopt-existing",
-            hasResumeCursor: existing.resumeCursor !== undefined,
-          });
-          return { adapter, session: existing } as const;
+          if (existing) {
+            yield* upsertSessionBinding(
+              { ...existing, providerInstanceId: bindingInstanceId },
+              input.binding.threadId,
+            );
+            yield* analytics.record("provider.session.recovered", {
+              provider: existing.provider,
+              strategy: "adopt-existing",
+              hasResumeCursor: existing.resumeCursor !== undefined,
+            });
+            return { adapter, session: existing } as const;
+          }
         }
-      }
 
-      if (!hasResumeCursor) {
-        return yield* toValidationError(
-          input.operation,
-          `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
-        );
-      }
+        if (!hasResumeCursor) {
+          return yield* toValidationError(
+            input.operation,
+            `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
+          );
+        }
 
-      const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
-      const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+        const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+        const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
-      const resumed = yield* adapter
-        .startSession({
-          threadId: input.binding.threadId,
-          provider: input.binding.provider,
-          providerInstanceId: bindingInstanceId,
-          ...(persistedCwd ? { cwd: persistedCwd } : {}),
-          ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
-          ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-          runtimeMode: input.binding.runtimeMode ?? "full-access",
-        })
-        .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
-      if (resumed.provider !== adapter.provider) {
-        yield* rollbackUnpublishedSession({
+        const resumed = yield* publishStartedSession({
           threadId: input.binding.threadId,
           adapter,
+          operation: input.operation,
+          expectedProvider: adapter.provider,
+          providerInstanceId: bindingInstanceId,
+          start: adapter.startSession({
+            threadId: input.binding.threadId,
+            provider: input.binding.provider,
+            providerInstanceId: bindingInstanceId,
+            ...(persistedCwd ? { cwd: persistedCwd } : {}),
+            ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+            ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+            runtimeMode: input.binding.runtimeMode ?? "full-access",
+          }),
+          mismatchIssue: (received) =>
+            `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${received}'.`,
         });
-        return yield* toValidationError(
-          input.operation,
-          `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${resumed.provider}'.`,
-        );
-      }
-
-      yield* Effect.matchEffect(
-        upsertSessionBinding(
-          { ...resumed, providerInstanceId: bindingInstanceId },
-          input.binding.threadId,
-        ),
-        {
-          onFailure: (error) =>
-            rollbackUnpublishedSession({
-              threadId: input.binding.threadId,
-              adapter,
-            }).pipe(Effect.andThen(Effect.fail(error))),
-          onSuccess: () => Effect.void,
-        },
-      );
-      yield* analytics.record("provider.session.recovered", {
-        provider: resumed.provider,
-        strategy: "resume-thread",
-        hasResumeCursor: resumed.resumeCursor !== undefined,
-      });
-      return { adapter, session: resumed } as const;
-    }).pipe(
+        yield* analytics.record("provider.session.recovered", {
+          provider: resumed.provider,
+          strategy: "resume-thread",
+          hasResumeCursor: resumed.resumeCursor !== undefined,
+        });
+        return { adapter, session: resumed } as const;
+      }),
+    ).pipe(
       withMetrics({
         counter: providerSessionsTotal,
         attributes: providerMetricAttributes(input.binding.provider, {
@@ -1278,49 +1392,40 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
-        const session = yield* adapter
-          .startSession({
-            ...input,
-            providerInstanceId: resolvedInstanceId,
-            ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
-            ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-          })
-          .pipe(Effect.onError(() => clearMcpSession(threadId)));
-
-        if (session.provider !== adapter.provider) {
-          yield* rollbackUnpublishedSession({ threadId, adapter });
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
-          );
-        }
-        const sessionWithInstance = {
-          ...session,
-          providerInstanceId: resolvedInstanceId,
-        };
-
-        // Persist the new binding before stopping stale sessions for the same
-        // thread on other provider instances. If publication fails, the new
-        // session is rolled back and prior sessions are left untouched so the
-        // thread keeps its previous provider.
-        yield* Effect.matchEffect(
-          upsertSessionBinding(sessionWithInstance, threadId, {
-            modelSelection: input.modelSelection,
-          }),
-          {
-            onFailure: (error) =>
-              rollbackUnpublishedSession({ threadId, adapter }).pipe(
-                Effect.andThen(Effect.fail(error)),
-              ),
-            onSuccess: () => Effect.void,
-          },
-        );
-        yield* stopStaleSessionsForThread({
+        const sessionWithInstance = yield* withThreadStartLock(
           threadId,
-          currentInstanceId: resolvedInstanceId,
-        });
+          Effect.gen(function* () {
+            const started = yield* publishStartedSession({
+              threadId,
+              adapter,
+              operation: "ProviderService.startSession",
+              expectedProvider: resolvedProvider,
+              providerInstanceId: resolvedInstanceId,
+              start: adapter.startSession({
+                ...input,
+                providerInstanceId: resolvedInstanceId,
+                ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+                ...(effectiveResumeCursor !== undefined
+                  ? { resumeCursor: effectiveResumeCursor }
+                  : {}),
+              }),
+              upsertExtra: {
+                modelSelection: input.modelSelection,
+              },
+              mismatchIssue: (received) =>
+                `Adapter/provider mismatch: requested '${resolvedProvider}', received '${received}'.`,
+            });
+            // Persist the new binding before stopping stale sessions for the
+            // same thread on other provider instances. Cleanup runs only after
+            // the binding committed and its failures are isolated from the new
+            // binding, so a cleanup error never rolls back the replacement.
+            yield* stopStaleSessionsForThread({
+              threadId,
+              currentInstanceId: resolvedInstanceId,
+            });
+            return started;
+          }),
+        );
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,
