@@ -17,10 +17,12 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as NodeAssert from "node:assert/strict";
 
@@ -3047,4 +3049,456 @@ describe("PiAdapter", () => {
       }),
     );
   });
+
+  it.effect("emits exactly one graceful session.exited on explicit stop", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const accepted = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "hello",
+          modelSelection,
+        });
+        yield* adapter.stopSession(ThreadId.make("thread"));
+        const events = Array.from(yield* Fiber.join(collected));
+        const exits = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+            event.type === "session.exited",
+        );
+        assert.equal(exits.length, 1);
+        assert.equal(events.at(-1)?.type, "session.exited");
+        assert.equal(exits[0]?.payload.exitKind, "graceful");
+        assert.equal(exits[0]?.payload.reason, "Session stopped.");
+        assert.equal(exits[0]?.payload.recoverable, false);
+        assert.equal(exits[0]?.turnId, undefined);
+        const turnEvents = events.filter((event) => event.turnId === accepted.turnId);
+        assert.deepEqual(
+          turnEvents.map((event) => event.type),
+          ["turn.started", "turn.completed"],
+        );
+        assert.equal(
+          (turnEvents[1] as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>).payload
+            .state,
+          "interrupted",
+        );
+        assert.equal(
+          events.indexOf(turnEvents[1]!) < events.indexOf(exits[0]!),
+          true,
+        );
+        assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+        assert.equal(h.client.calls.close, 1);
+      }),
+    );
+  });
+
+  it.effect("emits one error session.exited when the idle stream dies with background agents", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const parentSettled = yield* Deferred.make<void>();
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.tap((event) =>
+            event.type === "turn.completed"
+              ? Deferred.succeed(parentSettled, undefined)
+              : Effect.void,
+          ),
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "delegate this",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "bg-1",
+            toolName: "subagent_spawn",
+            args: { name: "Background review", harness: "pi" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "bg-1",
+            toolName: "subagent_spawn",
+            result: {
+              content: [{ type: "text", text: "Spawned bg-1" }],
+              details: { id: "bg-1", title: "Background review", harness: "pi" },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Deferred.await(parentSettled);
+        yield* Queue.shutdown(h.client.input);
+        const events = Array.from(yield* Fiber.join(collected));
+        const exits = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+            event.type === "session.exited",
+        );
+        const taskCompletions = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        assert.equal(exits.length, 1);
+        assert.equal(events.at(-1)?.type, "session.exited");
+        assert.equal(exits[0]?.payload.exitKind, "error");
+        assert.equal(exits[0]?.payload.reason, "Pi session exited unexpectedly.");
+        assert.equal(taskCompletions.length, 1);
+        assert.equal(taskCompletions[0]?.payload.status, "failed");
+        assert.equal(String(taskCompletions[0]?.payload.taskId), "pi-subagent:bg-1");
+        assert.equal(
+          events.indexOf(taskCompletions[0]!) < events.indexOf(exits[0]!),
+          true,
+        );
+        assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+        assert.equal(h.client.calls.close, 1);
+      }),
+    );
+  });
+
+  it.effect("fails the active turn and emits an error session.exited when the stream dies mid-turn", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const accepted = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "hello",
+          modelSelection,
+        });
+        yield* Queue.shutdown(h.client.input);
+        const events = Array.from(yield* Fiber.join(collected));
+        const exits = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+            event.type === "session.exited",
+        );
+        assert.equal(exits.length, 1);
+        assert.equal(events.at(-1)?.type, "session.exited");
+        assert.equal(exits[0]?.payload.exitKind, "error");
+        const turnEvents = events.filter((event) => event.turnId === accepted.turnId);
+        assert.deepEqual(
+          turnEvents.map((event) => event.type),
+          ["turn.started", "runtime.error", "turn.completed"],
+        );
+        assert.equal(
+          (turnEvents.at(-1) as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>).payload
+            .state,
+          "failed",
+        );
+        assert.equal(
+          events.indexOf(turnEvents.at(-1)!) < events.indexOf(exits[0]!),
+          true,
+        );
+        assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+        assert.equal(h.client.calls.close, 1);
+      }),
+    );
+  });
+
+  it.effect("terminalizes background agent, workflow, and extension tasks before session.exited", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const parentSettled = yield* Deferred.make<void>();
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.tap((event) =>
+            event.type === "turn.completed"
+              ? Deferred.succeed(parentSettled, undefined)
+              : Effect.void,
+          ),
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "delegate everything",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "agent-bg",
+            toolName: "Agent",
+            args: {
+              description: "Background hello",
+              subagent_type: "luna",
+              run_in_background: true,
+              prompt: "Reply later",
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "agent-bg",
+            toolName: "Agent",
+            result: {
+              content: [{ type: "text", text: "Agent started in background." }],
+              details: {
+                displayName: "luna",
+                description: "Background hello",
+                subagentType: "luna",
+                status: "background",
+                agentId: "agent-bg-id",
+              },
+            },
+            isError: false,
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "wf-1",
+            toolName: "workflow",
+            args: { script: "return {}" },
+          },
+          {
+            type: "tool_execution_update",
+            toolCallId: "wf-1",
+            toolName: "workflow",
+            partialResult: {
+              content: [{ type: "text", text: "running" }],
+              details: {
+                runId: "run-1",
+                name: "Audit",
+                phases: [{ title: "Scan" }],
+                agents: [{ index: 0, label: "Scanner", state: "running" }],
+              },
+            },
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "subagent-1",
+            toolName: "subagent",
+            args: { tasks: [{ agent: "scout", task: "Find the auth flow" }] },
+          },
+          {
+            type: "tool_execution_update",
+            toolCallId: "subagent-1",
+            toolName: "subagent",
+            partialResult: {
+              content: [{ type: "text", text: "running" }],
+              details: {
+                mode: "parallel",
+                agentScope: "user",
+                projectAgentsDir: null,
+                results: [
+                  {
+                    agent: "scout",
+                    agentSource: "user",
+                    task: "Find the auth flow",
+                    exitCode: -1,
+                    messages: [],
+                    stderr: "",
+                    model: "openai/gpt-5",
+                    usage: {
+                      input: 30,
+                      output: 4,
+                      cacheRead: 20,
+                      cacheWrite: 0,
+                      cost: 0,
+                      contextTokens: 34,
+                      turns: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Deferred.await(parentSettled);
+        yield* Queue.shutdown(h.client.input);
+        const events = Array.from(yield* Fiber.join(collected));
+        const exits = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+            event.type === "session.exited",
+        );
+        const taskCompletions = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        // One async Agent task, one workflow coordinator, one workflow agent,
+        // and one reference-extension subagent task.
+        assert.equal(taskCompletions.length, 4);
+        assert.equal(exits.length, 1);
+        assert.equal(events.at(-1)?.type, "session.exited");
+        const lastTaskIndex = Math.max(...taskCompletions.map((event) => events.indexOf(event)));
+        assert.equal(lastTaskIndex < events.indexOf(exits[0]!), true);
+        for (const completed of taskCompletions) assert.equal(completed.payload.status, "failed");
+        assert.deepEqual(
+          taskCompletions.map((event) => String(event.payload.taskId)).sort(),
+          [
+            "pi-subagent:agent-bg",
+            "pi-subagent:subagent-1:0",
+            "pi-workflow:run-1:0",
+            "pi-workflow:run-1:coordinator",
+          ],
+        );
+      }),
+    );
+  });
+
+  it.effect("does not duplicate task completion when map keys alias the same agent", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const parentSettled = yield* Deferred.make<void>();
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.tap((event) =>
+            event.type === "turn.completed"
+              ? Deferred.succeed(parentSettled, undefined)
+              : Effect.void,
+          ),
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "delegate twice",
+          modelSelection,
+        });
+        // Two distinct tool calls report the same extension agent id. The
+        // by-id map keeps only the newest task; the older task survives only
+        // in the tool-call map. Identity-based close collection must still
+        // terminalize each unique task exactly once.
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "tool_execution_start",
+            toolCallId: "call-a",
+            toolName: "subagent_spawn",
+            args: { name: "Review A", harness: "pi" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "call-a",
+            toolName: "subagent_spawn",
+            result: {
+              content: [{ type: "text", text: "Spawned A" }],
+              details: { id: "shared-id", title: "Review A", harness: "pi" },
+            },
+            isError: false,
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "call-b",
+            toolName: "subagent_spawn",
+            args: { name: "Review B", harness: "pi" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "call-b",
+            toolName: "subagent_spawn",
+            result: {
+              content: [{ type: "text", text: "Spawned B" }],
+              details: { id: "shared-id", title: "Review B", harness: "pi" },
+            },
+            isError: false,
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Deferred.await(parentSettled);
+        yield* Queue.shutdown(h.client.input);
+        const events = Array.from(yield* Fiber.join(collected));
+        const taskCompletions = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+            event.type === "task.completed",
+        );
+        assert.equal(taskCompletions.length, 2);
+        assert.equal(
+          new Set(taskCompletions.map((event) => String(event.payload.taskId))).size,
+          2,
+        );
+        assert.deepEqual(
+          taskCompletions.map((event) => String(event.payload.taskId)).sort(),
+          ["pi-subagent:call-a", "pi-subagent:call-b"],
+        );
+        assert.equal(
+          events.filter((event) => event.type === "session.exited").length,
+          1,
+        );
+      }),
+    );
+  });
+
+  it.effect("does not duplicate session.exited when stop is repeated", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.stopSession(ThreadId.make("thread"));
+        yield* adapter.stopSession(ThreadId.make("thread"));
+        yield* adapter.stopSession(ThreadId.make("thread"));
+        const events = Array.from(yield* Fiber.join(collected));
+        assert.equal(
+          events.filter((event) => event.type === "session.exited").length,
+          1,
+        );
+        assert.equal(events.at(-1)?.type, "session.exited");
+        assert.equal(h.client.calls.close, 1);
+        assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+      }),
+    );
+  });
+
+  it.effect("completes streamEvents when the adapter scope closes", () =>
+    Effect.gen(function* () {
+      const h = makeHarness();
+      const scope = yield* Scope.make();
+      let scopeClosed = false;
+      try {
+        const adapter = yield* makePiAdapter({
+          binaryPath: "pi",
+          providerInstanceId: instanceId,
+          stateDir: h.stateDir,
+          attachmentsDir: h.attachmentsDir,
+          makeRpcClient: h.makeClient,
+        }).pipe(
+          Effect.provideService(Scope.Scope, scope),
+          Effect.provide(NodeServices.layer),
+        );
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("pi"),
+          providerInstanceId: instanceId,
+          threadId: ThreadId.make("thread"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        // Subscribe while the queue is alive, then close the adapter scope.
+        // The finalizer stops the session and shuts down the event queue, so
+        // the consumer must terminate instead of hanging on an abandoned queue.
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Scope.close(scope, Exit.void);
+        scopeClosed = true;
+        const exit = yield* Fiber.await(eventsFiber).pipe(Effect.timeout("1 second"));
+        assert.equal(Exit.hasInterrupts(exit), true);
+        assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+        assert.equal(h.client.calls.close, 1);
+      } finally {
+        if (!scopeClosed) yield* Scope.close(scope, Exit.void).pipe(Effect.ignore);
+      }
+    }),
+  );
 });
