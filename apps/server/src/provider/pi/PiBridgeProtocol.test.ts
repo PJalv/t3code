@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
 import * as NodeAssert from "node:assert/strict";
 
 import {
@@ -18,6 +19,7 @@ import {
 } from "./PiBridgeProtocol.ts";
 
 const assert: typeof NodeAssert = NodeAssert;
+const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 type Handler = (data: any, ctx?: any) => any;
 
@@ -105,7 +107,7 @@ describe("PiBridgeProtocol", () => {
         },
       ]) {
         const exit = yield* decodePiBridgeNotification(
-          PI_BRIDGE_PREFIX + JSON.stringify(payload),
+          PI_BRIDGE_PREFIX + encodeUnknownJson(payload),
         ).pipe(Effect.exit);
         assert.equal(Exit.isFailure(exit), true);
       }
@@ -191,14 +193,15 @@ describe("PiBridgeProtocol", () => {
     await h.emitHook("session_start");
     const command = h.commands.get("t3code-control");
     assert.ok(command);
-    const encode = (request: unknown) => Buffer.from(JSON.stringify(request)).toString("base64url");
+    const encode = (request: unknown) =>
+      Buffer.from(encodeUnknownJson(request)).toString("base64url");
     await command.handler(
       encode({ version: 1, operation: "stop-subagent", requestId: "stop-1", agentId: "agent-1" }),
       h.ctx,
     );
     protocolVersion = 3;
     h.pi.events.emit("subagents:ready", {});
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Effect.runPromise(Effect.yieldNow);
     await command.handler(
       encode({ version: 1, operation: "stop-subagent", requestId: "stop-2", agentId: "agent-2" }),
       h.ctx,
