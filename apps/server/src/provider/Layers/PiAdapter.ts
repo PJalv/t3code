@@ -687,11 +687,39 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     );
   });
 
-  const close = Effect.fn("PiAdapter.close")(function* (ctx: SessionContext) {
+  const collectActiveTaskEntries = (ctx: SessionContext) => {
+    // agentTasksByToolCall and agentTasksById can hold the same task under two
+    // keys (tool call id and extension agent id), and a stale tool-call entry
+    // can outlive the agent-id mapping when the extension reuses an id. Always
+    // dedupe by task identity so one task produces exactly one terminal event.
+    const seen = new Set<PiAgentTask>();
+    const agentTasks: PiAgentTask[] = [];
+    const collectAgentTask = (task: PiAgentTask) => {
+      if (seen.has(task)) return;
+      seen.add(task);
+      agentTasks.push(task);
+    };
+    for (const task of ctx.agentTasksByToolCall.values()) collectAgentTask(task);
+    for (const task of ctx.agentTasksById.values()) collectAgentTask(task);
+    const workflowTasks = [...ctx.workflowTasks.values()].filter(
+      (task) => task.state === "running",
+    );
+    const extensionSubagentTasks = [...ctx.extensionSubagentTasks.values()].filter(
+      (task) => task.state === "running",
+    );
+    return { agentTasks, workflowTasks, extensionSubagentTasks };
+  };
+
+  const close = Effect.fn("PiAdapter.close")(function* (
+    ctx: SessionContext,
+    mode: "explicit" | "unexpected" = "explicit",
+  ) {
     yield* Effect.uninterruptible(
       Effect.gen(function* () {
         if (ctx.stopped || ctx.closing) return;
         ctx.closing = true;
+        // Cancel interactive extension inputs before the session disappears so
+        // the client never waits on a request that can no longer be answered.
         yield* Effect.forEach(
           [...ctx.pendingUserInputs],
           ([requestId, pending]) =>
@@ -702,13 +730,78 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         );
         const turn = ctx.activeTurn;
         if (turn && !turn.terminal) {
-          const completedEvent = {
-            type: "turn.completed",
-            ...(yield* base(ctx, turn)),
-            payload: { state: "interrupted", stopReason: "abort" },
-          } as const;
-          yield* publishTerminal(ctx, turn, [completedEvent], "ready");
+          if (mode === "explicit") {
+            // The user (or the adapter scope) asked to stop: report the turn
+            // as interrupted, never as a transport failure.
+            const completedEvent = {
+              type: "turn.completed",
+              ...(yield* base(ctx, turn)),
+              payload: { state: "interrupted", stopReason: "abort" },
+            } as const;
+            yield* publishTerminal(ctx, turn, [completedEvent], "ready");
+          } else {
+            // The RPC process or stream died under the session: the turn did
+            // not finish and must surface as a failed transport turn.
+            yield* failActive(ctx, "Pi RPC event stream ended unexpectedly.", undefined, true);
+          }
         }
+        const taskStatus = mode === "explicit" ? "stopped" : "failed";
+        const taskSummary =
+          mode === "explicit" ? "Session stopped." : "Session exited unexpectedly.";
+        const { agentTasks, workflowTasks, extensionSubagentTasks } =
+          collectActiveTaskEntries(ctx);
+        for (const task of agentTasks) {
+          yield* offer({
+            type: "task.completed",
+            ...(yield* base(ctx, turn)),
+            payload: {
+              taskId: task.taskId,
+              status: taskStatus,
+              summary: taskSummary,
+              ...agentTaskLinkage(task),
+            },
+          });
+        }
+        for (const task of workflowTasks) {
+          yield* offer({
+            type: "task.completed",
+            ...(yield* base(ctx, turn)),
+            payload: { taskId: task.taskId, status: taskStatus, summary: taskSummary },
+          });
+        }
+        for (const task of extensionSubagentTasks) {
+          yield* offer({
+            type: "task.completed",
+            ...(yield* base(ctx, turn)),
+            payload: {
+              taskId: task.taskId,
+              status: taskStatus,
+              summary: taskSummary,
+              taskType: "subagent",
+              title: task.title,
+              role: task.role,
+              ...(task.model ? { model: task.model } : {}),
+              toolUseId: task.toolUseId,
+            },
+          });
+        }
+        ctx.agentTasksByToolCall.clear();
+        ctx.agentTasksById.clear();
+        ctx.workflowTasks.clear();
+        ctx.extensionSubagentTasks.clear();
+        // Emit exactly one canonical exit event, after every terminal turn and
+        // task event, so runtime ingestion can stop the session and clear
+        // stale active-turn, plan, and background-liveness state.
+        yield* offer({
+          type: "session.exited",
+          ...(yield* base(ctx)),
+          payload: {
+            reason:
+              mode === "explicit" ? "Session stopped." : "Pi session exited unexpectedly.",
+            recoverable: false,
+            exitKind: mode === "explicit" ? "graceful" : "error",
+          },
+        });
         const { activeTurnId: _, ...session } = ctx.session;
         ctx.session = { ...session, status: "closed", updatedAt: yield* now };
         yield* ctx.client.close().pipe(Effect.ignore);
@@ -1482,7 +1575,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   ) {
     if ("_tag" in native && native._tag === "PiRpcProtocolFailureEvent") {
       yield* failActive(ctx, String(native.detail), native);
-      yield* close(ctx);
+      yield* close(ctx, "unexpected");
       return;
     }
     if ("_tag" in native && native._tag === "PiRpcOutputLineEvent") {
@@ -1690,7 +1783,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       }
       if (!piStateMatchesCursor(state.value, ctx.cursor)) {
         yield* failActive(ctx, "Pi session identity drifted during settlement.", native);
-        yield* close(ctx);
+        yield* close(ctx, "unexpected");
         return;
       }
       if (state.value.isStreaming === true) return;
@@ -1962,10 +2055,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               Effect.suspend(() =>
                 ctx.closing || ctx.stopped
                   ? Effect.void
-                  : failActive(ctx, "Pi RPC event stream ended unexpectedly.").pipe(
-                      Effect.andThen(close(ctx)),
-                      Effect.orDie,
-                    ),
+                  : close(ctx, "unexpected").pipe(Effect.orDie),
               ),
             ),
             Effect.orDie,
@@ -2123,7 +2213,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         if (Result.isFailure(prompted)) {
           const reusable = isPiRpcCommandError(prompted.failure);
           yield* failActive(ctx, "Pi prompt failed.", undefined, !reusable);
-          if (!reusable) yield* close(ctx);
+          if (!reusable) yield* close(ctx, "unexpected");
           return yield* request("prompt", prompted.failure);
         }
         if (ctx.closing || ctx.stopped || sessions.get(input.threadId) !== ctx) {
@@ -2227,10 +2317,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         return yield* requestMessage("extension_ui_response", "Pi input request already resolved.");
     });
   const stopSession = (threadId: ThreadId) =>
-    sessions.has(threadId) ? close(sessions.get(threadId)!) : Effect.void;
+    sessions.has(threadId) ? close(sessions.get(threadId)!, "explicit") : Effect.void;
   const stopAll = () =>
     Effect.forEach([...sessions.keys()], stopSession, { discard: true, concurrency: "unbounded" });
-  yield* Effect.addFinalizer(() => stopAll().pipe(Effect.ignore));
+  yield* Effect.addFinalizer(() =>
+    stopAll().pipe(Effect.ignore, Effect.ensuring(Queue.shutdown(events))),
+  );
 
   return {
     provider: PROVIDER,
