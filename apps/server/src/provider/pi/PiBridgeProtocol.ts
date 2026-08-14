@@ -195,9 +195,9 @@ export default function t3codePiBridge(pi) {
     });
   };
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
-    if (ctx.mode === "rpc") await ping();
+    if (ctx.mode === "rpc") void ping();
   });
 
   pi.on("tool_result", (event, ctx) => {
