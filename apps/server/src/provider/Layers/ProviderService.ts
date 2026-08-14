@@ -742,6 +742,35 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
 
+  // A session that finished starting but whose publication failed (identity
+  // validation or binding persistence) must not remain live holding provider
+  // resources or an MCP credential. Cleanup failures are logged and swallowed
+  // so the original publication error is preserved for the caller.
+  const rollbackUnpublishedSession = (input: {
+    readonly threadId: ThreadId;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+  }) =>
+    Effect.gen(function* () {
+      yield* input.adapter.stopSession(input.threadId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider.session.rollback-stop-failed", {
+            threadId: input.threadId,
+            provider: input.adapter.provider,
+            cause,
+          }),
+        ),
+      );
+      yield* clearMcpSession(input.threadId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider.session.rollback-mcp-clear-failed", {
+            threadId: input.threadId,
+            provider: input.adapter.provider,
+            cause,
+          }),
+        ),
+      );
+    });
+
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
       Effect.tap((canonicalEvent) =>
@@ -1033,16 +1062,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         })
         .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
       if (resumed.provider !== adapter.provider) {
-        yield* clearMcpSession(input.binding.threadId);
+        yield* rollbackUnpublishedSession({
+          threadId: input.binding.threadId,
+          adapter,
+        });
         return yield* toValidationError(
           input.operation,
           `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${resumed.provider}'.`,
         );
       }
 
-      yield* upsertSessionBinding(
-        { ...resumed, providerInstanceId: bindingInstanceId },
-        input.binding.threadId,
+      yield* Effect.matchEffect(
+        upsertSessionBinding(
+          { ...resumed, providerInstanceId: bindingInstanceId },
+          input.binding.threadId,
+        ),
+        {
+          onFailure: (error) =>
+            rollbackUnpublishedSession({
+              threadId: input.binding.threadId,
+              adapter,
+            }).pipe(Effect.andThen(Effect.fail(error))),
+          onSuccess: () => Effect.void,
+        },
       );
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
@@ -1248,7 +1290,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           .pipe(Effect.onError(() => clearMcpSession(threadId)));
 
         if (session.provider !== adapter.provider) {
-          yield* clearMcpSession(threadId);
+          yield* rollbackUnpublishedSession({ threadId, adapter });
           return yield* toValidationError(
             "ProviderService.startSession",
             `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
@@ -1259,12 +1301,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: resolvedInstanceId,
         };
 
+        // Persist the new binding before stopping stale sessions for the same
+        // thread on other provider instances. If publication fails, the new
+        // session is rolled back and prior sessions are left untouched so the
+        // thread keeps its previous provider.
+        yield* Effect.matchEffect(
+          upsertSessionBinding(sessionWithInstance, threadId, {
+            modelSelection: input.modelSelection,
+          }),
+          {
+            onFailure: (error) =>
+              rollbackUnpublishedSession({ threadId, adapter }).pipe(
+                Effect.andThen(Effect.fail(error)),
+              ),
+            onSuccess: () => Effect.void,
+          },
+        );
         yield* stopStaleSessionsForThread({
           threadId,
           currentInstanceId: resolvedInstanceId,
-        });
-        yield* upsertSessionBinding(sessionWithInstance, threadId, {
-          modelSelection: input.modelSelection,
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,

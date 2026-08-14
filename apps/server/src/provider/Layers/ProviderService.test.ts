@@ -52,6 +52,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
+  ProviderSessionDirectoryPersistenceError,
   ProviderUnsupportedError,
   ProviderValidationError,
   type ProviderAdapterError,
@@ -60,6 +61,7 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
+import type { ProviderRuntimeBinding } from "../Services/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive } from "./ProviderService.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
@@ -73,6 +75,11 @@ import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { EnvironmentId } from "@t3tools/contracts";
+import { HttpServer } from "effect/unstable/http";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
 const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
@@ -4305,3 +4312,403 @@ describe("agent browser access", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
+const fakeMcpHttpServer = HttpServer.HttpServer.of({
+  address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 43123 },
+  serve: (() => Effect.void) as HttpServer.HttpServer["Service"]["serve"],
+});
+const fakeMcpEnvironment = ServerEnvironment.ServerEnvironment.of({
+  getEnvironmentId: Effect.succeed(EnvironmentId.make("test-environment")),
+  getDescriptor: Effect.die("unused"),
+});
+
+/**
+ * Builds an isolated ProviderService harness for publication-rollback tests.
+ *
+ * The directory `upsert` can be made to fail per binding, and the codex
+ * adapter `stopSession` can be forced to fail so cleanup failure behavior is
+ * observable. The real `McpSessionRegistry` layer is wired in so MCP session
+ * state can be asserted before and after a rollback.
+ */
+const makePublicationRollbackHarness = (options?: {
+  readonly failUpsert?: (binding: ProviderRuntimeBinding) => boolean;
+  readonly stopSessionError?: ProviderAdapterError;
+}) => {
+  const codex = makeFakeCodexAdapter();
+  const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
+  if (options?.stopSessionError !== undefined) {
+    codex.stopSession.mockImplementation(() => Effect.fail(options.stopSessionError!));
+  }
+  const registry = makeAdapterRegistryMock({
+    [CODEX_DRIVER]: codex.adapter,
+    [CLAUDE_AGENT_DRIVER]: claude.adapter,
+  });
+  const providerAdapterLayer = Layer.succeed(
+    ProviderAdapterRegistry.ProviderAdapterRegistry,
+    registry,
+  );
+  const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+  let resolvedDirectoryLayer = directoryLayer;
+  if (options?.failUpsert !== undefined) {
+    const failure = new ProviderSessionDirectoryPersistenceError({
+      operation: "ProviderSessionDirectory.upsert",
+      detail: "simulated directory upsert failure",
+    });
+    resolvedDirectoryLayer = Layer.effect(
+      ProviderSessionDirectory.ProviderSessionDirectory,
+      Effect.gen(function* () {
+        const base = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        return {
+          ...base,
+          upsert: (binding: ProviderRuntimeBinding) =>
+            options.failUpsert!(binding) ? Effect.fail(failure) : base.upsert(binding),
+        };
+      }),
+    ).pipe(Layer.provide(directoryLayer));
+  }
+  const providerLayer = Layer.mergeAll(
+    makeProviderServiceLive().pipe(
+      Layer.provide(providerAdapterLayer),
+      Layer.provide(resolvedDirectoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+      Layer.provide(McpSessionRegistry.layer),
+    ),
+    resolvedDirectoryLayer,
+    runtimeRepositoryLayer,
+    NodeServices.layer,
+  ).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(HttpServer.HttpServer, fakeMcpHttpServer),
+        Layer.succeed(ServerEnvironment.ServerEnvironment, fakeMcpEnvironment),
+      ),
+    ),
+  );
+  return { codex, claude, layer: providerLayer };
+};
+
+it.effect(
+  "rolls back a newly started session when the adapter identity mismatches",
+  () =>
+    Effect.gen(function* () {
+      const { codex, layer } = makePublicationRollbackHarness();
+      const threadId = asThreadId("thread-identity-mismatch");
+      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+        Effect.sync(() => {
+          const now = "2026-01-01T00:00:00.000Z";
+          return {
+            provider: CLAUDE_AGENT_DRIVER,
+            status: "ready",
+            threadId: input.threadId,
+            runtimeMode: input.runtimeMode,
+            cwd: input.cwd ?? process.cwd(),
+            createdAt: now,
+            updatedAt: now,
+          } satisfies ProviderSession;
+        }),
+      );
+
+      const failure = yield* Effect.flip(
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          return yield* provider.startSession(threadId, {
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: codexInstanceId,
+            threadId,
+            runtimeMode: "full-access",
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      assert.instanceOf(failure, ProviderValidationError);
+      assert.include(failure.issue, "Adapter/provider mismatch");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* codex.hasSession(threadId), false);
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "rolls back a newly started session and preserves the original error when binding persistence fails",
+  () =>
+    Effect.gen(function* () {
+      const { codex, layer } = makePublicationRollbackHarness({
+        failUpsert: () => true,
+      });
+      const threadId = asThreadId("thread-upsert-failure");
+
+      const failure = yield* Effect.flip(
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          return yield* provider.startSession(threadId, {
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: codexInstanceId,
+            threadId,
+            runtimeMode: "full-access",
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
+      assert.include(failure.detail, "simulated directory upsert failure");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* codex.hasSession(threadId), false);
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "leaves prior sessions untouched until the new binding succeeds and retries cleanly",
+  () =>
+    Effect.gen(function* () {
+      let claudeUpsertAttempts = 0;
+      const { codex, claude, layer } = makePublicationRollbackHarness({
+        failUpsert: (binding) => {
+          if (binding.provider !== CLAUDE_AGENT_DRIVER) return false;
+          claudeUpsertAttempts += 1;
+          return claudeUpsertAttempts === 1;
+        },
+      });
+      const threadId = asThreadId("thread-replacement-rollback");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(
+        Effect.provide(runtimeServices),
+      );
+
+      const codexSession = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      assert.equal(codexSession.provider, "codex");
+      codex.stopSession.mockClear();
+
+      // First replacement attempt: the new claude session starts, but its
+      // binding cannot be persisted. The new session must be rolled back and
+      // the prior codex session must not be stopped.
+      const failure = yield* Effect.flip(
+        provider.startSession(threadId, {
+          provider: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: claudeAgentInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        }),
+      );
+      assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
+      assert.deepEqual(claude.stopSession.mock.calls, [[threadId]]);
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+      assert.equal(yield* codex.hasSession(threadId), true);
+
+      // Retry now that the binding succeeds: the replacement is published and
+      // the stale codex session is stopped only after publication.
+      const claudeSession = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      assert.equal(claudeSession.provider, "claudeAgent");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* codex.hasSession(threadId), false);
+
+      const sessions = yield* provider.listSessions();
+      assert.deepEqual(
+        sessions
+          .filter((session) => session.threadId === threadId)
+          .map((session) => session.provider),
+        ["claudeAgent"],
+      );
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "preserves the original error when rollback cleanup itself fails",
+  () =>
+    Effect.gen(function* () {
+      const { codex, layer } = makePublicationRollbackHarness({
+        failUpsert: () => true,
+        stopSessionError: new ProviderAdapterRequestError({
+          provider: String(CODEX_DRIVER),
+          method: "stopSession",
+          detail: "simulated rollback stop failure",
+        }),
+      });
+      const threadId = asThreadId("thread-cleanup-failure");
+
+      const failure = yield* Effect.flip(
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          return yield* provider.startSession(threadId, {
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: codexInstanceId,
+            threadId,
+            runtimeMode: "full-access",
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
+      assert.include(failure.detail, "simulated directory upsert failure");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "keeps a replacement session live when stale-session cleanup fails after binding",
+  () =>
+    Effect.gen(function* () {
+      const { codex, claude, layer } = makePublicationRollbackHarness();
+      const threadId = asThreadId("thread-stale-cleanup-failure");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(
+        Effect.provide(runtimeServices),
+      );
+
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      codex.stopSession.mockImplementation(() =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: String(CODEX_DRIVER),
+            method: "stopSession",
+            detail: "simulated stale stop failure",
+          }),
+        ),
+      );
+
+      const claudeSession = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(claudeSession.provider, "claudeAgent");
+      assert.equal(yield* claude.hasSession(threadId), true);
+      assert.equal(codex.stopSession.mock.calls.length, 1);
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "rolls back a resumed session when recovery identity mismatches",
+  () =>
+    Effect.gen(function* () {
+      const { codex, layer } = makePublicationRollbackHarness();
+      const threadId = asThreadId("thread-recovery-mismatch");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(
+        Effect.provide(runtimeServices),
+      );
+
+      const initial = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      assert.equal(initial.provider, "codex");
+
+      yield* codex.stopAll();
+      codex.startSession.mockClear();
+      codex.stopSession.mockClear();
+      codex.startSession.mockImplementation((input: ProviderSessionStartInput) =>
+        Effect.sync(() => {
+          const now = "2026-01-01T00:00:00.000Z";
+          return {
+            provider: CLAUDE_AGENT_DRIVER,
+            status: "ready",
+            threadId: input.threadId,
+            runtimeMode: input.runtimeMode,
+            cwd: input.cwd ?? process.cwd(),
+            createdAt: now,
+            updatedAt: now,
+          } satisfies ProviderSession;
+        }),
+      );
+
+      const failure = yield* Effect.flip(
+        provider.sendTurn({
+          threadId,
+          input: "resume",
+          attachments: [],
+        }),
+      );
+
+      assert.instanceOf(failure, ProviderValidationError);
+      assert.include(failure.issue, "Adapter/provider mismatch while recovering");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* codex.hasSession(threadId), false);
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "rolls back a resumed session and preserves the original error when recovery binding persistence fails",
+  () =>
+    Effect.gen(function* () {
+      let failUpserts = false;
+      const { codex, layer } = makePublicationRollbackHarness({
+        failUpsert: () => failUpserts,
+      });
+      const threadId = asThreadId("thread-recovery-upsert-failure");
+      const scope = yield* Scope.make();
+      const runtimeServices = yield* Layer.build(layer).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(
+        Effect.provide(runtimeServices),
+      );
+
+      const initial = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      assert.equal(initial.provider, "codex");
+
+      yield* codex.stopAll();
+      codex.startSession.mockClear();
+      codex.stopSession.mockClear();
+      failUpserts = true;
+
+      const failure = yield* Effect.flip(
+        provider.sendTurn({
+          threadId,
+          input: "resume",
+          attachments: [],
+        }),
+      );
+
+      assert.instanceOf(failure, ProviderSessionDirectoryPersistenceError);
+      assert.include(failure.detail, "simulated directory upsert failure");
+      assert.deepEqual(codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(yield* codex.hasSession(threadId), false);
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+
+      yield* Scope.close(scope, Exit.void).pipe(Effect.exit);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
