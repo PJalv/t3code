@@ -90,6 +90,24 @@ describe("PiBridgeProtocol", () => {
         success: true,
       });
       assert.equal(yield* decodePiBridgeNotification("ordinary extension message"), undefined);
+      const progress = yield* encodePiBridgeNotification({
+        version: 1,
+        kind: "task.progress",
+        invocationId: "call-1",
+        agentId: "agent-1",
+        title: "Live agent",
+        role: "general-purpose",
+        usage: { totalTokens: 42, inputTokens: 30, outputTokens: 12, toolUses: 3 },
+      });
+      assert.deepEqual(yield* decodePiBridgeNotification(progress), {
+        version: 1,
+        kind: "task.progress",
+        invocationId: "call-1",
+        agentId: "agent-1",
+        title: "Live agent",
+        role: "general-purpose",
+        usage: { totalTokens: 42, inputTokens: 30, outputTokens: 12, toolUses: 3 },
+      });
     }),
   );
 
@@ -175,6 +193,72 @@ describe("PiBridgeProtocol", () => {
       summary: "Done",
       usage: { totalTokens: 14, inputTokens: 10, outputTokens: 4, toolUses: 3, durationMs: 20 },
     });
+  });
+
+  it("streams changed live usage from the public cross-package manager", async () => {
+    process.env.T3CODE_PI_BRIDGE = "1";
+    process.env.T3CODE_PI_BRIDGE_PROGRESS_INTERVAL_MS = "100";
+    const h = makeFakePi();
+    h.pi.events.on("subagents:rpc:ping", (request: any) => {
+      h.pi.events.emit(`subagents:rpc:ping:reply:${request.requestId}`, {
+        success: true,
+        data: { version: 2 },
+      });
+    });
+    const record = {
+      id: "agent-live",
+      type: "general-purpose",
+      description: "Live metrics",
+      status: "running",
+      toolUses: 0,
+      startedAt: 1,
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+    };
+    const managerKey = Symbol.for("pi-subagents:manager");
+    const globalRegistry = globalThis as Record<PropertyKey, unknown>;
+    globalRegistry[managerKey] = {
+      getRecord: (id: string) => (id === record.id ? record : undefined),
+    };
+    try {
+      (await loadBridge())(h.pi);
+      await h.emitHook("session_start");
+      await h.emitHook("tool_result", {
+        toolName: "Agent",
+        toolCallId: "call-live",
+        details: {
+          agentId: record.id,
+          description: record.description,
+          subagentType: record.type,
+          status: "background",
+        },
+      });
+      await Effect.runPromise(Effect.sleep("120 millis"));
+      record.toolUses = 2;
+      record.lifetimeUsage = { input: 100, output: 25, cacheWrite: 5 };
+      await Effect.runPromise(Effect.sleep("120 millis"));
+      const beforeIdle = await decodedNotifications(h.notifications);
+      await Effect.runPromise(Effect.sleep("120 millis"));
+      const afterIdle = await decodedNotifications(h.notifications);
+      const progress = beforeIdle.filter((event) => event.kind === "task.progress");
+      assert.equal(progress.length, 2);
+      const latest = progress[1];
+      assert.equal(latest?.kind, "task.progress");
+      if (latest?.kind === "task.progress") {
+        assert.deepEqual(latest.usage, {
+          totalTokens: 130,
+          inputTokens: 100,
+          outputTokens: 25,
+          cacheWriteTokens: 5,
+          toolUses: 2,
+          durationMs: latest.usage.durationMs,
+        });
+      }
+      assert.equal(afterIdle.filter((event) => event.kind === "task.progress").length, 2);
+      await h.emitHook("session_shutdown");
+    } finally {
+      delete globalRegistry[managerKey];
+      delete process.env.T3CODE_PI_BRIDGE_PROGRESS_INTERVAL_MS;
+    }
   });
 
   it("relays targeted stop success and rejects unsupported protocol versions", async () => {

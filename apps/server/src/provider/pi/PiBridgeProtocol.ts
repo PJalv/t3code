@@ -42,6 +42,16 @@ const TaskRunning = Schema.Struct({
   role: Schema.optional(Schema.String),
 });
 
+const TaskProgress = Schema.Struct({
+  version: Schema.Literal(PI_BRIDGE_VERSION),
+  kind: Schema.Literal("task.progress"),
+  invocationId: Schema.String,
+  agentId: Schema.String,
+  title: Schema.String,
+  role: Schema.optional(Schema.String),
+  usage: Usage,
+});
+
 const TaskCompleted = Schema.Struct({
   version: Schema.Literal(PI_BRIDGE_VERSION),
   kind: Schema.Literal("task.completed"),
@@ -67,6 +77,7 @@ export const PiBridgeEnvelope = Schema.Union([
   Ready,
   TaskRegistered,
   TaskRunning,
+  TaskProgress,
   TaskCompleted,
   ControlResult,
 ]);
@@ -99,8 +110,11 @@ export default function t3codePiBridge(pi) {
   let negotiation;
   const invocationByAgent = new Map();
   const pendingByAgent = new Map();
+  const lastProgressByAgent = new Map();
   const unsubscribers = [];
+  let progressTimer;
   const rpcTimeoutMs = Math.max(10, Number(process.env.T3CODE_PI_BRIDGE_RPC_TIMEOUT_MS) || 1500);
+  const progressIntervalMs = Math.max(100, Number(process.env.T3CODE_PI_BRIDGE_PROGRESS_INTERVAL_MS) || 500);
 
   const notify = (payload) => {
     if (!currentCtx || currentCtx.mode !== "rpc") return;
@@ -181,6 +195,54 @@ export default function t3codePiBridge(pi) {
           typeof data.result === "string" ? { summary: data.result.slice(0, 2000) } : {}),
       ...(usage ? { usage } : {}),
     });
+    invocationByAgent.delete(data.id);
+    lastProgressByAgent.delete(data.id);
+    if (invocationByAgent.size === 0 && progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = undefined;
+    }
+  };
+
+  const emitLiveProgress = () => {
+    try {
+      // pi-subagents exposes this registry and getRecord() for cross-package
+      // consumers. Read only its public live counters; do not import internals.
+      const manager = globalThis[Symbol.for("pi-subagents:manager")];
+      if (!manager || typeof manager.getRecord !== "function") return;
+      for (const [agentId, invocation] of invocationByAgent) {
+        const record = manager.getRecord(agentId);
+        if (!record || (record.status !== "running" && record.status !== "queued")) continue;
+        const lifetime = record.lifetimeUsage && typeof record.lifetimeUsage === "object"
+          ? record.lifetimeUsage
+          : undefined;
+        const inputTokens = Number.isFinite(lifetime?.input) ? Math.max(0, lifetime.input) : 0;
+        const outputTokens = Number.isFinite(lifetime?.output) ? Math.max(0, lifetime.output) : 0;
+        const cacheWriteTokens = Number.isFinite(lifetime?.cacheWrite) ? Math.max(0, lifetime.cacheWrite) : 0;
+        const toolUses = Number.isFinite(record.toolUses) ? Math.max(0, record.toolUses) : 0;
+        const signature = inputTokens + ":" + outputTokens + ":" + cacheWriteTokens + ":" + toolUses;
+        if (lastProgressByAgent.get(agentId) === signature) continue;
+        lastProgressByAgent.set(agentId, signature);
+        notify({
+          kind: "task.progress",
+          invocationId: invocation.invocationId,
+          agentId,
+          title: record.description || invocation.title,
+          role: record.type || invocation.role,
+          usage: {
+            totalTokens: inputTokens + outputTokens + cacheWriteTokens,
+            inputTokens,
+            outputTokens,
+            cacheWriteTokens,
+            toolUses,
+            ...(Number.isFinite(record.startedAt)
+              ? { durationMs: Math.max(0, Date.now() - record.startedAt) }
+              : {}),
+          },
+        });
+      }
+    } catch {
+      // Live usage is best-effort. Lifecycle and targeted control stay authoritative.
+    }
   };
 
   const ping = async () => {
@@ -227,6 +289,10 @@ export default function t3codePiBridge(pi) {
       role: typeof details.subagentType === "string" ? details.subagentType : undefined,
     };
     invocationByAgent.set(details.agentId, invocation);
+    if (!progressTimer) {
+      progressTimer = setInterval(emitLiveProgress, progressIntervalMs);
+      progressTimer.unref?.();
+    }
     notify({
       kind: "task.registered",
       invocationId: invocation.invocationId,
@@ -278,6 +344,9 @@ export default function t3codePiBridge(pi) {
     currentCtx = undefined;
     invocationByAgent.clear();
     pendingByAgent.clear();
+    lastProgressByAgent.clear();
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = undefined;
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe();
   });
 }

@@ -44,8 +44,10 @@ result format, including single, parallel, and chained work. It also supports th
 `subagent_spawn` and `workflow` formats. Claude Code-style `Agent` extensions, including
 `@tintinweb/pi-subagents`, can keep background agents running while the main Pi orchestrator
 accepts new messages. T3 tracks their completion notifications and `get_subagent_result` calls.
-Agent status, model, and token use appear in the Agents panel. T3 also loads a private RPC-only Pi
-bridge for normalized lifecycle events and targeted Stop requests. When `@tintinweb/pi-subagents`
+Agent status, model, token use, and completed tool-call count appear in the Agents panel. For
+`@tintinweb/pi-subagents`, token and tool-use counters update while an agent runs and retain their
+final values when it settles. T3 also loads a private RPC-only Pi bridge for normalized lifecycle
+events and targeted Stop requests. When `@tintinweb/pi-subagents`
 reports RPC protocol v2 support, **Stop generation** stops detached and queued agents by their
 opaque agent ID. T3 does not use a generic process-tree kill when targeted Stop is unavailable.
 
