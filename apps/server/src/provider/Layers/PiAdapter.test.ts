@@ -34,7 +34,7 @@ import {
   PiRpcProtocolError,
   type PiRpcSpawnOptions,
 } from "../pi/PiRpcClient.ts";
-import type { PiRpcEvent, PiThinkingLevel } from "../pi/PiRpcSchema.ts";
+import type { PiRpcEvent, PiRpcModel, PiThinkingLevel } from "../pi/PiRpcSchema.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { makePiAdapter, type PiRpcClientFactory } from "./PiAdapter.ts";
@@ -67,7 +67,13 @@ class FakeClient implements PiRpcClient {
     models: [] as Array<{ provider: string; id: string }>,
     extensionUiResponses: [] as Array<Record<string, unknown>>,
   };
-  state: { sessionFile?: string; sessionId?: string; isStreaming?: boolean } = {};
+  state: {
+    sessionFile?: string;
+    sessionId?: string;
+    isStreaming?: boolean;
+    model?: PiRpcModel;
+    thinkingLevel?: PiThinkingLevel;
+  } = {};
   getStateResults: Array<typeof this.state> = [];
   availableModels = [
     { provider: "openai", id: "gpt-5", reasoning: true },
@@ -196,6 +202,7 @@ interface Harness {
   readonly stateDir: string;
   readonly attachmentsDir: string;
   readonly makeClient: PiRpcClientFactory;
+  failNextSpawn: boolean;
 }
 
 const collectThroughSentinel = Effect.fn("PiAdapterTest.collectThroughSentinel")(function* (
@@ -221,28 +228,36 @@ const makeHarness = (harnessOptions: { readonly failStart?: boolean } = {}): Har
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-pi-adapter-"));
   const attachmentsDir = path.join(stateDir, "attachments");
   fs.mkdirSync(attachmentsDir, { recursive: true });
-  const makeClient: PiRpcClientFactory = (spawnOptions) =>
-    Effect.gen(function* () {
-      spawns.push(spawnOptions);
-      if (harnessOptions.failStart) {
-        return yield* new PiRpcCommandError({
-          command: "spawn",
-          requestId: "test",
-          detail: "spawn failed",
-        });
-      }
-      const sessionIndex = spawnOptions.args?.indexOf("--session") ?? -1;
-      const sessionFile = spawnOptions.args?.[sessionIndex + 1];
-      assert.ok(sessionFile);
-      const sessionId = "pi-generated-session-id";
-      fs.writeFileSync(
-        sessionFile,
-        `{"type":"session","id":"${sessionId}","cwd":"${spawnOptions.cwd}"}\n`,
-      );
-      client.state = { sessionFile, sessionId };
-      return client;
-    });
-  return { client, spawns, stateDir, attachmentsDir, makeClient };
+  const harness: Harness = {
+    client,
+    spawns,
+    stateDir,
+    attachmentsDir,
+    failNextSpawn: false,
+    makeClient: (spawnOptions) =>
+      Effect.gen(function* () {
+        spawns.push(spawnOptions);
+        if (harnessOptions.failStart || harness.failNextSpawn) {
+          harness.failNextSpawn = false;
+          return yield* new PiRpcCommandError({
+            command: "spawn",
+            requestId: "test",
+            detail: "spawn failed",
+          });
+        }
+        const sessionIndex = spawnOptions.args?.indexOf("--session") ?? -1;
+        const sessionFile = spawnOptions.args?.[sessionIndex + 1];
+        assert.ok(sessionFile);
+        const sessionId = "pi-generated-session-id";
+        fs.writeFileSync(
+          sessionFile,
+          `{"type":"session","id":"${sessionId}","cwd":"${spawnOptions.cwd}"}\n`,
+        );
+        client.state = { ...client.state, sessionFile, sessionId };
+        return client;
+      }),
+  };
+  return harness;
 };
 
 const withAdapter = <A>(
@@ -3460,7 +3475,320 @@ describe("PiAdapter", () => {
     );
   });
 
-  it.effect("completes streamEvents when the adapter scope closes", () =>
+  it.effect("replaces an idle same-thread session with the exact resume cursor without session.exited", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          const cursor = first.resumeCursor;
+          const cwd = first.cwd;
+          const exited = yield* Deferred.make<void>();
+          yield* adapter.streamEvents.pipe(
+            Stream.tap((event) =>
+              event.type === "session.exited" ? Deferred.succeed(exited, undefined) : Effect.void,
+            ),
+            Stream.runDrain,
+            Effect.forkChild,
+          );
+          const second = yield* adapter.startSession({
+            provider: ProviderDriverKind.make("pi"),
+            providerInstanceId: instanceId,
+            threadId: ThreadId.make("thread"),
+            cwd,
+            runtimeMode: "full-access",
+            resumeCursor: cursor,
+          });
+          assert.equal(second.threadId, first.threadId);
+          assert.deepEqual(second.resumeCursor, cursor);
+          assert.equal(h.spawns.length, 2);
+          assert.equal(h.client.calls.close, 1);
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), true);
+          // An in-place replacement must not emit session.exited.
+          assert.equal(yield* Deferred.poll(exited).pipe(Effect.map(Option.isSome)), false);
+          // The replacement session is live and still emits the exit on stop.
+          yield* adapter.stopSession(ThreadId.make("thread"));
+          yield* Deferred.await(exited).pipe(Effect.timeout("1 second"), Effect.orDie);
+          assert.equal(h.client.calls.close, 2);
+        }),
+      );
+  });
+
+  it.effect("rejects same-thread replacement while the old session has active work", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          yield* adapter.sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "busy",
+            modelSelection,
+          });
+          const rejected = yield* adapter
+            .startSession({
+              provider: ProviderDriverKind.make("pi"),
+              providerInstanceId: instanceId,
+              threadId: ThreadId.make("thread"),
+              cwd: first.cwd,
+              runtimeMode: "full-access",
+              resumeCursor: first.resumeCursor,
+            })
+            .pipe(Effect.result);
+          assert.equal(rejected._tag, "Failure");
+          if (rejected._tag === "Failure")
+            assert.equal(rejected.failure._tag, "ProviderAdapterValidationError");
+          // The old session is untouched.
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), true);
+          assert.equal(h.spawns.length, 1);
+          assert.equal(h.client.calls.close, 0);
+          yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        }),
+      );
+  });
+
+  it.effect("rejects same-thread replacement when the resume cursor targets another session file", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          const sessionsRoot = path.join(
+            h.stateDir,
+            "providers",
+            "pi",
+            encodeURIComponent(String(instanceId)),
+            "sessions",
+          );
+          fs.mkdirSync(sessionsRoot, { recursive: true });
+          const otherFile = path.join(sessionsRoot, "other-session.jsonl");
+          fs.writeFileSync(
+            otherFile,
+            `{"type":"session","id":"other-session","cwd":"${first.cwd}"}\n`,
+          );
+          const rejected = yield* adapter
+            .startSession({
+              provider: ProviderDriverKind.make("pi"),
+              providerInstanceId: instanceId,
+              threadId: ThreadId.make("thread"),
+              cwd: first.cwd,
+              runtimeMode: "full-access",
+              resumeCursor: {
+                schemaVersion: 1,
+                sessionFile: otherFile,
+                sessionId: "other-session",
+              },
+            })
+            .pipe(Effect.result);
+          assert.equal(rejected._tag, "Failure");
+          if (rejected._tag === "Failure")
+            assert.equal(rejected.failure._tag, "ProviderAdapterValidationError");
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), true);
+          assert.equal(h.spawns.length, 1);
+          assert.equal(h.client.calls.close, 0);
+        }),
+      );
+  });
+
+  it.effect("rejects same-thread replacement when the working directory changed", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          const otherCwd = fs.mkdtempSync(path.join(os.tmpdir(), "t3-pi-adapter-cwd-"));
+          const rejected = yield* adapter
+            .startSession({
+              provider: ProviderDriverKind.make("pi"),
+              providerInstanceId: instanceId,
+              threadId: ThreadId.make("thread"),
+              cwd: otherCwd,
+              runtimeMode: "full-access",
+              resumeCursor: first.resumeCursor,
+            })
+            .pipe(Effect.result);
+          assert.equal(rejected._tag, "Failure");
+          if (rejected._tag === "Failure")
+            assert.equal(rejected.failure._tag, "ProviderAdapterValidationError");
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), true);
+          assert.equal(h.spawns.length, 1);
+          assert.equal(h.client.calls.close, 0);
+        }),
+      );
+  });
+
+  it.effect("rejects same-thread replacement when no resume cursor is supplied", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          const rejected = yield* adapter
+            .startSession({
+              provider: ProviderDriverKind.make("pi"),
+              providerInstanceId: instanceId,
+              threadId: ThreadId.make("thread"),
+              cwd: first.cwd,
+              runtimeMode: "full-access",
+            })
+            .pipe(Effect.result);
+          assert.equal(rejected._tag, "Failure");
+          if (rejected._tag === "Failure")
+            assert.equal(rejected.failure._tag, "ProviderAdapterValidationError");
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), true);
+          assert.equal(h.spawns.length, 1);
+        }),
+      );
+  });
+
+  it.effect("leaks nothing and keeps the durable cursor recoverable when a replacement fails", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const first = yield* start(adapter);
+          const cursor = first.resumeCursor;
+          h.failNextSpawn = true;
+          const failed = yield* adapter
+            .startSession({
+              provider: ProviderDriverKind.make("pi"),
+              providerInstanceId: instanceId,
+              threadId: ThreadId.make("thread"),
+              cwd: first.cwd,
+              runtimeMode: "full-access",
+              resumeCursor: cursor,
+            })
+            .pipe(Effect.result);
+          assert.equal(failed._tag, "Failure");
+          assert.equal(h.spawns.length, 2);
+          // The idle old context was torn down as a replacement and the failed
+          // candidate was rolled back: nothing is published and nothing leaks.
+          assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
+          assert.equal(h.client.calls.close, 1);
+          // The durable session file was not deleted, so the same cursor starts
+          // a fresh process again.
+          const recovered = yield* adapter.startSession({
+            provider: ProviderDriverKind.make("pi"),
+            providerInstanceId: instanceId,
+            threadId: ThreadId.make("thread"),
+            cwd: first.cwd,
+            runtimeMode: "full-access",
+            resumeCursor: cursor,
+          });
+          assert.equal(recovered.threadId, first.threadId);
+          assert.deepEqual(recovered.resumeCursor, cursor);
+        }),
+      );
+  });
+
+  it.effect("uses Pi's authoritative get_state model for the startup session model", () => {
+      const h = makeHarness();
+      h.client.state = {
+        ...h.client.state,
+        model: { provider: "openai", id: "gpt-5.1", name: "GPT 5.1", reasoning: true },
+        thinkingLevel: "high",
+      };
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const session = yield* start(adapter);
+          assert.equal(session.model, "openai/gpt-5.1");
+        }),
+      );
+  });
+
+  it.effect("falls back to the requested model when get_state omits the loaded model", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          const session = yield* adapter.startSession({
+            provider: ProviderDriverKind.make("pi"),
+            providerInstanceId: instanceId,
+            threadId: ThreadId.make("thread"),
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+            modelSelection,
+          });
+          assert.equal(session.model, modelSelection.model);
+        }),
+      );
+  });
+
+  it.effect("does not attach the interrupted turn id to session-wide task completions on close", () => {
+      const h = makeHarness();
+      return withAdapter(h, (adapter) =>
+        Effect.gen(function* () {
+          yield* start(adapter);
+          const taskStarted = yield* Deferred.make<void>();
+          const collected = yield* adapter.streamEvents.pipe(
+            Stream.tap((event) =>
+              event.type === "task.started" ? Deferred.succeed(taskStarted, undefined) : Effect.void,
+            ),
+            Stream.takeUntil((event) => event.type === "session.exited"),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          const accepted = yield* adapter.sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "delegate",
+            modelSelection,
+          });
+          // Start a background agent while the parent turn is still active so
+          // close must terminalize both the turn and the task.
+          yield* Queue.offerAll(h.client.input, [
+            {
+              type: "tool_execution_start",
+              toolCallId: "bg-live",
+              toolName: "Agent",
+              args: {
+                description: "Live background",
+                subagent_type: "luna",
+                run_in_background: true,
+                prompt: "Keep running",
+              },
+            },
+            {
+              type: "tool_execution_end",
+              toolCallId: "bg-live",
+              toolName: "Agent",
+              result: {
+                content: [{ type: "text", text: "Agent started in background." }],
+                details: {
+                  displayName: "luna",
+                  description: "Live background",
+                  subagentType: "luna",
+                  status: "background",
+                  agentId: "bg-live-id",
+                },
+              },
+              isError: false,
+            },
+          ]);
+          yield* Deferred.await(taskStarted);
+          yield* adapter.stopSession(ThreadId.make("thread"));
+          const events = Array.from(yield* Fiber.join(collected));
+          const exits = events.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+              event.type === "session.exited",
+          );
+          const taskCompletions = events.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "task.completed" }> =>
+              event.type === "task.completed",
+          );
+          assert.equal(exits.length, 1);
+          assert.equal(events.at(-1)?.type, "session.exited");
+          assert.equal(taskCompletions.length, 1);
+          // Session-wide terminalization must not borrow the interrupted turn id.
+          assert.equal(taskCompletions[0]?.turnId, undefined);
+          const turnEvents = events.filter(
+            (event) =>
+              event.turnId === accepted.turnId &&
+              (event.type === "turn.started" || event.type === "turn.completed"),
+          );
+          assert.deepEqual(
+            turnEvents.map((event) => event.type),
+            ["turn.started", "turn.completed"],
+          );
+          assert.equal(events.indexOf(turnEvents.at(-1)!) < events.indexOf(taskCompletions[0]!), true);
+          assert.equal(events.indexOf(taskCompletions[0]!) < events.indexOf(exits[0]!), true);
+        }),
+      );
+  });
+
+  it.effect("drains buffered terminal events to a delayed streamEvents consumer on adapter scope close", () =>
     Effect.gen(function* () {
       const h = makeHarness();
       const scope = yield* Scope.make();
@@ -3483,17 +3811,52 @@ describe("PiAdapter", () => {
           cwd: process.cwd(),
           runtimeMode: "full-access",
         });
-        // Subscribe while the queue is alive, then close the adapter scope.
-        // The finalizer stops the session and shuts down the event queue, so
-        // the consumer must terminate instead of hanging on an abandoned queue.
-        const eventsFiber = yield* adapter.streamEvents.pipe(
-          Stream.runCollect,
-          Effect.forkChild,
-        );
+        // Keep an active turn so scope close emits turn and session terminal
+        // events into the event queue.
+        const accepted = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "hello",
+          modelSelection,
+        });
+        // Deliberately delay the consumer: fork it behind a release gate, then
+        // close the adapter scope so the terminal events buffer first. The
+        // finalizer must end the queue gracefully (Queue.end), so the delayed
+        // consumer still receives every buffered terminal event, with
+        // session.exited last, and then completes normally instead of being
+        // interrupted on an abandoned queue.
+        const releaseConsumer = yield* Deferred.make<void>();
+        const eventsFiber = yield* Deferred.await(releaseConsumer)
+          .pipe(
+            Effect.andThen(
+              adapter.streamEvents.pipe(
+                Stream.runCollect,
+                Effect.timeout("1 second"),
+                Effect.orDie,
+              ),
+            ),
+          )
+          .pipe(Effect.forkChild);
         yield* Scope.close(scope, Exit.void);
         scopeClosed = true;
-        const exit = yield* Fiber.await(eventsFiber).pipe(Effect.timeout("1 second"));
-        assert.equal(Exit.hasInterrupts(exit), true);
+        yield* Deferred.succeed(releaseConsumer, undefined);
+        const exit = yield* Fiber.await(eventsFiber);
+        assert.equal(Exit.isSuccess(exit), true);
+        const events = Array.from(Exit.isSuccess(exit) ? exit.value : []);
+        const exits = events.filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "session.exited" }> =>
+            event.type === "session.exited",
+        );
+        assert.equal(exits.length, 1);
+        assert.equal(events.at(-1)?.type, "session.exited");
+        const turnEvents = events.filter((event) => event.turnId === accepted.turnId);
+        assert.deepEqual(
+          turnEvents.map((event) => event.type),
+          ["turn.started", "turn.completed"],
+        );
+        assert.equal(
+          events.indexOf(turnEvents.at(-1)!) < events.indexOf(exits[0]!),
+          true,
+        );
         assert.equal(yield* adapter.hasSession(ThreadId.make("thread")), false);
         assert.equal(h.client.calls.close, 1);
       } finally {
