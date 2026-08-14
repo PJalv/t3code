@@ -138,6 +138,91 @@ describe("CheckpointDiffQuery.layer", () => {
     }),
   );
 
+  it.effect("uses a provider-native diff while its checkpoint ref is still a placeholder", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.make("project-provider-placeholder");
+      const threadId = ThreadId.make("thread-provider-placeholder");
+      const providerRef = CheckpointRef.make("provider-diff:turn-provider-placeholder");
+      const diff = [
+        "Index: sample.txt",
+        "===================================================================",
+        "--- sample.txt",
+        "+++ sample.txt",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+      const threadCheckpointContext = makeThreadCheckpointContext({
+        projectId,
+        threadId,
+        workspaceRoot: "/tmp/workspace",
+        worktreePath: null,
+        checkpointTurnCount: 1,
+        checkpointRef: providerRef,
+      });
+      const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
+        isGitRepository: () => Effect.die("provider placeholder should not inspect Git"),
+        captureCheckpoint: () => Effect.die("provider placeholder should not capture Git"),
+        hasCheckpointRef: () => Effect.die("provider placeholder should not inspect Git refs"),
+        restoreCheckpoint: () => Effect.die("provider placeholder should not restore Git refs"),
+        diffCheckpoints: () => Effect.die("provider placeholder must not reach git diff"),
+        deleteCheckpointRefs: () => Effect.die("provider placeholder should not delete Git refs"),
+      };
+      const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provideMerge(
+          makeProjectionTurnRepositoryLayer(() =>
+            Effect.succeed(
+              Option.some({
+                threadId,
+                fromTurnCount: 0,
+                toTurnCount: 1,
+                diff,
+                createdAt: "2026-01-01T00:00:00.000Z",
+              }),
+            ),
+          ),
+        ),
+        Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
+        Layer.provideMerge(
+          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            getCommandReadModel: () => Effect.die("unused"),
+            getSnapshot: () => Effect.die("unused"),
+            getShellSnapshot: () => Effect.die("unused"),
+            getArchivedShellSnapshot: () => Effect.die("unused"),
+            getSnapshotSequence: () => Effect.die("unused"),
+            getCounts: () => Effect.die("unused"),
+            getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
+            getProjectShellById: () => Effect.die("unused"),
+            getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+            getFullThreadDiffContext: () => Effect.die("unused"),
+            getThreadShellById: () => Effect.die("unused"),
+            getThreadDetailById: () => Effect.die("unused"),
+            getThreadDetailSnapshot: () => Effect.die("unused"),
+            searchThreads: () => Effect.die("unused"),
+          }),
+        ),
+      );
+
+      const result = yield* Effect.gen(function* () {
+        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+        return yield* query.getTurnDiff({
+          threadId,
+          fromTurnCount: 0,
+          toTurnCount: 1,
+          ignoreWhitespace: false,
+        });
+      }).pipe(Effect.provide(layer));
+
+      expect(result).toEqual({
+        threadId,
+        fromTurnCount: 0,
+        toTurnCount: 1,
+        diff,
+      });
+    }),
+  );
+
   it.effect("uses the narrow full-thread context lookup for all-turns diffs", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.make("project-full-thread");
