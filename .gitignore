@@ -26,6 +26,7 @@ squashfs-root/
 .vercel
 .gstack/
 .plans/
+.slim/deepwork/
 dist-electron/
 .electron-runtime/
 .showcase/
