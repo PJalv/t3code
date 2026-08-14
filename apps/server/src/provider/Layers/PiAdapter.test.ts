@@ -16,6 +16,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -24,6 +25,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as NodeAssert from "node:assert/strict";
 
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -32,6 +34,7 @@ import {
   type PiRpcClient,
   type PiRpcImage,
   PiRpcProtocolError,
+  PiRpcRequestTimeoutError,
   type PiRpcSpawnOptions,
 } from "../pi/PiRpcClient.ts";
 import { PI_BRIDGE_PREFIX } from "../pi/PiBridgeProtocol.ts";
@@ -99,12 +102,16 @@ class FakeClient implements PiRpcClient {
   failExtensionUiResponse = false;
   failGetState = false;
   failThinking = false;
+  timeoutModelAfterApply = false;
+  timeoutThinkingAfterApply = false;
   abortBeforeSettle = false;
   abortEntered: Deferred.Deferred<void> | undefined;
   getStateEntered: Deferred.Deferred<void> | undefined;
   getStateGate: Deferred.Deferred<void> | undefined;
   getAvailableModelsEntered: Deferred.Deferred<void> | undefined;
   getAvailableModelsGate: Deferred.Deferred<void> | undefined;
+  sessionStatsEntered: Deferred.Deferred<void> | undefined;
+  sessionStatsGate: Deferred.Deferred<void> | undefined;
   setModelEntered: Deferred.Deferred<void> | undefined;
   setModelGate: Deferred.Deferred<void> | undefined;
   setThinkingEntered: Deferred.Deferred<void> | undefined;
@@ -137,21 +144,33 @@ class FakeClient implements PiRpcClient {
     });
   };
   getCommands = () => Effect.succeed({ commands: [] });
-  getSessionStats = () =>
-    Effect.sync(() => {
-      this.calls.sessionStats += 1;
+  getSessionStats = () => {
+    const self = this;
+    return Effect.gen(function* () {
+      self.calls.sessionStats += 1;
+      if (self.sessionStatsEntered) yield* Deferred.succeed(self.sessionStatsEntered, undefined);
+      if (self.sessionStatsGate) yield* Deferred.await(self.sessionStatsGate);
       return {
-        sessionId: this.state.sessionId,
+        sessionId: self.state.sessionId,
         tokens: { input: 100, output: 20, cacheRead: 40, cacheWrite: 0, total: 160 },
         contextUsage: { tokens: 80, contextWindow: 200_000, percent: 0.04 },
       };
     });
+  };
   setModel = (provider: string, id: string) => {
     const self = this;
     return Effect.gen(function* () {
       self.calls.models.push({ provider, id });
       if (self.setModelEntered) yield* Deferred.succeed(self.setModelEntered, undefined);
       if (self.setModelGate) yield* Deferred.await(self.setModelGate);
+      if (self.timeoutModelAfterApply) {
+        self.state = { ...self.state, model: { provider, id } };
+        return yield* new PiRpcRequestTimeoutError({
+          command: "set_model",
+          requestId: "model-timeout",
+          timeoutMs: 120_000,
+        });
+      }
       return { provider, id };
     });
   };
@@ -161,6 +180,14 @@ class FakeClient implements PiRpcClient {
       self.calls.thinking.push(level);
       if (self.setThinkingEntered) yield* Deferred.succeed(self.setThinkingEntered, undefined);
       if (self.setThinkingGate) yield* Deferred.await(self.setThinkingGate);
+      if (self.timeoutThinkingAfterApply) {
+        self.state = { ...self.state, thinkingLevel: level };
+        return yield* new PiRpcRequestTimeoutError({
+          command: "set_thinking_level",
+          requestId: "thinking-timeout",
+          timeoutMs: 120_000,
+        });
+      }
       if (self.failThinking)
         return yield* new PiRpcProtocolError({ detail: "set_thinking_level failed" });
     });
@@ -2153,7 +2180,8 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const collected = yield* Stream.take(adapter.streamEvents, 5).pipe(
+        const collected = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -2172,14 +2200,21 @@ describe("PiAdapter", () => {
         const events = Array.from(yield* Fiber.join(collected));
         assert.deepEqual(
           events.map((event) => event.type),
-          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+          [
+            "turn.started",
+            "item.started",
+            "content.delta",
+            "thread.token-usage.updated",
+            "item.completed",
+            "turn.completed",
+          ],
         );
         assert.equal(
           events.every((event) => event.turnId === turn.turnId),
           true,
         );
         assert.equal(events[1]?.itemId, events[2]?.itemId);
-        assert.equal(events[2]?.itemId, events[3]?.itemId);
+        assert.equal(events[2]?.itemId, events[4]?.itemId);
         assert.deepEqual(h.client.calls.thinking, ["max"]);
       }),
     );
@@ -2232,22 +2267,138 @@ describe("PiAdapter", () => {
         ]);
         const events = Array.from(yield* Fiber.join(eventsFiber));
         assert.deepEqual(
-          events.map((event) => event.type),
+          events
+            .filter((event) => event.type !== "thread.token-usage.updated")
+            .map((event) => event.type),
           [
             "turn.started",
             "item.started",
             "content.delta",
             "item.completed",
-            "thread.token-usage.updated",
             "item.started",
             "content.delta",
             "item.completed",
             "turn.completed",
           ],
         );
+        assert.equal(
+          events.filter((event) => event.type === "thread.token-usage.updated").length,
+          1,
+        );
+        assert.ok(
+          events.findIndex((event) => event.type === "thread.token-usage.updated") <
+            events.findIndex((event) => event.type === "turn.completed"),
+        );
         const assistantStarts = events.filter((event) => event.type === "item.started");
         assert.equal(assistantStarts.length, 2);
         assert.notEqual(assistantStarts[0]?.itemId, assistantStarts[1]?.itemId);
+      }),
+    );
+  });
+
+  it.effect("projects Pi extension errors as runtime diagnostics", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const warningFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (event): event is Extract<ProviderRuntimeEvent, { type: "runtime.warning" }> =>
+              event.type === "runtime.warning",
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "run extension",
+          modelSelection,
+        });
+        yield* Queue.offer(h.client.input, {
+          type: "extension_error",
+          extensionPath: "/tmp/failing-extension.ts",
+          event: "tool_call",
+          error: "extension failed",
+        });
+        const warning = yield* Fiber.join(warningFiber);
+        assert.equal(Option.isSome(warning), true);
+        if (Option.isSome(warning)) {
+          assert.equal(warning.value.payload.message, "A Pi extension reported an error.");
+          assert.deepEqual(warning.value.payload.detail, {
+            extensionPath: "/tmp/failing-extension.ts",
+            event: "tool_call",
+            error: "extension failed",
+          });
+        }
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+      }),
+    );
+  });
+
+  it.effect("keeps native retries inside one canonical turn", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const sent = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "retry this request",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "529 overloaded",
+            },
+          },
+          { type: "agent_end", messages: [], willRetry: true },
+          {
+            type: "auto_retry_start",
+            attempt: 1,
+            maxAttempts: 3,
+            delayMs: 2_000,
+            errorMessage: "529 overloaded",
+          },
+          { type: "agent_start" },
+          {
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "Recovered" },
+          },
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Recovered" }],
+              stopReason: "stop",
+            },
+          },
+          { type: "auto_retry_end", success: true, attempt: 1 },
+          { type: "agent_end", messages: [], willRetry: false },
+          { type: "agent_settled" },
+        ]);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        assert.equal(events.filter((event) => event.type === "turn.started").length, 1);
+        assert.equal(events.filter((event) => event.type === "runtime.warning").length, 1);
+        assert.equal(
+          events.some((event) => event.type === "runtime.error"),
+          false,
+        );
+        assert.equal(
+          events.every((event) => event.turnId === sent.turnId),
+          true,
+        );
+        const terminal = events.at(-1);
+        assert.equal(terminal?.type, "turn.completed");
+        if (terminal?.type === "turn.completed") assert.equal(terminal.payload.state, "completed");
       }),
     );
   });
@@ -2306,15 +2457,14 @@ describe("PiAdapter", () => {
         ]);
         const events = Array.from(yield* Fiber.join(eventsFiber));
         assert.deepEqual(
-          events.map((event) => event.type),
-          [
-            "turn.started",
-            "thread.token-usage.updated",
-            "item.started",
-            "content.delta",
-            "item.completed",
-            "turn.completed",
-          ],
+          events
+            .filter((event) => event.type !== "thread.token-usage.updated")
+            .map((event) => event.type),
+          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+        );
+        assert.equal(
+          events.filter((event) => event.type === "thread.token-usage.updated").length,
+          1,
         );
         assert.equal(
           events.every((event) => event.turnId === turn.turnId),
@@ -2372,7 +2522,8 @@ describe("PiAdapter", () => {
     return withAdapter(failedHarness, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const failedEventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+        const failedEventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -2381,21 +2532,24 @@ describe("PiAdapter", () => {
           input: "fail",
           modelSelection,
         });
-        yield* Queue.offer(failedHarness.client.input, {
-          type: "message_end",
-          message: {
-            role: "assistant",
-            content: [],
-            stopReason: "error",
-            errorMessage: "authentication failed",
+        yield* Queue.offerAll(failedHarness.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "authentication failed",
+            },
           },
-        });
+          { type: "agent_end", messages: [], willRetry: false },
+        ]);
         const failedEvents = Array.from(yield* Fiber.join(failedEventsFiber));
         assert.deepEqual(
           failedEvents.map((event) => event.type),
-          ["turn.started", "thread.token-usage.updated", "runtime.error", "turn.completed"],
+          ["turn.started", "runtime.error", "turn.completed"],
         );
-        const failed = failedEvents[3] as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+        const failed = failedEvents[2] as Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
         assert.equal(failed.payload.state, "failed");
         assert.equal(failed.payload.errorMessage, "authentication failed");
       }),
@@ -2406,7 +2560,8 @@ describe("PiAdapter", () => {
           return withAdapter(abortedHarness, (adapter) =>
             Effect.gen(function* () {
               yield* start(adapter);
-              const eventsFiber = yield* Stream.take(adapter.streamEvents, 3).pipe(
+              const eventsFiber = yield* adapter.streamEvents.pipe(
+                Stream.takeUntil((event) => event.type === "turn.completed"),
                 Stream.runCollect,
                 Effect.forkChild,
               );
@@ -2423,7 +2578,7 @@ describe("PiAdapter", () => {
                 { type: "agent_settled" },
               ]);
               const events = Array.from(yield* Fiber.join(eventsFiber));
-              const terminal = events[2] as Extract<
+              const terminal = events.at(-1) as Extract<
                 ProviderRuntimeEvent,
                 { type: "turn.completed" }
               >;
@@ -2440,7 +2595,7 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const eventsFiber = yield* Stream.take(adapter.streamEvents, 5).pipe(
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -2456,7 +2611,14 @@ describe("PiAdapter", () => {
         const events = Array.from(yield* Fiber.join(eventsFiber));
         assert.deepEqual(
           events.map((event) => event.type),
-          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+          [
+            "turn.started",
+            "item.started",
+            "content.delta",
+            "thread.token-usage.updated",
+            "item.completed",
+            "turn.completed",
+          ],
         );
       }),
     );
@@ -2845,6 +3007,49 @@ describe("PiAdapter", () => {
     );
   });
 
+  it.effect("coalesces token refreshes and bounds stalled telemetry", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        h.client.sessionStatsEntered = yield* Deferred.make<void>();
+        h.client.sessionStatsGate = yield* Deferred.make<void>();
+        yield* start(adapter);
+        const completed = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "telemetry must not block",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: { role: "assistant", content: [], stopReason: "toolUse" },
+          },
+          {
+            type: "message_end",
+            message: { role: "assistant", content: [], stopReason: "stop" },
+          },
+          { type: "agent_settled" },
+        ]);
+        yield* Deferred.await(h.client.sessionStatsEntered);
+        yield* Effect.yieldNow;
+        assert.equal(h.client.calls.sessionStats, 1);
+        yield* TestClock.adjust(Duration.millis(300));
+        const events = Array.from(yield* Fiber.join(completed));
+        assert.equal(events.at(-1)?.type, "turn.completed");
+        assert.equal(
+          events.some((event) => event.type === "thread.token-usage.updated"),
+          false,
+        );
+        assert.equal((yield* adapter.listSessions())[0]?.status, "ready");
+      }),
+    );
+  });
+
   it.effect("serializes concurrent sends into one turn with a steering message", () => {
     const h = makeHarness();
     return withAdapter(h, (adapter) =>
@@ -2899,12 +3104,13 @@ describe("PiAdapter", () => {
         const firstEvents = events.filter((event) => event.turnId === firstTurnId);
         assert.deepEqual(
           firstEvents.map((event) => event.type),
-          ["turn.started", "turn.completed", "thread.token-usage.updated"],
+          ["turn.started", "thread.token-usage.updated", "turn.completed"],
         );
-        const usage = firstEvents[2] as Extract<
-          ProviderRuntimeEvent,
-          { type: "thread.token-usage.updated" }
-        >;
+        const usage = firstEvents.find(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }> =>
+            event.type === "thread.token-usage.updated",
+        );
+        assert.ok(usage);
         assert.deepEqual(usage.payload.usage, {
           usedTokens: 80,
           totalProcessedTokens: 160,
@@ -2952,16 +3158,16 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const recoveredTurnFiber = yield* adapter.streamEvents.pipe(
-          Stream.filter(
-            (event): event is Extract<ProviderRuntimeEvent, { type: "turn.started" }> =>
-              event.type === "turn.started",
+        const startedEvents: ProviderRuntimeEvent[] = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              startedEvents.push(event);
+            }),
           ),
-          Stream.drop(1),
-          Stream.runHead,
           Effect.forkChild,
         );
-        yield* adapter.sendTurn({
+        const originalTurn = yield* adapter.sendTurn({
           threadId: ThreadId.make("thread"),
           input: "first",
           modelSelection,
@@ -2976,24 +3182,92 @@ describe("PiAdapter", () => {
               errorMessage: "Stream ended without finish_reason",
             },
           },
+          { type: "agent_end", messages: [], willRetry: true },
+          {
+            type: "auto_retry_start",
+            attempt: 1,
+            maxAttempts: 3,
+            delayMs: 10,
+            errorMessage: "Stream ended without finish_reason",
+          },
           { type: "agent_start" },
         ]);
-
-        const recoveredTurn = yield* Fiber.join(recoveredTurnFiber);
-        assert.equal(Option.isSome(recoveredTurn), true);
-        if (Option.isNone(recoveredTurn)) return;
-        assert.equal(recoveredTurn.value.payload.model, modelSelection.model);
-        assert.equal(recoveredTurn.value.payload.effort, "max");
+        while (!startedEvents.some((event) => event.type === "runtime.warning")) {
+          yield* Effect.yieldNow;
+        }
+        const turnStarts = startedEvents.filter((event) => event.type === "turn.started");
+        assert.equal(turnStarts.length, 1);
+        assert.equal(turnStarts[0]?.payload.model, modelSelection.model);
+        assert.equal(turnStarts[0]?.payload.effort, "max");
 
         const steered = yield* adapter.sendTurn({
           threadId: ThreadId.make("thread"),
           input: "steer after retry",
           modelSelection,
         });
-        assert.equal(steered.turnId, recoveredTurn.value.turnId);
+        assert.equal(steered.turnId, originalTurn.turnId);
         assert.equal(h.client.calls.prompts[1]?.streamingBehavior, "steer");
-        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Recovered" }],
+              stopReason: "stop",
+            },
+          },
+          { type: "auto_retry_end", success: true, attempt: 1 },
+          { type: "agent_settled" },
+        ]);
+        while ((yield* adapter.listSessions())[0]?.status === "running") yield* Effect.yieldNow;
+        yield* Fiber.interrupt(eventsFiber);
       }),
+    );
+  });
+
+  it.effect("recovers model and thinking mutations that time out after Pi applies them", () => {
+    const modelHarness = makeHarness();
+    const changedModel = createModelSelection(instanceId, "openai/gpt-5.1", [
+      { id: "thinkingLevel", value: "max" },
+    ]);
+    return withAdapter(modelHarness, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        modelHarness.client.timeoutModelAfterApply = true;
+        const sent = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "use the applied model",
+          modelSelection: changedModel,
+        });
+        assert.equal(sent.turnId.length > 0, true);
+        assert.equal((yield* adapter.listSessions())[0]?.model, changedModel.model);
+        assert.equal(modelHarness.client.calls.prompt, 1);
+        yield* Queue.offer(modelHarness.client.input, { type: "agent_settled" });
+      }),
+    ).pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          const thinkingHarness = makeHarness();
+          const changedThinking = createModelSelection(instanceId, "openai/gpt-5", [
+            { id: "thinkingLevel", value: "high" },
+          ]);
+          return withAdapter(thinkingHarness, (adapter) =>
+            Effect.gen(function* () {
+              yield* start(adapter);
+              thinkingHarness.client.timeoutThinkingAfterApply = true;
+              const sent = yield* adapter.sendTurn({
+                threadId: ThreadId.make("thread"),
+                input: "use the applied thinking level",
+                modelSelection: changedThinking,
+              });
+              assert.equal(sent.turnId.length > 0, true);
+              assert.equal(thinkingHarness.client.calls.prompt, 1);
+              assert.equal(thinkingHarness.client.state.thinkingLevel, "high");
+              yield* Queue.offer(thinkingHarness.client.input, { type: "agent_settled" });
+            }),
+          );
+        }),
+      ),
     );
   });
 
