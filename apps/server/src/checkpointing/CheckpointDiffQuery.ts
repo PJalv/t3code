@@ -110,21 +110,21 @@ export const make = Effect.gen(function* () {
       }
 
       const providerDiff = yield* projectionTurnRepository.getDiffBlob(input);
-      if (Option.isSome(providerDiff)) {
-        const turnDiff = buildTurnDiffResult(input, providerDiff.value.diff);
-        if (!isTurnDiffResult(turnDiff)) {
-          return yield* new CheckpointDiffResultInvalidError({
-            operation,
-            threadId: input.threadId,
-          });
-        }
-        return turnDiff;
+      const providerFallback = Option.isSome(providerDiff)
+        ? buildTurnDiffResult(input, providerDiff.value.diff)
+        : undefined;
+      if (providerFallback && !isTurnDiffResult(providerFallback)) {
+        return yield* new CheckpointDiffResultInvalidError({
+          operation,
+          threadId: input.threadId,
+        });
       }
 
       const threadContext = yield* projectionSnapshotQuery
         .getThreadCheckpointContext(input.threadId)
         .pipe(Effect.withSpan("checkpoint.turnDiff.lookupContext"));
       if (Option.isNone(threadContext)) {
+        if (providerFallback) return providerFallback;
         return yield* new CheckpointThreadNotFoundError({
           operation,
           threadId: input.threadId,
@@ -136,6 +136,7 @@ export const make = Effect.gen(function* () {
         0,
       );
       if (input.toTurnCount > maxTurnCount) {
+        if (providerFallback) return providerFallback;
         return yield* new CheckpointTurnRangeUnavailableError({
           operation,
           threadId: input.threadId,
@@ -146,6 +147,7 @@ export const make = Effect.gen(function* () {
 
       const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
       if (!workspaceCwd) {
+        if (providerFallback) return providerFallback;
         return yield* new CheckpointWorkspacePathMissingError({
           operation,
           threadId: input.threadId,
@@ -159,6 +161,7 @@ export const make = Effect.gen(function* () {
               (checkpoint) => checkpoint.checkpointTurnCount === input.fromTurnCount,
             )?.checkpointRef;
       if (!fromCheckpointRef) {
+        if (providerFallback) return providerFallback;
         return yield* new CheckpointRefUnavailableError({
           operation,
           threadId: input.threadId,
@@ -171,6 +174,7 @@ export const make = Effect.gen(function* () {
         (checkpoint) => checkpoint.checkpointTurnCount === input.toTurnCount,
       )?.checkpointRef;
       if (!toCheckpointRef) {
+        if (providerFallback) return providerFallback;
         return yield* new CheckpointRefUnavailableError({
           operation,
           threadId: input.threadId,
