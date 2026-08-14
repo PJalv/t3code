@@ -52,11 +52,17 @@ import { decodePiModelSlug, encodePiModelSlug } from "../pi/PiModel.ts";
 import {
   makePiRpcClient,
   PiRpcCommandError,
+  PiRpcRequestTimeoutError,
   type PiRpcClient,
   type PiRpcError,
   type PiRpcSpawnOptions,
 } from "../pi/PiRpcClient.ts";
-import { PiThinkingLevel, type PiRpcEvent, type PiRpcSessionStats } from "../pi/PiRpcSchema.ts";
+import {
+  PiThinkingLevel,
+  type PiRpcEvent,
+  type PiRpcSessionStats,
+  type PiRpcState,
+} from "../pi/PiRpcSchema.ts";
 import {
   allocateFreshPiSessionFile,
   cleanupFreshPiSessionFile,
@@ -69,6 +75,7 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("pi");
 const isPiRpcCommandError = Schema.is(PiRpcCommandError);
+const isPiRpcRequestTimeoutError = Schema.is(PiRpcRequestTimeoutError);
 const decodePiSessionCursor = Schema.decodeUnknownEffect(PiSessionCursor);
 const decodePiThinkingLevel = Schema.decodeUnknownEffect(PiThinkingLevel);
 const DETERMINISTIC_ARGS = ["--offline"] as const;
@@ -106,6 +113,8 @@ interface ActiveTurn {
   reasoningStarted: boolean;
   lastAssistantMessageIncomplete: boolean;
   compactionContinuationPending: boolean;
+  pendingAssistantError: string | undefined;
+  nativeRetryPending: boolean;
   interruptRequested: boolean;
   terminal: boolean;
 }
@@ -120,6 +129,11 @@ interface PendingExtensionInput {
 
 interface PendingPreflight {
   readonly cancelled: Deferred.Deferred<void>;
+}
+
+interface TokenUsageRefresh {
+  readonly turn: ActiveTurn;
+  readonly finished: Deferred.Deferred<void>;
 }
 
 type PiBridgeControlResult = Extract<PiBridgeEnvelope, { kind: "control.result" }>;
@@ -181,6 +195,7 @@ interface SessionContext {
   bridgeRpcVersion: number | undefined;
   lastEventCreatedAt: string | undefined;
   lastTokenUsage: PiThreadTokenUsage | undefined;
+  tokenUsageRefresh: TokenUsageRefresh | undefined;
   thinkingLevel: PiThinkingLevel | undefined;
   closing: boolean;
   stopped: boolean;
@@ -760,6 +775,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       reasoningStarted: false,
       lastAssistantMessageIncomplete: false,
       compactionContinuationPending: false,
+      pendingAssistantError: undefined,
+      nativeRetryPending: false,
       interruptRequested: false,
       terminal: false,
     };
@@ -1362,33 +1379,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     left.outputTokens === right.outputTokens &&
     left.compactsAutomatically === right.compactsAutomatically;
 
-  const readTokenUsageEvent = Effect.fn("PiAdapter.readTokenUsageEvent")(function* (
-    ctx: SessionContext,
-    turn: ActiveTurn,
-    native: PiRpcEvent,
-  ) {
-    const stats = yield* ctx.client.getSessionStats().pipe(Effect.exit);
-    if (Exit.isFailure(stats) || ctx.activeTurn !== turn || turn.terminal) return undefined;
-    const usage = normalizeTokenUsage(stats.value);
-    if (!usage || (ctx.lastTokenUsage && tokenUsageMatches(ctx.lastTokenUsage, usage))) {
-      return undefined;
-    }
-    ctx.lastTokenUsage = usage;
-    return {
-      type: "thread.token-usage.updated",
-      ...(yield* base(ctx, turn)),
-      payload: { usage },
-      raw: raw(native),
-    } satisfies ProviderRuntimeEvent;
-  });
-
   const refreshTokenUsage = Effect.fn("PiAdapter.refreshTokenUsage")(function* (
     ctx: SessionContext,
     turn: ActiveTurn,
     native: PiRpcEvent,
   ) {
-    const event = yield* readTokenUsageEvent(ctx, turn, native);
-    if (event) yield* offer(event);
+    const current = ctx.tokenUsageRefresh;
+    if (current?.turn === turn && !(yield* Deferred.isDone(current.finished))) return current;
+    const refresh: TokenUsageRefresh = { turn, finished: yield* Deferred.make<void>() };
+    ctx.tokenUsageRefresh = refresh;
+    yield* Effect.gen(function* () {
+      const result = yield* ctx.client
+        .getSessionStats()
+        .pipe(Effect.timeoutOption(Duration.millis(250)), Effect.exit);
+      if (Exit.isSuccess(result) && Option.isSome(result.value) && !ctx.stopped && !turn.terminal) {
+        const usage = normalizeTokenUsage(result.value.value);
+        if (usage && (!ctx.lastTokenUsage || !tokenUsageMatches(ctx.lastTokenUsage, usage))) {
+          ctx.lastTokenUsage = usage;
+          yield* offer({
+            type: "thread.token-usage.updated",
+            ...(yield* base(ctx, turn)),
+            payload: { usage },
+            raw: raw(native),
+          });
+        }
+      }
+    }).pipe(
+      Effect.ensuring(Deferred.succeed(refresh.finished, undefined)),
+      Effect.forkIn(ctx.scope),
+    );
+    return refresh;
   });
 
   const handleExtensionSubagentToolEvent = Effect.fn("PiAdapter.handleExtensionSubagentToolEvent")(
@@ -1754,6 +1774,64 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       return;
     }
     if (!turn || turn.terminal) return;
+    if (type === "extension_error") {
+      yield* offer({
+        type: "runtime.warning",
+        ...(yield* base(ctx, turn)),
+        payload: {
+          message: "A Pi extension reported an error.",
+          detail: {
+            extensionPath: trimmedString(event.extensionPath),
+            event: trimmedString(event.event),
+            error: trimmedString(event.error) ?? "Unknown extension error.",
+          },
+        },
+        raw: raw(native),
+      });
+      return;
+    }
+    if (type === "auto_retry_start") {
+      turn.nativeRetryPending = true;
+      yield* offer({
+        type: "runtime.warning",
+        ...(yield* base(ctx, turn)),
+        payload: {
+          message: "Pi is retrying a transient model error.",
+          detail: {
+            attempt: finiteNonNegative(event.attempt),
+            maxAttempts: finiteNonNegative(event.maxAttempts),
+            delayMs: finiteNonNegative(event.delayMs),
+            error: trimmedString(event.errorMessage),
+          },
+        },
+        raw: raw(native),
+      });
+      return;
+    }
+    if (type === "auto_retry_end") {
+      turn.nativeRetryPending = false;
+      if (event.success === false && !turn.interruptRequested) {
+        const message =
+          trimmedString(event.finalError) ??
+          turn.pendingAssistantError ??
+          "Pi exhausted its automatic retries.";
+        turn.pendingAssistantError = undefined;
+        yield* failActive(ctx, message, native, false);
+      }
+      return;
+    }
+    if (type === "agent_end") {
+      if (event.willRetry === true) {
+        turn.nativeRetryPending = true;
+        return;
+      }
+      if (turn.pendingAssistantError && !turn.interruptRequested) {
+        const message = turn.pendingAssistantError;
+        turn.pendingAssistantError = undefined;
+        yield* failActive(ctx, message, native, false);
+      }
+      return;
+    }
     if (type === "message_update") {
       turn.compactionContinuationPending = false;
       const update = isRecord(event.assistantMessageEvent)
@@ -1815,19 +1893,17 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         // context snapshot as soon as a fresh assistant response is recorded.
         yield* refreshTokenUsage(ctx, turn, native);
       }
-      if (
-        message?.role === "assistant" &&
-        message.stopReason === "error" &&
-        !turn.interruptRequested
-      ) {
-        yield* failActive(
-          ctx,
-          trimmedString(message.errorMessage) ?? "Pi assistant failed.",
-          native,
-          false,
-        );
+      if (message?.role === "assistant" && message.stopReason === "error") {
+        if (!turn.interruptRequested) {
+          turn.pendingAssistantError =
+            trimmedString(message.errorMessage) ?? "Pi assistant failed.";
+        }
       } else if (message?.role === "assistant" && message.stopReason === "aborted") {
+        turn.pendingAssistantError = undefined;
         turn.interruptRequested = true;
+      } else if (message?.role === "assistant") {
+        turn.pendingAssistantError = undefined;
+        turn.nativeRetryPending = false;
       }
       return;
     }
@@ -1910,6 +1986,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       return;
     }
     if (type === "agent_settled") {
+      if (turn.pendingAssistantError && !turn.interruptRequested) {
+        const message = turn.pendingAssistantError;
+        turn.pendingAssistantError = undefined;
+        yield* failActive(ctx, message, native, false);
+        return;
+      }
       if (ctx.steeringPromptsInFlight > 0) {
         ctx.deferredSettlement = native;
         return;
@@ -1940,10 +2022,18 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         return;
       }
       if (state.value.isStreaming === true) return;
-      const terminalEvents: ProviderRuntimeEvent[] = [];
       // Keep settlement as a fallback for turns that produce no assistant
-      // message_end event and for a final snapshot that changed since it.
-      const usageEvent = yield* readTokenUsageEvent(ctx, turn, native);
+      // message_end event and wait only for the short-lived coalesced refresh.
+      // This preserves usage-before-terminal ordering without letting telemetry
+      // block the Pi event loop indefinitely.
+      if (!turn.interruptRequested) {
+        const usageRefresh = yield* refreshTokenUsage(ctx, turn, native);
+        yield* Deferred.await(usageRefresh.finished).pipe(
+          Effect.timeoutOption(Duration.millis(300)),
+          Effect.ignore,
+        );
+      }
+      const terminalEvents: ProviderRuntimeEvent[] = [];
       if (turn.assistantStarted) {
         terminalEvents.push({
           type: "item.completed",
@@ -1979,10 +2069,23 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         },
         raw: raw(native),
       });
-      if (usageEvent) terminalEvents.push(usageEvent);
       yield* publishTerminal(ctx, turn, terminalEvents, "ready");
+      return;
     }
-    // agent_end and turn_end are native cycle boundaries, not T3 settlement.
+    if (
+      type !== "agent_end" &&
+      type !== "turn_start" &&
+      type !== "turn_end" &&
+      type !== "compaction_start" &&
+      type !== "queue_update" &&
+      type !== "summarization_retry_scheduled" &&
+      type !== "summarization_retry_attempt_start" &&
+      type !== "summarization_retry_finished"
+    ) {
+      yield* Effect.logDebug("Ignored unknown Pi RPC event").pipe(
+        Effect.annotateLogs({ provider: "pi", eventType: type ?? "missing" }),
+      );
+    }
   });
 
   const requireSession = (threadId: ThreadId) => {
@@ -2258,6 +2361,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             bridgeRpcVersion: undefined,
             lastEventCreatedAt: undefined,
             lastTokenUsage: undefined,
+            tokenUsageRefresh: undefined,
             thinkingLevel: started.success.state.thinkingLevel,
             closing: false,
             stopped: false,
@@ -2301,6 +2405,27 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           ),
         )
       : effect;
+
+  const applyMutationWithTimeoutRecovery = Effect.fn("PiAdapter.applyMutationWithTimeoutRecovery")(
+    function* <A>(
+      ctx: SessionContext,
+      pending: PendingPreflight | undefined,
+      operation: string,
+      mutation: Effect.Effect<A, PiRpcError>,
+      wasApplied: (state: PiRpcState) => boolean,
+    ) {
+      const outcome = yield* runPreflight(pending, mutation.pipe(Effect.exit));
+      if (Exit.isSuccess(outcome)) return outcome.value;
+      const error = Cause.squash(outcome.cause);
+      if (!isPiRpcRequestTimeoutError(error)) return yield* request(operation, error);
+      const state = yield* runPreflight(
+        pending,
+        ctx.client.getState().pipe(Effect.mapError((cause) => request("get_state", cause))),
+      );
+      if (piStateMatchesCursor(state, ctx.cursor) && wasApplied(state)) return undefined as A;
+      return yield* request(operation, error);
+    },
+  );
 
   const sendTurn: ProviderAdapterShape<ProviderAdapterError>["sendTurn"] = (input) => {
     let createdTurn: ActiveTurn | undefined;
@@ -2419,26 +2544,29 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                 ),
               );
         const previousModel = ctx.session.model ? decodePiModelSlug(ctx.session.model) : undefined;
-        yield* runPreflight(
+        yield* applyMutationWithTimeoutRecovery(
+          ctx,
           pendingPreflight,
-          ctx.client
-            .setModel(parsed.provider, parsed.modelId)
-            .pipe(Effect.mapError((cause) => request("set_model", cause))),
+          "set_model",
+          ctx.client.setModel(parsed.provider, parsed.modelId),
+          (state) => state.model?.provider === parsed.provider && state.model.id === parsed.modelId,
         );
         if (thinkingLevel !== undefined) {
-          yield* runPreflight(
+          yield* applyMutationWithTimeoutRecovery(
+            ctx,
             pendingPreflight,
-            ctx.client.setThinkingLevel(thinkingLevel).pipe(
-              Effect.mapError((cause) => request("set_thinking_level", cause)),
-              Effect.onError(() =>
-                previousModel &&
-                (previousModel.provider !== parsed.provider ||
-                  previousModel.modelId !== parsed.modelId)
-                  ? ctx.client
-                      .setModel(previousModel.provider, previousModel.modelId)
-                      .pipe(Effect.ignore)
-                  : Effect.void,
-              ),
+            "set_thinking_level",
+            ctx.client.setThinkingLevel(thinkingLevel),
+            (state) => state.thinkingLevel === thinkingLevel,
+          ).pipe(
+            Effect.onError(() =>
+              previousModel &&
+              (previousModel.provider !== parsed.provider ||
+                previousModel.modelId !== parsed.modelId)
+                ? ctx.client
+                    .setModel(previousModel.provider, previousModel.modelId)
+                    .pipe(Effect.ignore)
+                : Effect.void,
             ),
           );
           ctx.thinkingLevel = thinkingLevel;
