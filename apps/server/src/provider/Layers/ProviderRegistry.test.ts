@@ -766,6 +766,47 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ]);
       });
 
+      it("drops Pi models after an authoritative empty inventory and retains them on failure", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("pi"),
+          driver: ProviderDriverKind.make("pi"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-07-17T00:00:00.000Z",
+          version: null,
+          models: [
+            {
+              slug: "cliproxy-group/deepseek-v4-flash",
+              name: "DeepSeek V4 Flash",
+              isCustom: false,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const successfulEmpty = {
+          ...previousProvider,
+          status: "warning",
+          auth: { status: "unknown" },
+          checkedAt: "2026-07-17T00:01:00.000Z",
+          models: [],
+          message: "Pi reported no models.",
+        } satisfies ServerProvider;
+        const failedEmpty = {
+          ...successfulEmpty,
+          status: "error",
+          message: "Pi inventory failed.",
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, successfulEmpty).models, []);
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, failedEmpty).models, [
+          ...previousProvider.models,
+        ]);
+      });
+
       it("retains stale OpenCode models when a refresh fails", () => {
         const previousProvider = {
           instanceId: ProviderInstanceId.make("opencode"),

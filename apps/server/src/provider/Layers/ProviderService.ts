@@ -947,10 +947,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         Effect.map((lock) => [lock, new Map(locks).set(threadId, lock)] as const),
       );
     });
-  const withThreadStartLock = <A, E, R>(
-    threadId: ThreadId,
-    effect: Effect.Effect<A, E, R>,
-  ) => Effect.flatMap(getThreadStartLock(threadId), (lock) => lock.withPermit(effect));
+  const withThreadStartLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(getThreadStartLock(threadId), (lock) => lock.withPermit(effect));
 
   /**
    * Interruption-safe acquire/use/rollback for publishing a newly started
@@ -982,38 +980,60 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ProviderSession,
     ProviderAdapterError | ProviderValidationError | ProviderSessionDirectoryPersistenceError
   > =>
-    Effect.gen(function* () {
-      const preparedMcp = yield* prepareMcpSession(input.threadId, input.providerInstanceId);
-      const committed = yield* Ref.make(false);
-      return yield* Effect.acquireUseRelease(
-        input.start.pipe(Effect.onError(() => rollbackCandidateMcpSession(preparedMcp))),
-        (session) =>
-          Effect.gen(function* () {
-            if (session.provider !== input.expectedProvider) {
-              return yield* Effect.fail(
-                toValidationError(input.operation, input.mismatchIssue(session.provider)),
-              );
-            }
-            const sessionWithInstance = {
-              ...session,
-              providerInstanceId: input.providerInstanceId,
-            };
-            yield* upsertSessionBinding(sessionWithInstance, input.threadId, input.upsertExtra);
-            yield* Ref.set(committed, true);
-            yield* commitCandidateMcpSession(preparedMcp);
-            return sessionWithInstance;
-          }),
-        (started, exit) =>
-          Effect.gen(function* () {
-            if (yield* Ref.get(committed)) return;
-            yield* rollbackUnpublishedSession({
-              threadId: input.threadId,
-              adapter: input.adapter,
-              preparedMcp,
-            });
-          }),
-      );
-    });
+    Effect.acquireUseRelease(
+      Effect.gen(function* () {
+        const preparedMcp = yield* prepareMcpSession(input.threadId, input.providerInstanceId);
+        return { preparedMcp, committed: yield* Ref.make(false) };
+      }),
+      ({ preparedMcp, committed }) =>
+        Effect.acquireUseRelease(
+          input.start,
+          (session) =>
+            Effect.gen(function* () {
+              if (session.provider !== input.expectedProvider) {
+                return yield* Effect.fail(
+                  toValidationError(input.operation, input.mismatchIssue(session.provider)),
+                );
+              }
+              const sessionWithInstance = {
+                ...session,
+                providerInstanceId: input.providerInstanceId,
+              };
+              yield* upsertSessionBinding(sessionWithInstance, input.threadId, input.upsertExtra);
+              yield* Ref.set(committed, true);
+              yield* commitCandidateMcpSession(preparedMcp);
+              return sessionWithInstance;
+            }),
+          () =>
+            Ref.get(committed).pipe(
+              Effect.flatMap((isCommitted) =>
+                isCommitted
+                  ? Effect.void
+                  : rollbackUnpublishedSession({
+                      threadId: input.threadId,
+                      adapter: input.adapter,
+                      preparedMcp,
+                    }),
+              ),
+            ),
+        ),
+      ({ preparedMcp, committed }) =>
+        Ref.get(committed).pipe(
+          Effect.flatMap((isCommitted) =>
+            isCommitted
+              ? Effect.void
+              : rollbackCandidateMcpSession(preparedMcp).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("provider.session.rollback-mcp-clear-failed", {
+                      threadId: input.threadId,
+                      provider: input.adapter.provider,
+                      cause,
+                    }),
+                  ),
+                ),
+          ),
+        ),
+    );
 
   const processRuntimeEvent = (
     source: {
