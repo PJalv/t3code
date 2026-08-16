@@ -108,8 +108,17 @@ export interface PiRpcClient {
 export interface PiRpcTransportOptions {
   readonly requestTimeoutMs?: number;
   readonly maxLineLength?: number;
+  readonly maxPendingRequests?: number;
   readonly close?: Effect.Effect<void>;
 }
+
+interface PendingRequest {
+  readonly command: string;
+  readonly waiter: Deferred.Deferred<PiRpcResponse, PiRpcError>;
+}
+
+export const PI_RPC_MAX_LINE_LENGTH = 16 * 1024 * 1024;
+export const PI_RPC_MAX_PENDING_REQUESTS = 32;
 
 const encoder = new TextEncoder();
 
@@ -118,8 +127,9 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
   options: PiRpcTransportOptions = {},
 ): Effect.fn.Return<PiRpcClient, never, Scope.Scope> {
   const timeoutMs = options.requestTimeoutMs ?? 120_000;
-  const maxLineLength = options.maxLineLength;
-  const pending = yield* Ref.make(new Map<string, Deferred.Deferred<PiRpcResponse, PiRpcError>>());
+  const maxLineLength = options.maxLineLength ?? PI_RPC_MAX_LINE_LENGTH;
+  const maxPendingRequests = options.maxPendingRequests ?? PI_RPC_MAX_PENDING_REQUESTS;
+  const pending = yield* Ref.make(new Map<string, PendingRequest>());
   const nextId = yield* Ref.make(1);
   const events = yield* Queue.unbounded<PiRpcEvent>();
   const writeLock = yield* Semaphore.make(1);
@@ -182,8 +192,8 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
       Effect.andThen(
         Ref.modify(pending, (current) => [Array.from(current.values()), new Map()] as const),
       ),
-      Effect.flatMap((waiters) =>
-        Effect.forEach(waiters, (waiter) => Deferred.fail(waiter, error), { discard: true }),
+      Effect.flatMap((requests) =>
+        Effect.forEach(requests, ({ waiter }) => Deferred.fail(waiter, error), { discard: true }),
       ),
       Effect.andThen(Queue.shutdown(events)),
     );
@@ -216,11 +226,20 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
         onSuccess: (message) => {
           if (isPiRpcResponse(message) && message.id !== undefined) {
             return Ref.modify(pending, (current) => {
-              const waiter = current.get(message.id!);
-              if (!waiter) return [Effect.void, current] as const;
+              const request = current.get(message.id!);
+              if (!request) return [Effect.void, current] as const;
               const next = new Map(current);
               next.delete(message.id!);
-              return [Deferred.succeed(waiter, message), next] as const;
+              const resolution =
+                message.command === request.command
+                  ? Deferred.succeed(request.waiter, message)
+                  : Deferred.fail(
+                      request.waiter,
+                      new PiRpcProtocolError({
+                        detail: `Pi RPC response command mismatch for ${message.id!}: expected ${request.command}, received ${message.command}`,
+                      }),
+                    );
+              return [resolution, next] as const;
             }).pipe(Effect.flatten);
           }
           if (typeof message === "object" && message !== null && !Array.isArray(message)) {
@@ -303,7 +322,15 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
         Effect.map((value) => `t3-pi-${String(value)}`),
       );
       const waiter = yield* Deferred.make<PiRpcResponse, PiRpcError>();
-      yield* Ref.update(pending, (current) => new Map(current).set(id, waiter));
+      const accepted = yield* Ref.modify(pending, (current) => {
+        if (current.size >= maxPendingRequests) return [false, current] as const;
+        return [true, new Map(current).set(id, { command, waiter })] as const;
+      });
+      if (!accepted) {
+        return yield* new PiRpcProtocolError({
+          detail: `Pi RPC has reached its ${String(maxPendingRequests)} in-flight request limit`,
+        });
+      }
       if (yield* Ref.get(closed)) {
         yield* remove(id);
         return yield* new PiRpcProcessExitedError({ detail: "Pi RPC client is closed" });
