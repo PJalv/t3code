@@ -27,6 +27,7 @@ class FakeClient implements PiRpcClient {
   readonly events = Stream.fromQueue(this.queue);
   readonly models: Array<[string, string]> = [];
   readonly thinking: PiThinkingLevel[] = [];
+  readonly prompts: string[] = [];
   closeCalls = 0;
   failPrompt = false;
   settle = true;
@@ -51,23 +52,25 @@ class FakeClient implements PiRpcClient {
     Effect.sync(() => {
       this.thinking.push(level);
     });
-  prompt = () => {
+  prompt = (message: string) => {
     const self = this;
+    self.prompts.push(message);
     return self.failPrompt
       ? Effect.fail(
           new PiRpcCommandError({ command: "prompt", requestId: "test", detail: "prompt failed" }),
         )
       : Effect.gen(function* () {
+          const output = self.output;
           yield* Queue.offerAll(
             self.queue,
             self.promptEvents ?? [
               {
                 type: "message_update",
-                assistantMessageEvent: { type: "text_delta", delta: `preface ${self.output}` },
+                assistantMessageEvent: { type: "text_delta", delta: `preface ${output}` },
               },
               {
                 type: "message_end",
-                message: { role: "assistant", content: [{ type: "text", text: self.output }] },
+                message: { role: "assistant", content: [{ type: "text", text: output }] },
               },
               ...(self.settle ? [{ type: "agent_settled" }] : []),
             ],
@@ -95,8 +98,14 @@ const input = {
   modelSelection: selection,
 };
 
-const makeHarness = (client: FakeClient, spawns: PiRpcSpawnOptions[], timeoutMs?: number) =>
-  Effect.scoped(
+const makeHarness = (
+  clientOrClients: FakeClient | readonly FakeClient[],
+  spawns: PiRpcSpawnOptions[],
+  timeoutMs?: number,
+) => {
+  const clients = Array.isArray(clientOrClients) ? clientOrClients : [clientOrClients];
+  let clientIndex = 0;
+  return Effect.scoped(
     Effect.gen(function* () {
       const textGeneration = yield* makePiTextGeneration(
         settings,
@@ -105,7 +114,7 @@ const makeHarness = (client: FakeClient, spawns: PiRpcSpawnOptions[], timeoutMs?
           Effect.acquireRelease(
             Effect.sync(() => {
               spawns.push(options);
-              return client;
+              return clients[Math.min(clientIndex++, clients.length - 1)]!;
             }),
             (opened) => opened.close(),
           ),
@@ -114,6 +123,7 @@ const makeHarness = (client: FakeClient, spawns: PiRpcSpawnOptions[], timeoutMs?
       return yield* textGeneration.generateCommitMessage(input);
     }),
   ).pipe(Effect.provide(NodeServices.layer));
+};
 
 it.effect("selects the decoded model and thinking level, then parses assistant text", () => {
   const client = new FakeClient();
@@ -135,6 +145,41 @@ it.effect("selects the decoded model and thinking level, then parses assistant t
     ])
       assert.equal(spawns[0]?.args?.includes(arg), false);
     assert.equal(client.closeCalls, 1);
+  });
+});
+
+it.effect("retries once when Pi returns invalid structured output", () => {
+  const firstClient = new FakeClient();
+  firstClient.output = "TEST_OK";
+  const retryClient = new FakeClient();
+  retryClient.output = '{"subject":"Recovered Pi generation","body":"Valid JSON."}';
+  const spawns: PiRpcSpawnOptions[] = [];
+  return Effect.gen(function* () {
+    const result = yield* makeHarness([firstClient, retryClient], spawns);
+
+    assert.deepEqual(result, { subject: "Recovered Pi generation", body: "Valid JSON." });
+    assert.equal(spawns.length, 2);
+    assert.equal(firstClient.closeCalls, 1);
+    assert.equal(retryClient.closeCalls, 1);
+    assert.match(retryClient.prompts[0] ?? "", /previous response was not valid JSON/);
+  });
+});
+
+it.effect("fails after one structured-output retry", () => {
+  const firstClient = new FakeClient();
+  firstClient.output = "TEST_OK";
+  const retryClient = new FakeClient();
+  retryClient.output = "still not JSON";
+  const spawns: PiRpcSpawnOptions[] = [];
+  return Effect.gen(function* () {
+    const result = yield* makeHarness([firstClient, retryClient], spawns).pipe(Effect.result);
+
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure")
+      assert.equal(Schema.is(TextGenerationError)(result.failure), true);
+    assert.equal(spawns.length, 2);
+    assert.equal(firstClient.closeCalls, 1);
+    assert.equal(retryClient.closeCalls, 1);
   });
 });
 
