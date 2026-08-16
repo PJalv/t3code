@@ -236,6 +236,49 @@ describe("PiRpcClient transport", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("rejects a response whose command does not match its request id", () =>
+    Effect.gen(function* () {
+      const test = yield* makeIo();
+      const client = yield* makePiRpcTransport(test.io);
+      const stateFiber = yield* client.getState().pipe(Effect.flip, Effect.forkScoped);
+      yield* Queue.take(test.writes);
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          '{"type":"response","command":"get_commands","success":true,"id":"t3-pi-1","data":{"sessionId":"wrong"}}\n',
+        ),
+      );
+      const error = yield* Fiber.join(stateFiber);
+      expect(error).toBeInstanceOf(PiRpcProtocolError);
+      if (error._tag !== "PiRpcProtocolError") throw error;
+      expect(error.detail).toContain("expected get_state, received get_commands");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("bounds the number of in-flight requests", () =>
+    Effect.gen(function* () {
+      const test = yield* makeIo();
+      const client = yield* makePiRpcTransport(test.io, { maxPendingRequests: 1 });
+      const first = yield* client.getState().pipe(Effect.forkScoped);
+      const firstWrite = yield* Queue.take(test.writes);
+
+      const rejected = yield* client.getState().pipe(Effect.flip);
+      expect(rejected).toBeInstanceOf(PiRpcProtocolError);
+      if (rejected._tag !== "PiRpcProtocolError") throw rejected;
+      expect(rejected.detail).toContain("1 in-flight request limit");
+      expect(Option.isNone(yield* Queue.poll(test.writes))).toBe(true);
+      expect(firstWrite).toContain('"id":"t3-pi-1"');
+
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          '{"type":"response","command":"get_state","success":true,"id":"t3-pi-1","data":{}}\n',
+        ),
+      );
+      yield* Fiber.join(first);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("reports command failures without poisoning later requests", () =>
     Effect.gen(function* () {
       const test = yield* makeIo();
