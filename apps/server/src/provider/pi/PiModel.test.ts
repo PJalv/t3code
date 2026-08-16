@@ -14,6 +14,44 @@ describe("PiModel", () => {
     (slug) => expect(decodePiModelSlug(slug)).toBeUndefined(),
   );
 
+  it("derives supported thinking levels from Pi's model map", () => {
+    const [mapped, defaultMapped, nonReasoning] = mapPiDiscoveredModels([
+      {
+        provider: "google",
+        id: "gemini-pro",
+        name: "Gemini Pro",
+        reasoning: true,
+        thinkingLevelMap: {
+          off: null,
+          minimal: null,
+          medium: null,
+          high: "HIGH",
+          xhigh: "ignored-only-when-string",
+        },
+      },
+      {
+        provider: "google",
+        id: "gemini-defaults",
+        name: "Gemini Defaults",
+        reasoning: true,
+      },
+      {
+        provider: "google",
+        id: "gemini-flash",
+        name: "Gemini Flash",
+        reasoning: false,
+      },
+    ]);
+
+    const thinkingOptionIds = (model: typeof mapped | undefined) => {
+      const descriptor = model?.capabilities?.optionDescriptors?.[0];
+      return descriptor?.type === "select" ? descriptor.options.map((option) => option.id) : [];
+    };
+    expect(thinkingOptionIds(mapped)).toEqual(["low", "high", "xhigh"]);
+    expect(thinkingOptionIds(defaultMapped)).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(nonReasoning?.capabilities).toBeNull();
+  });
+
   it("maps Pi's configured model and thinking defaults", () => {
     expect(
       mapPiDiscoveredModels(

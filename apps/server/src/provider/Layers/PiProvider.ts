@@ -157,6 +157,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
       id: model.id,
       name: model.name?.trim() || model.id,
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+      ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
     })),
     snapshot.state.model
       ? {
