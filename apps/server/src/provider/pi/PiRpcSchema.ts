@@ -17,6 +17,7 @@ export const PiRpcModel = Schema.Struct({
   provider: Schema.String,
   api: Schema.optional(Schema.String),
   reasoning: Schema.optional(Schema.Boolean),
+  thinkingLevelMap: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   contextWindow: Schema.optional(Schema.Number),
   maxTokens: Schema.optional(Schema.Number),
 });
