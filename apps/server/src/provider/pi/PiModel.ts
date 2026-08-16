@@ -7,6 +7,7 @@ export interface PiDiscoveredModel {
   readonly id: string;
   readonly name: string;
   readonly reasoning?: boolean;
+  readonly thinkingLevelMap?: Readonly<Record<string, unknown>>;
   readonly thinkingLevels?: ReadonlyArray<string>;
 }
 
@@ -18,6 +19,19 @@ export interface PiModelDefaults {
 
 const validSegment = (value: string): boolean => value.length > 0 && value.trim() === value;
 const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+const derivePiThinkingLevels = (
+  reasoning: boolean | undefined,
+  thinkingLevelMap: Readonly<Record<string, unknown>> | undefined,
+): ReadonlyArray<string> => {
+  if (!reasoning) return [];
+  return PI_THINKING_LEVELS.filter((level) => {
+    const mapped = thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return typeof mapped === "string";
+    return true;
+  });
+};
 
 export function encodePiModelSlug(provider: string, modelId: string): string | undefined {
   if (!validSegment(provider) || !validSegment(modelId)) return undefined;
@@ -50,7 +64,8 @@ export function piDiscoveredModelToServerProviderModel(
   const slug = encodePiModelSlug(model.provider, model.id);
   if (!slug || !validSegment(model.name)) return undefined;
   const thinkingLevels =
-    model.thinkingLevels?.filter(validSegment) ?? (model.reasoning ? PI_THINKING_LEVELS : []);
+    model.thinkingLevels?.filter(validSegment) ??
+    derivePiThinkingLevels(model.reasoning, model.thinkingLevelMap);
   const isDefault = defaults?.provider === model.provider && defaults.modelId === model.id;
   const defaultThinkingLevel =
     defaults?.thinkingLevel && thinkingLevels.includes(defaults.thinkingLevel)

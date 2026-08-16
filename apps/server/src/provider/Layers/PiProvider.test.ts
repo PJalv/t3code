@@ -46,7 +46,13 @@ it.effect("maps Pi RPC inventory into selectable models", () =>
         getAvailableModels: () =>
           Effect.succeed({
             models: [
-              { provider: "openai compatible", id: "gpt/5", name: " GPT Five ", reasoning: true },
+              {
+                provider: "openai compatible",
+                id: "gpt/5",
+                name: " GPT Five ",
+                reasoning: true,
+                thinkingLevelMap: { xhigh: "xhigh", max: null },
+              },
             ],
           }),
         getCommands: () =>
@@ -123,6 +129,10 @@ it.effect("maps Pi RPC inventory into selectable models", () =>
     assert.equal(snapshot.models[0]?.isDefault, true);
     assert.equal(snapshot.models[0]?.capabilities?.optionDescriptors?.[0]?.id, "thinkingLevel");
     assert.equal(snapshot.models[0]?.capabilities?.optionDescriptors?.[0]?.currentValue, "medium");
+    assert.deepEqual(
+      snapshot.models[0]?.capabilities?.optionDescriptors?.[0]?.options?.map((option) => option.id),
+      ["off", "minimal", "low", "medium", "high", "xhigh"],
+    );
     assert.match(snapshot.message ?? "", /MCP support is available/u);
     assert.deepEqual(snapshot.slashCommands, [
       { name: "mcp", description: "Show MCP server status" },
