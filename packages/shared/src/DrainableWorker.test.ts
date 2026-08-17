@@ -3,7 +3,7 @@ import { describe, expect } from "vite-plus/test";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 
-import { makeDrainableWorker } from "./DrainableWorker.ts";
+import { makeDrainableWorker, makeKeyedDrainableWorker } from "./DrainableWorker.ts";
 
 describe("makeDrainableWorker", () => {
   it.live("waits for work enqueued during active processing before draining", () =>
@@ -51,6 +51,44 @@ describe("makeDrainableWorker", () => {
         yield* Deferred.await(drained);
 
         expect(processed).toEqual(["first", "second"]);
+      }),
+    ),
+  );
+});
+
+describe("makeKeyedDrainableWorker", () => {
+  it.live("preserves per-key order without cross-key head-of-line blocking", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const processed: string[] = [];
+        const noisyStarted = yield* Deferred.make<void>();
+        const releaseNoisy = yield* Deferred.make<void>();
+        const quietProcessed = yield* Deferred.make<void>();
+
+        const worker = yield* makeKeyedDrainableWorker<string, string>((item) =>
+          Effect.gen(function* () {
+            if (item === "noisy-first") {
+              yield* Deferred.succeed(noisyStarted, undefined).pipe(Effect.orDie);
+              yield* Deferred.await(releaseNoisy);
+            }
+            processed.push(item);
+            if (item === "quiet") {
+              yield* Deferred.succeed(quietProcessed, undefined).pipe(Effect.orDie);
+            }
+          }),
+        );
+
+        yield* worker.enqueue("noisy", "noisy-first");
+        yield* worker.enqueue("noisy", "noisy-second");
+        yield* Deferred.await(noisyStarted);
+
+        yield* worker.enqueue("quiet", "quiet");
+        yield* Deferred.await(quietProcessed);
+        expect(processed).toEqual(["quiet"]);
+
+        yield* Deferred.succeed(releaseNoisy, undefined);
+        yield* worker.drain;
+        expect(processed).toEqual(["quiet", "noisy-first", "noisy-second"]);
       }),
     ),
   );

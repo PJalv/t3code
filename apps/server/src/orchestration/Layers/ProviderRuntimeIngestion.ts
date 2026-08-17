@@ -30,8 +30,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { formatTokens } from "@t3tools/shared/usageFormat";
+import { makeKeyedDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -2265,13 +2264,20 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  // Preserve event order within each thread without allowing a noisy provider
+  // session to delay lifecycle projection for every other thread.
+  const worker = yield* makeKeyedDrainableWorker(processInputSafely);
+  const enqueueInput = (input: RuntimeIngestionInput) =>
+    worker.enqueue(
+      input.source === "runtime" ? input.event.threadId : input.event.payload.threadId,
+      input,
+    );
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
       yield* forkParked(
         Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: "runtime", event }),
+          enqueueInput({ source: "runtime", event }),
         ),
       );
       yield* forkParked(
@@ -2279,7 +2285,7 @@ const make = Effect.gen(function* () {
           if (event.type !== "thread.turn-start-requested") {
             return Effect.void;
           }
-          return worker.enqueue({ source: "domain", event });
+          return enqueueInput({ source: "domain", event });
         }),
       );
     });
