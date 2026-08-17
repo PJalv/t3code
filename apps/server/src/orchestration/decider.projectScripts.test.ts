@@ -349,6 +349,108 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
     }),
   );
 
+  it.effect("rejects a replayed turn start with a new command id", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const initial = createEmptyReadModel(now);
+      const withProject = yield* projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-replay"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-replay"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create-replay"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create-replay"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-replay"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-replay",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const withThread = yield* projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-replay"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-replay"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-thread-create-replay"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-thread-create-replay"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-replay"),
+          projectId: asProjectId("project-replay"),
+          title: "Thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("pi"),
+            model: "cliproxy-group/deepseek-v4-flash",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const readModel = yield* projectEvent(withThread, {
+        sequence: 3,
+        eventId: asEventId("evt-message-replay"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-replay"),
+        type: "thread.message-sent",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-turn-start-original"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-turn-start-original"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-replay"),
+          messageId: asMessageId("message-replay"),
+          role: "user",
+          text: "inspect reconnect state",
+          attachments: [],
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-turn-start-reconnected"),
+            threadId: ThreadId.make("thread-replay"),
+            message: {
+              messageId: asMessageId("message-replay"),
+              role: "user",
+              text: "inspect reconnect state",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+          readModel,
+        }),
+      );
+
+      expect(failure.message).toContain(
+        "Message 'message-replay' already exists on thread 'thread-replay'.",
+      );
+    }),
+  );
+
   it.effect("emits thread.runtime-mode-set from thread.runtime-mode.set", () =>
     Effect.gen(function* () {
       const now = "2026-01-01T00:00:00.000Z";

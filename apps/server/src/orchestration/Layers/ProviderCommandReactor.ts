@@ -100,8 +100,9 @@ function mapProviderSessionStatusToOrchestrationStatus(
   }
 }
 
-const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
-  event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
+const turnStartKeyForEvent = (
+  event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+): string => `message:${event.payload.threadId}:${event.payload.messageId}`;
 
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
@@ -650,15 +651,18 @@ const make = Effect.gen(function* () {
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
     if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
+      const activeRuntimeTurn = activeSession?.status === "running";
       yield* setThreadSession({
         threadId,
         session: {
           threadId,
-          status: "starting",
+          status: activeRuntimeTurn ? "running" : "starting",
           providerName: activeSession?.provider ?? preferredProvider,
           providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
           runtimeMode: desiredRuntimeMode,
-          activeTurnId: null,
+          activeTurnId: activeRuntimeTurn
+            ? (activeSession.activeTurnId ?? thread.session?.activeTurnId ?? null)
+            : null,
           lastError: null,
           updatedAt: createdAt,
         },
