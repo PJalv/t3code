@@ -10,6 +10,7 @@
  */
 import * as Scope from "effect/Scope";
 import * as Effect from "effect/Effect";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as TxQueue from "effect/TxQueue";
 import * as TxRef from "effect/TxRef";
 
@@ -25,6 +26,14 @@ export interface DrainableWorker<A> {
   /**
    * Resolves when the queue is empty and the worker is idle (not processing).
    */
+  readonly drain: Effect.Effect<void>;
+}
+
+export interface KeyedDrainableWorker<K, A> {
+  /** Enqueue work in the serial lane selected by its key. */
+  readonly enqueue: (key: K, item: A) => Effect.Effect<void>;
+
+  /** Resolves when every key lane created so far is drained. */
   readonly drain: Effect.Effect<void>;
 }
 
@@ -67,4 +76,47 @@ export const makeDrainableWorker = <A, E, R>(
       );
 
     return { enqueue, drain } satisfies DrainableWorker<A>;
+  });
+
+/**
+ * Create independent serial workers for keyed work.
+ *
+ * Items with the same key retain strict enqueue order. Different keys process
+ * concurrently, so a noisy or slow key cannot block unrelated work. Workers
+ * live for the parent scope and are created atomically on first use.
+ */
+export const makeKeyedDrainableWorker = <K, A, E, R>(
+  process: (item: A) => Effect.Effect<void, E, R>,
+): Effect.Effect<KeyedDrainableWorker<K, A>, never, Scope.Scope | R> =>
+  Effect.gen(function* () {
+    const workersRef = yield* SynchronizedRef.make<ReadonlyMap<K, DrainableWorker<A>>>(new Map());
+
+    const workerFor = (key: K) =>
+      SynchronizedRef.modifyEffect(workersRef, (workers) => {
+        const existing = workers.get(key);
+        if (existing !== undefined) {
+          return Effect.succeed([existing, workers] as const);
+        }
+        return makeDrainableWorker(process).pipe(
+          Effect.map((worker) => {
+            const next = new Map(workers);
+            next.set(key, worker);
+            return [worker, next as ReadonlyMap<K, DrainableWorker<A>>] as const;
+          }),
+        );
+      });
+
+    const enqueue = (key: K, item: A) =>
+      workerFor(key).pipe(Effect.flatMap((worker) => worker.enqueue(item)));
+
+    const drain = SynchronizedRef.get(workersRef).pipe(
+      Effect.flatMap((workers) =>
+        Effect.forEach(workers.values(), (worker) => worker.drain, {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
+    );
+
+    return { enqueue, drain } satisfies KeyedDrainableWorker<K, A>;
   });
