@@ -1061,6 +1061,75 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  it("preserves an authoritative active runtime turn during a replayed start", async () => {
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: ProviderInstanceId.make("pi"),
+        model: "cliproxy-group/deepseek-v4-flash",
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const activeTurnId = asTurnId("turn-active-pi");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-stale-starting"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "starting",
+          providerName: "pi",
+          providerInstanceId: ProviderInstanceId.make("pi"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    harness.runtimeSessions.push({
+      provider: ProviderDriverKind.make("pi"),
+      providerInstanceId: ProviderInstanceId.make("pi"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.make("thread-1"),
+      cwd: "/tmp/provider-project",
+      model: "cliproxy-group/deepseek-v4-flash",
+      activeTurnId,
+      resumeCursor: { opaque: "resume-active-pi" },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-replayed-active"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-replayed-active"),
+          role: "user",
+          text: "continue the active Pi turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession).not.toHaveBeenCalled();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session).toMatchObject({
+      status: "running",
+      activeTurnId,
+    });
+  });
+
   effectIt.effect("starts a turn and generates its title without loading old message bodies", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
