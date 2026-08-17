@@ -34,7 +34,6 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -1047,7 +1046,8 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
-  const providerSessionDirectory = yield* ProviderSessionDirectory;
+  const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
+  const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const serverSettingsService = yield* ServerSettingsService;
@@ -1791,38 +1791,6 @@ const make = Effect.gen(function* () {
 
       const thread = yield* resolveThreadRuntimeContext(event.threadId);
       if (!thread) return;
-
-      // A session.exited from a superseded provider instance must not stop the
-      // thread's replacement session. The persisted binding names the current
-      // bound instance; when the event provably names a different instance,
-      // ignore it entirely. When either side is missing we cannot prove a
-      // mismatch, so the event is applied normally (a fresh session with no
-      // binding yet must still be able to start, and legacy events without an
-      // instance id remain accepted). Same-instance internal replacement is
-      // owned by the adapter and never reaches this gate.
-      if (event.type === "session.exited") {
-        const binding = yield* providerSessionDirectory
-          .getBinding(thread.id)
-          .pipe(Effect.map(Option.getOrUndefined));
-        const boundInstanceId = binding?.providerInstanceId;
-        if (
-          boundInstanceId !== undefined &&
-          event.providerInstanceId !== undefined &&
-          !sameId(boundInstanceId, event.providerInstanceId)
-        ) {
-          return;
-        }
-      }
-
-      let loadedThreadDetail: OrchestrationThread | null | undefined;
-      const getLoadedThreadDetail = () =>
-        Effect.gen(function* () {
-          if (loadedThreadDetail !== undefined) {
-            return loadedThreadDetail;
-          }
-          loadedThreadDetail = (yield* resolveThreadDetail(thread.id)) ?? null;
-          return loadedThreadDetail;
-        });
 
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
