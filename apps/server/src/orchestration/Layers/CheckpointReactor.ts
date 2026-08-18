@@ -21,7 +21,7 @@ import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
 import * as Stream from "effect/Stream";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeKeyedDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
@@ -1050,7 +1050,9 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  // Per-thread checkpoint lanes: a busy session capturing Git checkpoints
+  // must not delay another session's checkpoint projection.
+  const worker = yield* makeKeyedDrainableWorker<ThreadId>()(processInputSafely);
 
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
     if (process.env.T3_DISABLE_CHECKPOINTS === "1") {
@@ -1066,7 +1068,7 @@ const make = Effect.gen(function* () {
         ) {
           return Effect.void;
         }
-        return worker.enqueue({ source: "domain", event });
+        return worker.enqueue(event.payload.threadId, { source: "domain", event });
       }),
     );
 
@@ -1080,7 +1082,7 @@ const make = Effect.gen(function* () {
         ) {
           return Effect.void;
         }
-        return worker.enqueue({ source: "runtime", event });
+        return worker.enqueue(event.threadId, { source: "runtime", event });
       }),
     );
   });
