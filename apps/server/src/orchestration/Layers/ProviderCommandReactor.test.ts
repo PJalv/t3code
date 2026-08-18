@@ -3457,6 +3457,102 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+
+  effectIt.effect(
+    "processes a Stop on thread A while another thread's session start is busy (per-thread control lanes)",
+    () =>
+      Effect.gen(function* () {
+        const releaseBusy = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            startSessionEffect: (session) =>
+              session.threadId === ThreadId.make("thread-2")
+                ? Deferred.await(releaseBusy).pipe(Effect.as(session))
+                : Effect.succeed(session),
+          }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+
+        // Give thread-1 an active session so its Stop reaches the adapter.
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-set-a"),
+          threadId: ThreadId.make("thread-1"),
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: asTurnId("turn-1"),
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        });
+
+        // Create thread-2 so its turn-start below is a valid command.
+        yield* harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-thread-create-b"),
+          threadId: ThreadId.make("thread-2"),
+          projectId: asProjectId("project-1"),
+          title: "Thread B",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+        });
+
+        // Start a turn on thread-2 whose session startup blocks (simulates a
+        // slow or busy parallel session). In the single-worker design this held
+        // the only control lane and would block thread-1's Stop.
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-b"),
+          threadId: ThreadId.make("thread-2"),
+          message: {
+            messageId: asMessageId("user-message-b"),
+            role: "user",
+            text: "busy work",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+
+        // Confirm thread-2's session startup is actually in flight and blocked.
+        yield* Effect.promise(() =>
+          waitFor(() =>
+            harness.startSession.mock.calls.some(
+              ([threadId]) => threadId === ThreadId.make("thread-2"),
+            ),
+          ),
+        );
+
+        // Stop thread-1. This must be processed even though thread-2's lane is
+        // still blocked, because each thread owns an independent control lane.
+        yield* harness.engine.dispatch({
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-turn-interrupt-a"),
+          threadId: ThreadId.make("thread-1"),
+          turnId: asTurnId("turn-1"),
+          createdAt: now,
+        });
+
+        yield* Effect.promise(() => waitFor(() => harness.interruptTurn.mock.calls.length === 1));
+        expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({ threadId: "thread-1" });
+
+        // Release thread-2's session startup so the harness can tear down cleanly.
+        yield* Deferred.succeed(releaseBusy, undefined);
+      }),
+  );
+
   it("starts a fresh session when only projected session state exists", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

@@ -2266,7 +2266,7 @@ const make = Effect.gen(function* () {
 
   // Preserve event order within each thread without allowing a noisy provider
   // session to delay lifecycle projection for every other thread.
-  const worker = yield* makeKeyedDrainableWorker(processInputSafely);
+  const worker = yield* makeKeyedDrainableWorker<ThreadId>()(processInputSafely);
   const enqueueInput = (input: RuntimeIngestionInput) =>
     worker.enqueue(
       input.source === "runtime" ? input.event.threadId : input.event.payload.threadId,

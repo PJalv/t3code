@@ -27,7 +27,7 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeKeyedDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
@@ -1175,7 +1175,9 @@ const make = Effect.gen(function* () {
         }),
       ),
   );
-  const threadTitleRegenerationWorker = yield* makeDrainableWorker(
+  // Per-thread title regeneration lane: one thread must not block another
+  // thread's title regeneration behind its own regeneration work.
+  const threadTitleRegenerationWorker = yield* makeKeyedDrainableWorker<ThreadId>()(
     processThreadTitleRegenerationSafely,
   );
 
@@ -1703,7 +1705,7 @@ const make = Effect.gen(function* () {
     });
     switch (event.type) {
       case "thread.meta-updated":
-        yield* threadTitleRegenerationWorker.enqueue(event);
+        yield* threadTitleRegenerationWorker.enqueue(event.payload.threadId, event);
         return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThreadShell(event.payload.threadId);
@@ -1767,7 +1769,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  // Control events (turn start, turn interrupt/stop, session stop, approval
+  // and user-input responses) are processed on independent per-thread lanes.
+  // This preserves strict ordering within a thread while letting a slow or
+  // busy session never delay control of an unrelated parallel session: a Stop
+  // for thread A is no longer queued behind thread B's ongoing execution.
+  const worker = yield* makeKeyedDrainableWorker<ThreadId>()(processDomainEventSafely);
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations().pipe(
@@ -1792,7 +1799,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.session-stop-requested" ||
         event.type === "thread.settled"
       ) {
-        return yield* worker.enqueue(event);
+        return yield* worker.enqueue(event.payload.threadId, event);
       }
     });
 
