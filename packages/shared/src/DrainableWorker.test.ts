@@ -65,7 +65,7 @@ describe("makeKeyedDrainableWorker", () => {
         const releaseNoisy = yield* Deferred.make<void>();
         const quietProcessed = yield* Deferred.make<void>();
 
-        const worker = yield* makeKeyedDrainableWorker<string, string>((item) =>
+        const worker = yield* makeKeyedDrainableWorker<string>()((item: string) =>
           Effect.gen(function* () {
             if (item === "noisy-first") {
               yield* Deferred.succeed(noisyStarted, undefined).pipe(Effect.orDie);
