@@ -84,6 +84,7 @@ import {
   deriveTimelineEntries,
   selectMessageImageResources,
   workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolSuccess,
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
