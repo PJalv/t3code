@@ -741,10 +741,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // alongside the prior credential (never in place of it) and is the only
       // config exposed while the new adapter starts.
       const prior = McpProviderSession.readMcpProviderSession(threadId);
-      const credential = yield* McpSessionRegistry.issueActiveMcpCredential({
-        threadId,
-        providerInstanceId,
-      });
+      const credential = yield* issueMcpCredential({ threadId, providerInstanceId });
       if (credential) {
         yield* Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config));
       }

@@ -1038,7 +1038,12 @@ export function deriveMessagesTimelineRows(input: {
           });
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          // A group of file changes defaults to expanded so the inline provider
+          // file diffs stay visible without an extra click; command/tool groups
+          // keep the collapsed toggle summary.
+          const expanded =
+            (input.expandedWorkGroupIds?.has(groupId) ?? false) ||
+            visibleGroupedEntries.some((entry) => entry.itemType === "file_change");
           const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           const primarySourceEntry = visibleGroupedEntries.find(
             (entry) => entry.toolSource !== undefined,

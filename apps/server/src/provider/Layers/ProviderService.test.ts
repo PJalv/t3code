@@ -78,7 +78,6 @@ import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMoc
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
-import { EnvironmentId } from "@t3tools/contracts";
 import { HttpServer } from "effect/unstable/http";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
