@@ -3203,7 +3203,7 @@ describe("PiAdapter", () => {
     );
   });
 
-  it.effect("restarts the turn when the model or thinking level changes mid-run", () => {
+  it.effect("steers a follow-up mid-run after a model or thinking level change", () => {
     const h = makeHarness();
     const changedSelection = createModelSelection(instanceId, "openai/gpt-5.1", [
       { id: "thinkingLevel", value: "high" },
@@ -3216,33 +3216,19 @@ describe("PiAdapter", () => {
           input: "first",
           modelSelection,
         });
-        const events: ProviderRuntimeEvent[] = [];
-        yield* adapter.streamEvents.pipe(
-          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
-          Effect.forkChild,
-        );
-        const restarted = yield* adapter.sendTurn({
+        const steered = yield* adapter.sendTurn({
           threadId: ThreadId.make("thread"),
           input: "steer",
           modelSelection: changedSelection,
         });
-        assert.notEqual(restarted.turnId, first.turnId);
-        // The in-flight generation was interrupted and its turn settled as
-        // interrupted; the follow-up then started a fresh turn under the new
-        // selection instead of steering into the model-locked active turn.
-        assert.equal(h.client.calls.abort, 1);
-        while (
-          !events.some(
-            (event) => event.type === "turn.completed" && event.payload.state === "interrupted",
-          ) ||
-          !events.some(
-            (event) => event.type === "turn.started" && event.payload.model === "openai/gpt-5.1",
-          )
-        ) {
-          yield* Effect.yieldNow;
-        }
+        // A changed selection must not hard-fail or restart the turn: the
+        // follow-up is steered into the running turn (same id) and queued until
+        // the in-progress tool call completes, while the new selection is
+        // applied best-effort for the steered continuation.
+        assert.equal(steered.turnId, first.turnId);
+        assert.equal(h.client.calls.abort, 0);
         assert.equal(h.client.calls.prompt, 2);
-        assert.equal(h.client.calls.prompts[1]?.streamingBehavior, undefined);
+        assert.equal(h.client.calls.prompts[1]?.streamingBehavior, "steer");
         assert.ok(h.client.calls.models.some((m) => m.id === "gpt-5.1"));
         assert.ok(h.client.calls.thinking.some((t) => t === "high"));
         yield* Queue.offer(h.client.input, { type: "agent_settled" });
