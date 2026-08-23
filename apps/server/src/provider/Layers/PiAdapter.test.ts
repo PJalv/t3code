@@ -3203,7 +3203,7 @@ describe("PiAdapter", () => {
     );
   });
 
-  it.effect("rejects model changes in steering messages", () => {
+  it.effect("restarts the turn when the model or thinking level changes mid-run", () => {
     const h = makeHarness();
     const changedSelection = createModelSelection(instanceId, "openai/gpt-5.1", [
       { id: "thinkingLevel", value: "high" },
@@ -3211,22 +3211,40 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        yield* adapter.sendTurn({
+        const first = yield* adapter.sendTurn({
           threadId: ThreadId.make("thread"),
           input: "first",
           modelSelection,
         });
-        const steered = yield* adapter
-          .sendTurn({
-            threadId: ThreadId.make("thread"),
-            input: "steer",
-            modelSelection: changedSelection,
-          })
-          .pipe(Effect.result);
-        assert.equal(steered._tag, "Failure");
-        if (steered._tag === "Failure")
-          assert.equal(steered.failure._tag, "ProviderAdapterValidationError");
-        assert.equal(h.client.calls.prompt, 1);
+        const events: ProviderRuntimeEvent[] = [];
+        yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild,
+        );
+        const restarted = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "steer",
+          modelSelection: changedSelection,
+        });
+        assert.notEqual(restarted.turnId, first.turnId);
+        // The in-flight generation was interrupted and its turn settled as
+        // interrupted; the follow-up then started a fresh turn under the new
+        // selection instead of steering into the model-locked active turn.
+        assert.equal(h.client.calls.abort, 1);
+        while (
+          !events.some(
+            (event) => event.type === "turn.completed" && event.payload.state === "interrupted",
+          ) ||
+          !events.some(
+            (event) => event.type === "turn.started" && event.payload.model === "openai/gpt-5.1",
+          )
+        ) {
+          yield* Effect.yieldNow;
+        }
+        assert.equal(h.client.calls.prompt, 2);
+        assert.equal(h.client.calls.prompts[1]?.streamingBehavior, undefined);
+        assert.ok(h.client.calls.models.some((m) => m.id === "gpt-5.1"));
+        assert.ok(h.client.calls.thinking.some((t) => t === "high"));
         yield* Queue.offer(h.client.input, { type: "agent_settled" });
       }),
     );
