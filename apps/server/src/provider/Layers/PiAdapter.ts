@@ -2632,43 +2632,65 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           ? getModelSelectionStringOptionValue(selection, "thinkingLevel")
           : undefined;
         if (steeringTurn && ctx.activeTurn === steeringTurn) {
-          if (
-            selection &&
+          const selectionChanged =
+            selection !== undefined &&
             (selectedModel !== steeringTurn.model ||
-              (thinking !== undefined && thinking !== steeringTurn.effort))
-          )
-            return yield* validation(
-              "sendTurn",
-              "Pi model and thinking level cannot change during an active turn.",
+              (thinking !== undefined && thinking !== steeringTurn.effort));
+          if (selectionChanged) {
+            // The user switched the session model or thinking level while a
+            // generation was running and sent a follow-up that must run with
+            // it. Pi applies both at the session level, so they cannot be
+            // steered onto the in-flight turn. Interrupt the running
+            // generation, settle it, and fall through to the fresh-turn path
+            // below, which starts a new turn with the new selection. Stray
+            // events from the aborted generation are dropped by handleEvent's
+            // `ctx.activeTurn !== turn || turn.terminal` guard.
+            yield* ctx.client.abort().pipe(
+              Effect.mapError((cause) => request("abort", cause)),
+              Effect.ignore,
             );
-          ctx.steeringPromptsInFlight += 1;
-          ctx.steeringGeneration += 1;
-          return {
-            _tag: "Steer" as const,
-            effect: ctx.client.prompt(input.input ?? "", images, "steer").pipe(
-              Effect.mapError((cause) => request("prompt", cause)),
-              Effect.tap(() =>
-                steeringTurn.interruptRequested
-                  ? ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)))
-                  : Effect.void,
-              ),
-              Effect.ensuring(
-                Effect.gen(function* () {
-                  ctx.steeringPromptsInFlight -= 1;
-                  const deferredSettlement = ctx.deferredSettlement;
-                  ctx.deferredSettlement = undefined;
-                  if (deferredSettlement)
-                    yield* handleEvent(ctx, deferredSettlement).pipe(Effect.orDie);
+            yield* publishTerminal(
+              ctx,
+              steeringTurn,
+              [
+                {
+                  type: "turn.completed",
+                  ...(yield* base(ctx, steeringTurn)),
+                  payload: { state: "interrupted", stopReason: "replaced" },
+                },
+              ],
+              "ready",
+            );
+          } else {
+            ctx.steeringPromptsInFlight += 1;
+            ctx.steeringGeneration += 1;
+            return {
+              _tag: "Steer" as const,
+              effect: ctx.client.prompt(input.input ?? "", images, "steer").pipe(
+                Effect.mapError((cause) => request("prompt", cause)),
+                Effect.tap(() =>
+                  steeringTurn.interruptRequested
+                    ? ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)))
+                    : Effect.void,
+                ),
+                Effect.ensuring(
+                  Effect.gen(function* () {
+                    ctx.steeringPromptsInFlight -= 1;
+                    const deferredSettlement = ctx.deferredSettlement;
+                    ctx.deferredSettlement = undefined;
+                    if (deferredSettlement)
+                      yield* handleEvent(ctx, deferredSettlement).pipe(Effect.orDie);
+                  }),
+                ),
+                Effect.uninterruptible,
+                Effect.as({
+                  threadId: input.threadId,
+                  turnId: steeringTurn.id,
+                  resumeCursor: ctx.cursor,
                 }),
               ),
-              Effect.uninterruptible,
-              Effect.as({
-                threadId: input.threadId,
-                turnId: steeringTurn.id,
-                resumeCursor: ctx.cursor,
-              }),
-            ),
-          };
+            };
+          }
         }
         const available = yield* runPreflight(
           pendingPreflight,
