@@ -2088,6 +2088,9 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
     return "disconnected";
   }
   if (session.status === "starting") return "connecting";
-  if (session.status === "running") return "running";
+  // Compaction blocks the agent mid-run; keep the phase as running so the
+  // working indicator stays up, and let the thread view swap its label to
+  // "Compacting" via a separate isCompacting flag.
+  if (session.status === "running" || session.status === "compacting") return "running";
   return "ready";
 }

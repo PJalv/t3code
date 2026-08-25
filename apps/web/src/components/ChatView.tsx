@@ -2606,6 +2606,21 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  // Current step for the in-chat working row: only for the running turn's own
+  // plan (deriveActivePlanState falls back to older turns' plans, which must
+  // not label fresh work). Falls back to the first pending step so an
+  // all-pending freshly written plan labels the row, matching the chip and
+  // the server's planProgress.
+  const workingStepLabel = useMemo(() => {
+    if (!activePlan || activePlan.turnId !== (activeLatestTurn?.turnId ?? null)) {
+      return null;
+    }
+    return (
+      activePlan.steps.find((step) => step.status === "inProgress")?.step ??
+      activePlan.steps.find((step) => step.status === "pending")?.step ??
+      null
+    );
+  }, [activeLatestTurn?.turnId, activePlan]);
   const showPlanFollowUpPrompt = shouldShowPlanFollowUpPrompt({
     pendingUserInputCount: pendingUserInputs.length,
     interactionMode,
@@ -2630,33 +2645,8 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const optimisticCompactionMessage = optimisticUserMessages.at(-1);
-  const pendingCompactionMessage =
-    isSendBusy &&
-    optimisticCompactionMessage !== undefined &&
-    isCompactCommandMessage(optimisticCompactionMessage)
-      ? optimisticCompactionMessage
-      : activeThread?.messages.findLast(isCompactCommandMessage);
-  const compactRequestIsActive =
-    pendingCompactionMessage !== undefined &&
-    (pendingCompactionMessage.createdAt >
-      (activeLatestTurn?.requestedAt ?? pendingCompactionMessage.createdAt) ||
-      (activeLatestTurn?.state === "running" &&
-        pendingCompactionMessage.createdAt === activeLatestTurn.requestedAt));
-  const compactionSettled =
-    pendingCompactionMessage !== undefined &&
-    (latestTurnStartFailureId(activeThread, pendingCompactionMessage.id) !== null ||
-      activeThread?.activities.some((activity) => {
-        if (activity.kind !== "context-compaction") return false;
-        const payload = activity.payload as { readonly requestId?: unknown } | null | undefined;
-        return payload?.requestId === pendingCompactionMessage.id;
-      }));
-  const isCompacting =
-    (isSendBusy || phase === "connecting" || phase === "running") &&
-    compactRequestIsActive &&
-    !compactionSettled;
-  const isWorking =
-    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
+  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isCompacting = activeThread?.session?.status === "compacting";
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -7829,6 +7819,7 @@ export default function ChatView(props: ChatViewProps) {
                 isWorking={isWorking}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}
+                workingStepLabel={workingStepLabel}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}

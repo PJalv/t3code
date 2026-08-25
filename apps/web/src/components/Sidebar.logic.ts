@@ -528,6 +528,7 @@ export type SidebarThreadStatus =
   | "approval"
   | "input"
   | "working"
+  | "compacting"
   | "monitoring"
   | "failed"
   | "ready";
@@ -561,6 +562,11 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   }
   if (thread.session?.status === "running" || thread.session?.status === "starting") {
     return "working";
+  }
+  // Pi compacts context mid-run; surface it as its own state so the user can
+  // tell the agent is blocked on compaction, not actively generating.
+  if (thread.session?.status === "compacting") {
+    return "compacting";
   }
   // A failed session outranks lingering background liveness: the user must
   // see the failure, not a stale Working (review finding).

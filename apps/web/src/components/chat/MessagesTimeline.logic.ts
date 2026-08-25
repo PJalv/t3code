@@ -362,6 +362,7 @@ export type MessagesTimelineRow =
       kind: "thinking";
       id: string;
       createdAt: string | null;
+      isCompacting: boolean;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -785,6 +786,7 @@ export function deriveMessagesTimelineRows(input: {
   expandedTurnIds?: ReadonlySet<TurnId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
+  isCompacting?: boolean;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
@@ -1158,6 +1160,7 @@ export function deriveMessagesTimelineRows(input: {
       kind: "thinking",
       id: LIVE_ACTIVITY_ROW_ID,
       createdAt: input.activeTurnStartedAt,
+      isCompacting: input.isCompacting ?? false,
     });
   }
 
@@ -1243,8 +1246,12 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
   switch (a.kind) {
     case "working":
-    case "thinking":
       return a.createdAt === (b as typeof a).createdAt;
+    case "thinking":
+      return (
+        a.createdAt === (b as typeof a).createdAt &&
+        a.isCompacting === (b as typeof a).isCompacting
+      );
 
     case "assistant-meta": {
       const bm = b as typeof a;
