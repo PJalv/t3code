@@ -2487,8 +2487,9 @@ describe("PiAdapter", () => {
     return withAdapter(h, (adapter) =>
       Effect.gen(function* () {
         yield* start(adapter);
-        const eventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
-          Stream.runCollect,
+        const events: ProviderRuntimeEvent[] = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
           Effect.forkChild,
         );
         const turn = yield* adapter.sendTurn({
@@ -2534,12 +2535,25 @@ describe("PiAdapter", () => {
           },
           { type: "agent_settled" },
         ]);
-        const events = Array.from(yield* Fiber.join(eventsFiber));
+        while (!events.some((event) => event.type === "turn.completed")) {
+          yield* Effect.yieldNow;
+        }
+        yield* Fiber.interrupt(eventsFiber);
         assert.deepEqual(
           events
             .filter((event) => event.type !== "thread.token-usage.updated")
             .map((event) => event.type),
-          ["turn.started", "item.started", "content.delta", "item.completed", "turn.completed"],
+          [
+            "turn.started",
+            // compaction_end resumes the session state to "running" so the
+            // client can drop the "compacting" indicator before the
+            // continuation lands.
+            "session.state.changed",
+            "item.started",
+            "content.delta",
+            "item.completed",
+            "turn.completed",
+          ],
         );
         assert.equal(
           events.filter((event) => event.type === "thread.token-usage.updated").length,
@@ -2549,6 +2563,69 @@ describe("PiAdapter", () => {
           events.every((event) => event.turnId === turn.turnId),
           true,
         );
+      }),
+    );
+  });
+
+  it.effect("surfaces a compacting session state while Pi compacts context", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const events: ProviderRuntimeEvent[] = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "research the subject",
+          modelSelection,
+        });
+        // Native compaction_start must surface a distinct "compacting" session
+        // state so the client can show it instead of "working".
+        yield* Queue.offer(h.client.input, { type: "compaction_start", reason: "threshold" });
+        while (
+          !events.some(
+            (event) =>
+              event.type === "session.state.changed" && event.payload.state === "compacting",
+          )
+        ) {
+          yield* Effect.yieldNow;
+        }
+        // The compact-threshold extension's status entry must do the same.
+        yield* Queue.offer(h.client.input, {
+          type: "entry_appended",
+          entry: {
+            type: "custom",
+            customType: "compact-threshold:status",
+            data: { phase: "compacted", tokens: 100, threshold: 1000, percent: 10 },
+          },
+        });
+        while (
+          !events.some(
+            (event) => event.type === "session.state.changed" && event.payload.state === "running",
+          )
+        ) {
+          yield* Effect.yieldNow;
+        }
+        // A failed compaction_end must surface a runtime warning and resume the
+        // running state rather than leaving the session stuck "compacting".
+        yield* Queue.offer(h.client.input, {
+          type: "compaction_end",
+          reason: "threshold",
+          aborted: true,
+        });
+        while (
+          !events.some((event) => event.type === "runtime.warning") ||
+          !events.some(
+            (event) => event.type === "session.state.changed" && event.payload.state === "running",
+          )
+        ) {
+          yield* Effect.yieldNow;
+        }
+        yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        yield* Fiber.interrupt(eventsFiber);
       }),
     );
   });
