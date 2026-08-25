@@ -98,6 +98,9 @@ class FakeClient implements PiRpcClient {
   ];
   failPrompt = false;
   fatalPrompt = false;
+  // When set, `prompt` fails with a PiRpcCommandError carrying this detail
+  // (used to simulate Pi's "compaction is in progress" rejection).
+  promptRejectionDetail: string | undefined;
   fatalPromptError: PiRpcProtocolError | undefined;
   failExtensionUiResponse = false;
   failGetState = false;
@@ -216,6 +219,12 @@ class FakeClient implements PiRpcClient {
       });
       if (self.promptEntered) yield* Deferred.succeed(self.promptEntered, undefined);
       if (self.promptGate) yield* Deferred.await(self.promptGate);
+      if (self.promptRejectionDetail)
+        return yield* new PiRpcCommandError({
+          command: "prompt",
+          requestId: "test",
+          detail: self.promptRejectionDetail,
+        });
       if (self.failPrompt)
         return yield* new PiRpcCommandError({
           command: "prompt",
@@ -2626,6 +2635,57 @@ describe("PiAdapter", () => {
         }
         yield* Queue.offer(h.client.input, { type: "agent_settled" });
         yield* Fiber.interrupt(eventsFiber);
+      }),
+    );
+  });
+
+  it.effect("resets a Pi session wedged by a stuck compaction-in-progress rejection", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "first",
+          modelSelection,
+        });
+        yield* Queue.offerAll(h.client.input, [
+          {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "ok" }],
+              stopReason: "stop",
+            },
+          },
+          { type: "agent_settled" },
+        ]);
+        // Wait for the first turn to settle.
+        while ((yield* adapter.listSessions())[0]?.status === "running") {
+          yield* Effect.yieldNow;
+        }
+        // Simulate Pi's wedged state: it rejects the next prompt claiming a
+        // compaction is in progress, but no compaction_start was ever emitted
+        // (ctx.compactionActive is false). The adapter must close the orphaned
+        // session so the next prompt spawns a fresh Pi session.
+        h.client.promptRejectionDetail =
+          "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.";
+        const rejected = yield* adapter
+          .sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "second",
+            modelSelection,
+          })
+          .pipe(Effect.result);
+        assert.equal(rejected._tag, "Failure");
+        // The wedge path closed the session as unexpected: it is no longer
+        // tracked as a live running session.
+        const sessions = yield* adapter.listSessions();
+        assert.ok(
+          sessions.length === 0 || sessions[0]?.status === "closed",
+          "expected the wedged Pi session to be closed, got: " +
+            JSON.stringify(sessions.map((s) => s.status)),
+        );
       }),
     );
   });

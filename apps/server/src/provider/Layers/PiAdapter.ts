@@ -198,6 +198,12 @@ interface SessionContext {
   lastTokenUsage: PiThreadTokenUsage | undefined;
   tokenUsageRefresh: TokenUsageRefresh | undefined;
   thinkingLevel: PiThinkingLevel | undefined;
+  // True between a compaction_start and its compaction_end. Used to detect a
+  // wedged Pi session: pi sometimes sets its internal isCompacting flag but
+  // never emits compaction_end, so every prompt is rejected with "compaction
+  // is in progress". When that rejection arrives and this flag is false, the
+  // session is wedged and must be reset.
+  compactionActive: boolean;
   closing: boolean;
   stopped: boolean;
 }
@@ -1868,6 +1874,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       // Pi is compacting context; the agent is blocked until compaction_end.
       // Surface a distinct "compacting" session state so the client can show
       // it instead of "working"/"thinking".
+      ctx.compactionActive = true;
       yield* emitSessionState(
         ctx,
         "compacting",
@@ -1888,12 +1895,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const data = isRecord(entry.data) ? entry.data : undefined;
         const phase = trimmedString(data?.phase);
         if (phase === "compacting") {
+          ctx.compactionActive = true;
           yield* emitSessionState(ctx, "compacting", "Compacting context (threshold).");
         } else if (phase === "compacted" || phase === "failed" || phase === "idle") {
           // Compaction finished (or the threshold dropped back to idle):
           // resume the running session state. compaction_end is the
           // authoritative signal for native compaction, so this only handles
           // the extension-driven threshold path.
+          ctx.compactionActive = false;
           if (phase === "compacted" || phase === "idle") {
             yield* emitSessionState(ctx, "running");
           }
@@ -1905,6 +1914,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       // Always resume the running session state when compaction ends, even if
       // there is no active turn; the continuation logic below (which needs a
       // turn) is handled separately after the active-turn guard.
+      ctx.compactionActive = false;
       const aborted = event.aborted === true;
       const errorMessage = trimmedString(event.errorMessage);
       if (aborted || errorMessage) {
@@ -2595,6 +2605,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             lastTokenUsage: undefined,
             tokenUsageRefresh: undefined,
             thinkingLevel: started.success.state.thinkingLevel,
+            compactionActive: false,
             closing: false,
             stopped: false,
           };
@@ -2872,6 +2883,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const prompted = yield* ctx.client.prompt(input.input ?? "", images).pipe(Effect.result);
         if (Result.isFailure(prompted)) {
           const reusable = isPiRpcCommandError(prompted.failure);
+          // Pi sometimes wedges with its internal isCompacting flag stuck true
+          // without ever emitting compaction_start/compaction_end: every prompt
+          // is then rejected with "compaction is in progress". When that
+          // rejection arrives and we never saw a compaction_start, the session
+          // is orphaned — close it so the next prompt spawns a fresh Pi session
+          // instead of looping on the rejection.
+          const detail =
+            prompted.failure && typeof prompted.failure === "object"
+              ? String(
+                  (prompted.failure as { detail?: unknown }).detail ??
+                    (prompted.failure as { message?: unknown }).message ??
+                    prompted.failure,
+                )
+              : String(prompted.failure);
+          const wedgedByCompaction =
+            /compaction is in progress/i.test(detail) && !ctx.compactionActive;
+          if (wedgedByCompaction) {
+            yield* offer({
+              type: "runtime.warning",
+              ...(yield* base(ctx, turn)),
+              payload: {
+                message:
+                  "Pi was stuck mid-compaction (no compaction_end ever arrived). Resetting the session; retry your message.",
+                detail: { rejection: detail },
+              },
+            });
+            yield* failActive(ctx, "Pi prompt failed.", undefined, true);
+            yield* close(ctx, "unexpected");
+            return yield* request("prompt", prompted.failure);
+          }
           yield* failActive(ctx, "Pi prompt failed.", undefined, !reusable);
           if (!reusable) yield* close(ctx, "unexpected");
           return yield* request("prompt", prompted.failure);
