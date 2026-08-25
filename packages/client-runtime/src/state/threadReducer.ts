@@ -756,6 +756,7 @@ function settledTurnStateForSessionStatus(
       return "interrupted";
     case "starting":
     case "running":
+    case "compacting":
       return null;
   }
 }
