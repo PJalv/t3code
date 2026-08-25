@@ -3636,6 +3636,7 @@ export default function ChatView(props: ChatViewProps) {
     attachDraftHeroTransitionGroupRef,
     attachDraftHeroComposerAnchorRef,
     captureDraftHeroComposerRect,
+<<<<<<< HEAD
   ] = useDraftHeroLayoutTransition(
     isDraftHeroState,
     panelAnimationsActive,
@@ -10003,18 +10004,27 @@ export default function ChatView(props: ChatViewProps) {
                 {...(draftId ? { onWorktreeSetupWorkLocally } : {})}
                 {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
                 listRef={legendListRef}
-                timelineEntries={timelineEntries}
-                latestTurn={activeLatestTurn}
-                runningTurnId={activeRunningTurnId}
-                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                checkpointTurnCountByTurnId={checkpointTurnCountByTurnId}
-                activeThreadEnvironmentId={activeThread.environmentId}
-                routeThreadKey={routeThreadKey}
-                onOpenTurnDiff={onOpenTurnDiff}
-                supportsConversationRollback={supportsConversationRollback}
-                onRevertToTurnCount={onRevertTimelineTurn}
-                onUseArtifactTemplate={useArtifactTemplate}
-                isRevertingCheckpoint={isRevertingCheckpoint}
+                timelineEntries={displayedTimeline.entries}
+                latestTurn={paintOnlyDisplayedTimeline ? null : activeLatestTurn}
+                runningTurnId={paintOnlyDisplayedTimeline ? null : activeRunningTurnId}
+                turnDiffSummaries={
+                  paintOnlyDisplayedTimeline
+                    ? EMPTY_HELD_TURN_DIFF_SUMMARIES
+                    : activeThread.checkpoints
+                }
+                activeThreadEnvironmentId={
+                  displayedThreadRef?.environmentId ?? activeThread.environmentId
+                }
+                routeThreadKey={displayedTimelineKey}
+                displayThreadKey={displayedTimelineKey}
+                onOpenTurnDiff={paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiff}
+                supportsConversationRollback={
+                  !paintOnlyDisplayedTimeline && supportsConversationRollback
+                }
+                onRevertToTurnCount={
+                  paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
+                }
+                isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
                 onFileDownload={

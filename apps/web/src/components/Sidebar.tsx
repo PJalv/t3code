@@ -1110,16 +1110,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     thread.settledOverride !== "settled";
-  // Background work always recedes when it is not selected: an unread parent
-  // completion must not pull a still-working thread back into the foreground.
-  // Ready and action-required rows keep their unread and wake prominence.
-  const shouldRecede = shouldRecedeSidebarThread({
-    status,
-    isUnread,
-    isWoke,
-    isActive: props.isActive,
-    isSelected,
-  });
+  // In-flight rows (working, or waiting on approval/input) fade as a whole:
+  // there is nothing for the user to do yet, so prominence is reserved for
+  // rows that need a human — done (unread), read-but-unsettled, failed, and
+  // freshly woken. The status label keeps its hue, so waiting rows stay
+  // findable. In-flight rows recede the same as read-ready ones (inbox-zero:
+  // working threads aren't your problem yet) — only the colored status label
+  // stands out.
+  const isInFlight =
+    status === "working" ||
+    status === "compacting" ||
+    status === "monitoring" ||
+    status === "approval" ||
+    status === "input";
+  const shouldRecede =
+    (status === "ready" || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected;
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
@@ -1132,45 +1137,54 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           // full of them (and repaints every vsync on high-refresh displays).
           className: "text-sky-600 dark:text-sky-400",
         }
-      : status === "monitoring"
+      : status === "compacting"
         ? {
-            // Monitoring is calm background presence, not active progress
-            // (monitoring-pill D6), so it keeps the label at full strength.
-            label: "Monitoring",
-            icon: "monitoring" as const,
-            className: "text-foreground dark:text-white",
+            // Compaction blocks the agent (no assistant output until
+            // compaction_end), so it gets its own calm label rather than
+            // reading as ordinary Working.
+            label: "Compacting",
+            icon: "working" as const,
+            className: cn("text-violet-600 dark:text-violet-400", !props.isActive && "opacity-75"),
           }
-        : status === "approval"
+        : status === "monitoring"
           ? {
-              label: "Approval",
-              icon: "approval" as const,
-              className: "text-warning-foreground",
+              // Monitoring is calm background presence, not active progress
+              // (monitoring-pill D6), so it keeps the label at full strength.
+              label: "Monitoring",
+              icon: null,
+              className: "text-sky-600 dark:text-sky-400",
             }
-          : status === "input"
+          : status === "approval"
             ? {
-                label: "Input",
-                icon: "input" as const,
-                className: "text-indigo-600 dark:text-indigo-300",
+                label: "Approval",
+                icon: null,
+                className: "text-amber-700 dark:text-amber-300",
               }
-            : status === "failed"
+            : status === "input"
               ? {
-                  label: "Failed",
-                  icon: "failed" as const,
-                  className: "text-red-700 dark:text-red-300",
+                  label: "Input",
+                  icon: null,
+                  className: "text-indigo-600 dark:text-indigo-300",
                 }
-              : isWoke
+              : status === "failed"
                 ? {
-                    label: "Woke",
-                    icon: "woke" as const,
-                    className: "text-warning-foreground",
+                    label: "Failed",
+                    icon: null,
+                    className: "text-red-700 dark:text-red-300",
                   }
-                : isUnread
+                : isWoke
                   ? {
-                      label: "Done",
-                      icon: "done" as const,
-                      className: "text-emerald-700 dark:text-emerald-300",
+                      label: "Woke",
+                      icon: "woke" as const,
+                      className: "text-amber-700 dark:text-amber-300",
                     }
-                  : null;
+                  : isUnread
+                    ? {
+                        label: "Done",
+                        icon: "done" as const,
+                        className: "text-emerald-700 dark:text-emerald-300",
+                      }
+                    : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -1784,6 +1798,64 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   {/* Read-only status labels yield to the hover actions. Woke is
                     itself an action, so it stays pointer-enabled and visible
                     while the other controls appear beside it. */}
+                <span
+                  className={cn(
+                    isWokeStatus
+                      ? "pointer-events-auto"
+                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
+                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+                  )}
+                >
+                  {topStatus ? (
+                    isWokeStatus ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              aria-label="Dismiss Woke notification"
+                              onClick={handleAcknowledgeWokeClick}
+                              className={cn(
+                                "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                                topStatus.className,
+                              )}
+                            >
+                              <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                              <span role="status">{topStatus.label}</span>
+                            </button>
+                          }
+                        />
+                        <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                      </Tooltip>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 font-medium",
+                          topStatus.className,
+                        )}
+                      >
+                        {topStatus.icon === "working" ? (
+                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "done" ? (
+                          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+                        ) : null}
+                        {/* The label alone is the live region: a role="status"
+                            wrapper around the ticking duration would make
+                            screen readers announce every second. */}
+                        <span role="status">{topStatus.label}</span>
+                        {status === "working" || status === "compacting" ? (
+                          <span aria-hidden>
+                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                          </span>
+                        ) : null}
+                      </span>
+                    )
+                  ) : (
+                    threadTimeLabel(thread)
+                  )}
+                </span>
+                {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
                   <span
                     className={cn(
                       isWokeStatus
