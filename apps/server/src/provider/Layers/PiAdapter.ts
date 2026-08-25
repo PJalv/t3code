@@ -609,6 +609,27 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     payload: event,
   });
 
+  // Pi applies model and thinking level at the session level and emits
+  // compaction_start/compaction_end (plus the compact-threshold extension's
+  // entry_appended status events) to signal context compaction. Surface that
+  // as a session.state.changed event so the orchestration layer can project a
+  // distinct "compacting" status to the client instead of "running".
+  const emitSessionState = Effect.fn("PiAdapter.emitSessionState")(function* (
+    ctx: SessionContext,
+    state: "starting" | "running" | "waiting" | "ready" | "compacting",
+    reason?: string,
+  ) {
+    yield* offer({
+      type: "session.state.changed",
+      ...(yield* base(
+        ctx,
+        ctx.activeTurn && !ctx.activeTurn.terminal ? ctx.activeTurn : undefined,
+      )),
+      payload: { state, ...(reason ? { reason } : {}) },
+      raw: undefined,
+    });
+  });
+
   const resolveExtensionInput = Effect.fn("PiAdapter.resolveExtensionInput")(function* (
     ctx: SessionContext,
     requestId: ApprovalRequestId,
@@ -1843,6 +1864,69 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       }
       return;
     }
+    if (type === "compaction_start") {
+      // Pi is compacting context; the agent is blocked until compaction_end.
+      // Surface a distinct "compacting" session state so the client can show
+      // it instead of "working"/"thinking".
+      yield* emitSessionState(
+        ctx,
+        "compacting",
+        `Compacting context (${trimmedString(event.reason) ?? "auto"}).`,
+      );
+      return;
+    }
+    if (type === "entry_appended") {
+      // The compact-threshold extension reports predictive context pressure
+      // via custom entries. Only its "compacting" phase changes the live
+      // session state; the approaching/over phases are advisory and surface
+      // later as pressure hints.
+      const entry = isRecord(event.entry) ? event.entry : undefined;
+      if (
+        entry?.type === "custom" &&
+        trimmedString(entry.customType) === "compact-threshold:status"
+      ) {
+        const data = isRecord(entry.data) ? entry.data : undefined;
+        const phase = trimmedString(data?.phase);
+        if (phase === "compacting") {
+          yield* emitSessionState(ctx, "compacting", "Compacting context (threshold).");
+        } else if (phase === "compacted" || phase === "failed" || phase === "idle") {
+          // Compaction finished (or the threshold dropped back to idle):
+          // resume the running session state. compaction_end is the
+          // authoritative signal for native compaction, so this only handles
+          // the extension-driven threshold path.
+          if (phase === "compacted" || phase === "idle") {
+            yield* emitSessionState(ctx, "running");
+          }
+        }
+        return;
+      }
+    }
+    if (type === "compaction_end") {
+      // Always resume the running session state when compaction ends, even if
+      // there is no active turn; the continuation logic below (which needs a
+      // turn) is handled separately after the active-turn guard.
+      const aborted = event.aborted === true;
+      const errorMessage = trimmedString(event.errorMessage);
+      if (aborted || errorMessage) {
+        yield* emitSessionState(ctx, "running");
+        yield* offer({
+          type: "runtime.warning",
+          ...(yield* base(
+            ctx,
+            ctx.activeTurn && !ctx.activeTurn.terminal ? ctx.activeTurn : undefined,
+          )),
+          payload: {
+            message: errorMessage
+              ? `Pi context compaction failed: ${errorMessage}`
+              : "Pi context compaction was aborted; context was not reduced.",
+            detail: { reason: trimmedString(event.reason), aborted },
+          },
+          raw: raw(native),
+        });
+      } else {
+        yield* emitSessionState(ctx, "running");
+      }
+    }
     if (!turn || turn.terminal) return;
     if (type === "extension_error") {
       yield* offer({
@@ -1978,6 +2062,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       return;
     }
     if (type === "compaction_end") {
+      // Session state resume + failure surfacing is handled in the early
+      // compaction_end branch above; here we only re-issue the in-flight task
+      // after a successful threshold compaction when the assistant message was
+      // cut off mid-stream.
       const successfulThresholdCompaction =
         event.reason === "threshold" &&
         isRecord(event.result) &&
@@ -2161,7 +2249,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       type !== "agent_end" &&
       type !== "turn_start" &&
       type !== "turn_end" &&
-      type !== "compaction_start" &&
       type !== "queue_update" &&
       type !== "summarization_retry_scheduled" &&
       type !== "summarization_retry_attempt_start" &&
