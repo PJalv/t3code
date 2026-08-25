@@ -392,6 +392,7 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
+  workingStepLabel?: string | null;
   activeTurnStartedAt: string | null;
   /** Live bootstrap progress for this thread, or null when none is tracked. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
@@ -464,6 +465,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenWorktreeSetupTerminal,
   isPreparingWorktree = false,
   isCompacting = false,
+  workingStepLabel = null,
   activeTurnStartedAt,
   agentPanelModel,
   onOpenAgents = NOOP_OPEN_AGENTS,
@@ -744,6 +746,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedTurnIds: paintedExpandedTurnIds,
         expandedWorkGroupIds: paintedExpandedWorkGroupIds,
         isWorking,
+        isCompacting,
         activeTurnStartedAt,
         turnDiffSummaries,
         supportsConversationRollback,
@@ -1516,8 +1519,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
-      {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
-      {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
+      {row.kind === "thinking" ? <ThinkingTimelineRow isCompacting={row.isCompacting} /> : null}
     </div>
   );
 });
@@ -2172,8 +2174,11 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
             </>
           ) : row.createdAt ? (
             <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
+              {row.isCompacting ? "Compacting for" : "Working for"}{" "}
+              <WorkingTimer createdAt={row.createdAt} />
             </>
+          ) : row.isCompacting ? (
+            "Compacting..."
           ) : (
             "Working..."
           )}
@@ -2183,25 +2188,22 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
   );
 }
 
-function ThinkingTimelineRow() {
-  const { isCompacting, isPreparingWorktree } = use(TimelineRowActivityCtx);
+function ThinkingTimelineRow({ isCompacting }: { isCompacting: boolean }) {
+  const { isPreparingWorktree } = use(TimelineRowActivityCtx);
   // Reserve the activity row during setup so the handoff keeps the same height.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree || isCompacting ? null : (
-        <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
-      )}
+      {isPreparingWorktree ? null : isCompacting ? <CompactingActivityRow /> : <ThinkingActivityRow />}
     </div>
   );
 }
 
-function CompactingLabel() {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <Minimize2Icon aria-hidden="true" className="size-3" />
-      Compacting…
-    </span>
-  );
+function ThinkingActivityRow() {
+  return <LiveActivityRow label="Thinking" />;
+}
+
+function CompactingActivityRow() {
+  return <LiveActivityRow label="Compacting" />;
 }
 
 // ---------------------------------------------------------------------------
