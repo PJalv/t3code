@@ -5507,7 +5507,8 @@ export default function ChatView(props: ChatViewProps) {
     !activeThreadHasCompactableConversation ||
     !activeProject ||
     !isServerThread ||
-    !manualCompactionProviderAvailable ||
+    (selectedProvider !== "claudeAgent" && selectedProvider !== "pi") ||
+    !compactionProviderAvailable ||
     isWorking ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -5522,8 +5523,8 @@ export default function ChatView(props: ChatViewProps) {
       ? "Send or clear your draft before compacting"
       : !activeProject
         ? "Choose a project before compacting"
-        : !manualCompactionProviderAvailable
-          ? "Compaction is unavailable for this provider"
+        : !compactionProviderAvailable
+          ? "Enable a Claude or Pi provider before compacting"
           : "Compacting is unavailable right now"
     : null;
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {

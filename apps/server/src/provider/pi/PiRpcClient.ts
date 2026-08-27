@@ -99,6 +99,7 @@ export interface PiRpcClient {
     streamingBehavior?: "steer" | "followUp",
   ) => Effect.Effect<void, PiRpcError>;
   readonly abort: () => Effect.Effect<void, PiRpcError>;
+  readonly compact: (customInstructions?: string) => Effect.Effect<void, PiRpcError>;
   readonly respondToExtensionUi: (
     response: PiExtensionUiResponse,
   ) => Effect.Effect<void, PiRpcError>;
@@ -391,6 +392,8 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
         () => Effect.void,
       ),
     abort: () => request("abort", {}, () => Effect.void),
+    compact: (customInstructions) =>
+      request("compact", customInstructions ? { customInstructions } : {}, () => Effect.void),
     respondToExtensionUi: (response) => write({ type: "extension_ui_response", ...response }),
     close: () => close,
   };

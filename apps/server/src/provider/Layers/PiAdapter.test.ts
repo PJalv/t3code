@@ -73,6 +73,8 @@ class FakeClient implements PiRpcClient {
   readonly calls = {
     close: 0,
     abort: 0,
+    compact: 0,
+    compactInstructions: [] as Array<string | undefined>,
     prompt: 0,
     sessionStats: 0,
     prompts: [] as Array<{
@@ -243,6 +245,13 @@ class FakeClient implements PiRpcClient {
       self.calls.abort += 1;
       if (self.abortEntered) yield* Deferred.succeed(self.abortEntered, undefined);
       if (self.abortBeforeSettle) yield* Queue.offer(self.input, { type: "agent_settled" });
+    });
+  };
+  compact = (customInstructions?: string) => {
+    const self = this;
+    return Effect.gen(function* () {
+      self.calls.compact += 1;
+      self.calls.compactInstructions.push(customInstructions);
     });
   };
   respondToExtensionUi = (response: Record<string, unknown>) => {
@@ -2634,6 +2643,61 @@ describe("PiAdapter", () => {
           yield* Effect.yieldNow;
         }
         yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        yield* Fiber.interrupt(eventsFiber);
+      }),
+    );
+  });
+
+  it.effect("runs pi's compact RPC when the user sends /compact", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const events: ProviderRuntimeEvent[] = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild,
+        );
+        // The context meter's "Compact context" button injects "/compact". The
+        // adapter must forward it to pi's compact RPC (not send it as a prompt)
+        // and settle the turn as completed.
+        const sent = yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "/compact",
+          modelSelection,
+        });
+        assert.ok(sent.turnId.length > 0);
+        while (!events.some((event) => event.type === "turn.completed")) {
+          yield* Effect.yieldNow;
+        }
+        assert.equal(h.client.calls.compact, 1);
+        assert.equal(h.client.calls.prompt, 0);
+        assert.equal(h.client.calls.compactInstructions[0], undefined);
+        yield* Fiber.interrupt(eventsFiber);
+      }),
+    );
+  });
+
+  it.effect("forwards /compact instructions to pi's compact RPC", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const events: ProviderRuntimeEvent[] = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: ThreadId.make("thread"),
+          input: "/compact focus on the DPI work",
+          modelSelection,
+        });
+        while (!events.some((event) => event.type === "turn.completed")) {
+          yield* Effect.yieldNow;
+        }
+        assert.equal(h.client.calls.compact, 1);
+        assert.equal(h.client.calls.compactInstructions[0], "focus on the DPI work");
         yield* Fiber.interrupt(eventsFiber);
       }),
     );
