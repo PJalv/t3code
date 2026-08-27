@@ -2880,6 +2880,42 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           );
           return yield* requestMessage("prompt", "Pi prompt preparation was interrupted.");
         }
+        // The context meter's "Compact context" button injects "/compact". Pi's
+        // native /compact is a TUI command, so forward it to pi's compact RPC
+        // (ctx.client.compact) instead of sending it as a prompt. The compact
+        // call emits compaction_start/compaction_end, which handleEvent surfaces
+        // as the "compacting" session state; the /compact turn itself settles as
+        // completed immediately.
+        const trimmedInput = input.input?.trimStart() ?? "";
+        if (trimmedInput === "/compact" || trimmedInput.startsWith("/compact ")) {
+          const compacted = yield* ctx.client
+            .compact(
+              trimmedInput.length > "/compact".length
+                ? trimmedInput.slice("/compact".length).trim()
+                : undefined,
+            )
+            .pipe(Effect.result);
+          if (Result.isFailure(compacted)) {
+            yield* failActive(ctx, "Pi compact failed.", undefined, true);
+            return yield* request("compact", compacted.failure);
+          }
+          yield* publishTerminal(
+            ctx,
+            turn,
+            [
+              {
+                type: "turn.completed",
+                ...(yield* base(ctx, turn)),
+                payload: { state: "completed", stopReason: null },
+              },
+            ],
+            "ready",
+          );
+          return {
+            _tag: "Started" as const,
+            result: { threadId: input.threadId, turnId, resumeCursor: ctx.cursor },
+          };
+        }
         const prompted = yield* ctx.client.prompt(input.input ?? "", images).pipe(Effect.result);
         if (Result.isFailure(prompted)) {
           const reusable = isPiRpcCommandError(prompted.failure);
