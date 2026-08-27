@@ -24,18 +24,18 @@ export function hasAvailableCompactionProvider(input: {
   readonly instanceId: ProviderInstanceId | null;
   readonly lockedInstanceId: ProviderInstanceId | null;
 }): boolean {
-  const driverProviders = input.providers.filter(
-    (provider) => provider.driverKind === input.driverKind,
+  const compactionProviders = input.providers.filter(
+    (provider) => provider.driverKind === "claudeAgent" || provider.driverKind === "pi",
   );
   const lockedContinuationGroupKey = input.lockedInstanceId
-    ? driverProviders.find((provider) => provider.instanceId === input.lockedInstanceId)
+    ? compactionProviders.find((provider) => provider.instanceId === input.lockedInstanceId)
         ?.continuationGroupKey
     : undefined;
   const compatibleProviders = lockedContinuationGroupKey
-    ? driverProviders.filter(
+    ? compactionProviders.filter(
         (provider) => provider.continuationGroupKey === lockedContinuationGroupKey,
       )
-    : driverProviders;
+    : compactionProviders;
 
   return providerSupportsManualCompaction(
     resolveSelectableProviderInstanceEntry(compatibleProviders, input.instanceId ?? undefined),

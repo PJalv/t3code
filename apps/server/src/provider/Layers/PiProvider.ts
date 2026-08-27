@@ -45,6 +45,17 @@ const mapPiCommands = (commands: ReadonlyArray<PiRpcCommand>) => {
     const description = command.description?.trim();
     return [{ name, ...(description ? { description } : {}) }];
   });
+  // Pi's native /compact is a TUI command, not exposed over the getCommands
+  // RPC, so the context meter's "Compact context" button (which injects
+  // /compact) would reach the model as plain text. Register it ourselves so it
+  // shows in the command list, and the adapter intercepts it to call pi's
+  // compact RPC (ctx.client.compact), which emits compaction_start/end.
+  if (!slashCommands.some((command) => command.name === "compact")) {
+    slashCommands.unshift({
+      name: "compact",
+      description: "Summarize the conversation and reduce context usage",
+    });
+  }
   const skills = environmentCommands.flatMap((command) => {
     if (command.source !== "skill" || !command.name.startsWith("skill:")) return [];
     const name = command.name.slice("skill:".length).trim();

@@ -29,6 +29,7 @@ const unusedClientMethods = {
   setThinkingLevel: () => Effect.die("unused"),
   prompt: () => Effect.die("unused"),
   abort: () => Effect.die("unused"),
+  compact: () => Effect.die("unused"),
   respondToExtensionUi: () => Effect.die("unused"),
   close: () => Effect.void,
 } satisfies Omit<PiRpcClient, "getAvailableModels" | "getState">;
@@ -135,6 +136,7 @@ it.effect("maps Pi RPC inventory into selectable models", () =>
     );
     assert.match(snapshot.message ?? "", /MCP support is available/u);
     assert.deepEqual(snapshot.slashCommands, [
+      { name: "compact", description: "Summarize the conversation and reduce context usage" },
       { name: "mcp", description: "Show MCP server status" },
       { name: "subagents", description: "List subagents" },
       { name: "skill:review", description: "Review changes" },
