@@ -2896,8 +2896,23 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             )
             .pipe(Effect.result);
           if (Result.isFailure(compacted)) {
-            yield* failActive(ctx, "Pi compact failed.", undefined, true);
-            return yield* request("compact", compacted.failure);
+            // A failed manual compact must not take the session down: emit a
+            // runtime.warning (compaction_end may already surface the reason),
+            // settle the turn as failed-but-usable, and keep the session alive
+            // so the user can retry or keep chatting. This is non-fatal.
+            yield* offer({
+              type: "runtime.warning",
+              ...(yield* base(ctx, turn)),
+              payload: {
+                message: "Pi compaction failed; the session was not reduced.",
+                detail: { rejection: String(compacted.failure) },
+              },
+            });
+            yield* failActive(ctx, "Pi compact failed.", undefined, false);
+            return {
+              _tag: "Started" as const,
+              result: { threadId: input.threadId, turnId, resumeCursor: ctx.cursor },
+            };
           }
           yield* publishTerminal(
             ctx,
