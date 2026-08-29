@@ -6735,6 +6735,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         "+after",
       ].join("\n");
       runtimeMock.state.subscribedEventStream = (async function* () {
+        yield { id: "evt-file-diff-connected", type: "server.connected", properties: {} };
         await eventStreamReady;
         yield {
           type: "message.part.updated",
@@ -6842,6 +6843,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         releaseEventStream = resolve;
       });
       runtimeMock.state.subscribedEventStream = (async function* () {
+        yield { id: "evt-write-diff-connected", type: "server.connected", properties: {} };
         await eventStreamReady;
         yield {
           type: "message.part.updated",
