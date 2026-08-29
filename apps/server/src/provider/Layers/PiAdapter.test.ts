@@ -111,6 +111,7 @@ class FakeClient implements PiRpcClient {
   timeoutThinkingAfterApply = false;
   abortBeforeSettle = false;
   abortEntered: Deferred.Deferred<void> | undefined;
+  abortGate: Deferred.Deferred<void> | undefined;
   getStateEntered: Deferred.Deferred<void> | undefined;
   getStateGate: Deferred.Deferred<void> | undefined;
   getAvailableModelsEntered: Deferred.Deferred<void> | undefined;
@@ -244,6 +245,7 @@ class FakeClient implements PiRpcClient {
     return Effect.gen(function* () {
       self.calls.abort += 1;
       if (self.abortEntered) yield* Deferred.succeed(self.abortEntered, undefined);
+      if (self.abortGate) yield* Deferred.await(self.abortGate);
       if (self.abortBeforeSettle) yield* Queue.offer(self.input, { type: "agent_settled" });
     });
   };
@@ -758,6 +760,44 @@ describe("PiAdapter", () => {
         assert.deepEqual(h.client.calls.extensionUiResponses, [
           { id: "confirm-overlap", confirmed: true },
         ]);
+      }),
+    );
+  });
+
+  it.effect("escalates to teardown when a wedged Pi never answers abort", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        h.client.promptEntered = yield* Deferred.make<void>();
+        h.client.promptGate = yield* Deferred.make<void>();
+        h.client.abortGate = yield* Deferred.make<void>();
+        h.client.closeEntered = yield* Deferred.make<void>();
+        const sending = yield* adapter
+          .sendTurn({
+            threadId: ThreadId.make("thread"),
+            input: "wedged prompt",
+            modelSelection,
+          })
+          .pipe(Effect.result, Effect.forkChild);
+        yield* Deferred.await(h.client.promptEntered);
+        const turnId = (yield* adapter.listSessions())[0]?.activeTurnId;
+        const interrupting = yield* adapter
+          .interruptTurn(ThreadId.make("thread"), turnId)
+          .pipe(Effect.forkChild);
+        // The abort request is short-fused: interruptTurn returns without
+        // waiting for the wedged Pi transport to answer.
+        yield* TestClock.adjust(Duration.seconds(3));
+        yield* Fiber.join(interrupting);
+        // Escalation deadline: the still-active turn forces session teardown.
+        yield* TestClock.adjust(Duration.seconds(3));
+        yield* Deferred.await(h.client.closeEntered);
+        yield* Deferred.succeed(h.client.promptGate, undefined);
+        const result = yield* Fiber.join(sending);
+        assert.equal(result._tag, "Failure");
+        const sessions = yield* adapter.listSessions();
+        assert.equal(sessions.length, 0);
+        assert.equal(h.client.calls.close, 1);
       }),
     );
   });
