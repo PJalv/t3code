@@ -80,6 +80,7 @@ class FakeClient implements PiRpcClient {
   };
   abort = () => Effect.void;
   compact = () => Effect.void;
+  clearQueue = () => Effect.succeed({ steering: [], followUp: [] });
   respondToExtensionUi = () => Effect.void;
   close = () =>
     Effect.sync(() => {

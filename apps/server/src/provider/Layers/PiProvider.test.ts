@@ -30,6 +30,7 @@ const unusedClientMethods = {
   prompt: () => Effect.die("unused"),
   abort: () => Effect.die("unused"),
   compact: () => Effect.die("unused"),
+  clearQueue: () => Effect.die("unused"),
   respondToExtensionUi: () => Effect.die("unused"),
   close: () => Effect.void,
 } satisfies Omit<PiRpcClient, "getAvailableModels" | "getState">;
