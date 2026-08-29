@@ -74,6 +74,7 @@ class FakeClient implements PiRpcClient {
     close: 0,
     abort: 0,
     compact: 0,
+    clearQueue: 0,
     compactInstructions: [] as Array<string | undefined>,
     prompt: 0,
     sessionStats: 0,
@@ -112,6 +113,7 @@ class FakeClient implements PiRpcClient {
   abortBeforeSettle = false;
   abortEntered: Deferred.Deferred<void> | undefined;
   abortGate: Deferred.Deferred<void> | undefined;
+  clearQueueGate: Deferred.Deferred<void> | undefined;
   getStateEntered: Deferred.Deferred<void> | undefined;
   getStateGate: Deferred.Deferred<void> | undefined;
   getAvailableModelsEntered: Deferred.Deferred<void> | undefined;
@@ -247,6 +249,14 @@ class FakeClient implements PiRpcClient {
       if (self.abortEntered) yield* Deferred.succeed(self.abortEntered, undefined);
       if (self.abortGate) yield* Deferred.await(self.abortGate);
       if (self.abortBeforeSettle) yield* Queue.offer(self.input, { type: "agent_settled" });
+    });
+  };
+  clearQueue = () => {
+    const self = this;
+    return Effect.gen(function* () {
+      self.calls.clearQueue += 1;
+      if (self.clearQueueGate) yield* Deferred.await(self.clearQueueGate);
+      return { steering: [], followUp: [] };
     });
   };
   compact = (customInstructions?: string) => {
@@ -798,6 +808,8 @@ describe("PiAdapter", () => {
         const sessions = yield* adapter.listSessions();
         assert.equal(sessions.length, 0);
         assert.equal(h.client.calls.close, 1);
+        // Queued steering/follow-up work must not survive a stop.
+        assert.equal(h.client.calls.clearQueue, 1);
       }),
     );
   });

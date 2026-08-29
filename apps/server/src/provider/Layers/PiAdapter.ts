@@ -3135,6 +3135,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       // never answers it (the transport would otherwise wait out its full
       // 120s request timeout and stop would appear to do nothing).
       if (turn || hasOtherBackgroundTasks) {
+        // Abort continues queued steering/follow-up messages, so clear the
+        // queue first (best-effort; older Pi versions reject the command).
+        yield* ctx.client
+          .clearQueue()
+          .pipe(Effect.timeout("2 seconds"), Effect.ignore, Effect.result);
         yield* ctx.client.abort().pipe(Effect.timeout("3 seconds"), Effect.ignore, Effect.result);
         // Escalation: if the session has not settled shortly after the abort
         // request, tear the process down. close() reports the active turn as
