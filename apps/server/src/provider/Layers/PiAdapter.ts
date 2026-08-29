@@ -3131,8 +3131,24 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
 
       // Abort remains correct for the active parent and for reference Pi
       // subagent/workflow extensions that inherit the parent AbortSignal.
+      // The abort request is deliberately short-fused: a wedged Pi RPC loop
+      // never answers it (the transport would otherwise wait out its full
+      // 120s request timeout and stop would appear to do nothing).
       if (turn || hasOtherBackgroundTasks) {
-        yield* ctx.client.abort().pipe(Effect.mapError((cause) => request("abort", cause)));
+        yield* ctx.client.abort().pipe(Effect.timeout("3 seconds"), Effect.ignore, Effect.result);
+        // Escalation: if the session has not settled shortly after the abort
+        // request, tear the process down. close() reports the active turn as
+        // interrupted, terminalizes every background task, and kills the
+        // child, so stop always lands even when Pi is unresponsive.
+        yield* Effect.forkDetach(
+          Effect.gen(function* () {
+            yield* Effect.sleep("3 seconds");
+            if (ctx.stopped || ctx.closing) return;
+            if (sessions.get(threadId) !== ctx) return;
+            if (isIdle(ctx)) return;
+            yield* close(ctx, "explicit");
+          }).pipe(Effect.ignore),
+        );
       }
       if (targetedStop && Result.isFailure(targetedStop)) return yield* targetedStop.failure;
     });
