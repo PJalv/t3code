@@ -83,6 +83,18 @@ export type PiExtensionUiResponse =
   | { readonly id: string; readonly confirmed: boolean }
   | { readonly id: string; readonly cancelled: true };
 
+export const PiRpcClearedQueue = Schema.Struct({
+  steering: Schema.Array(Schema.String),
+  followUp: Schema.Array(Schema.String),
+});
+export type PiRpcClearedQueue = typeof PiRpcClearedQueue.Type;
+const decodeClearedQueue = (data: unknown): Effect.Effect<PiRpcClearedQueue, PiRpcError> =>
+  Schema.decodeUnknownEffect(PiRpcClearedQueue)(data).pipe(
+    Effect.mapError(
+      (cause) => new PiRpcProtocolError({ detail: "invalid clear_queue response data", cause }),
+    ),
+  );
+
 export interface PiRpcClient {
   readonly events: Stream.Stream<PiRpcEvent>;
   readonly getState: () => Effect.Effect<PiRpcState, PiRpcError>;
@@ -100,6 +112,7 @@ export interface PiRpcClient {
   ) => Effect.Effect<void, PiRpcError>;
   readonly abort: () => Effect.Effect<void, PiRpcError>;
   readonly compact: (customInstructions?: string) => Effect.Effect<void, PiRpcError>;
+  readonly clearQueue: () => Effect.Effect<PiRpcClearedQueue, PiRpcError>;
   readonly respondToExtensionUi: (
     response: PiExtensionUiResponse,
   ) => Effect.Effect<void, PiRpcError>;
@@ -392,6 +405,7 @@ export const makePiRpcTransport = Effect.fn("PiRpcClient.makeTransport")(functio
         () => Effect.void,
       ),
     abort: () => request("abort", {}, () => Effect.void),
+    clearQueue: () => request("clear_queue", {}, decodeClearedQueue),
     compact: (customInstructions) =>
       request("compact", customInstructions ? { customInstructions } : {}, () => Effect.void),
     respondToExtensionUi: (response) => write({ type: "extension_ui_response", ...response }),
