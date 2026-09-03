@@ -4183,10 +4183,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntry.detail?.trim() ||
       workEntry.changedFiles?.length,
     );
-  const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
-  const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
-  const displayText =
-    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -4219,6 +4215,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const expanded = isFileChangeEntry
     ? (ctx.fileChangeExpandedByEntryId.get(workEntry.id) ?? shouldAutoExpandInlineDiff)
     : locallyExpanded;
+  const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
+  const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const displayText =
+    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
   const canExpand = canExpandTool || canShowInlineFileDiff || expandedBody !== null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
