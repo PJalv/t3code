@@ -2174,11 +2174,8 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
             </>
           ) : row.createdAt ? (
             <>
-              {row.isCompacting ? "Compacting for" : "Working for"}{" "}
-              <WorkingTimer createdAt={row.createdAt} />
+              Working for <WorkingTimer createdAt={row.createdAt} />
             </>
-          ) : row.isCompacting ? (
-            "Compacting..."
           ) : (
             "Working..."
           )}
@@ -4164,7 +4161,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   displayLabel?: string | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
-  const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
   const ctx = use(TimelineRowCtx);
   const { threadRef, onImageExpand } = ctx;
   const [locallyExpanded, setLocallyExpanded] = useState(false);
@@ -4175,14 +4172,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     showFailedIndicator &&
     (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
   const entryIconName =
-    showWarningIndicator || showDestructiveRowStyle ? "circle-alert" : workEntryIconName(workEntry);
-  const entryToolIcon =
-    showWarningIndicator || showDestructiveRowStyle
-      ? undefined
-      : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
-  const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
-  const displayText =
-    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
+    showWarningIndicator || (showFailedIndicator && !hasSpecialToolIcon)
+      ? "circle-alert"
+      : workEntryIconName(workEntry);
   const canExpandTool =
     (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
     Boolean(
@@ -4192,6 +4184,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntry.changedFiles?.length,
     );
   const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
+  const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const displayText =
+    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -4224,7 +4219,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const expanded = isFileChangeEntry
     ? (ctx.fileChangeExpandedByEntryId.get(workEntry.id) ?? shouldAutoExpandInlineDiff)
     : locallyExpanded;
-  const canExpand = canShowInlineFileDiff || expandedBody !== null;
+  const canExpand = canExpandTool || canShowInlineFileDiff || expandedBody !== null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
