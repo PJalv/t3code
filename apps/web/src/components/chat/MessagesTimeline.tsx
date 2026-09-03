@@ -1748,7 +1748,11 @@ function ThinkingTimelineRow({ isCompacting }: { isCompacting: boolean }) {
   // Reserve the activity row during setup so the handoff keeps the same height.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree ? null : isCompacting ? <CompactingActivityRow /> : <ThinkingActivityRow />}
+      {isPreparingWorktree ? null : isCompacting ? (
+        <CompactingActivityRow />
+      ) : (
+        <ThinkingActivityRow />
+      )}
     </div>
   );
 }
@@ -3206,6 +3210,17 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       ? undefined
       : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
   const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const displayText =
+    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
+  const canExpandTool =
+    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
+    Boolean(
+      workEntryRawCommand(workEntry) ||
+      workEntry.command?.trim() ||
+      workEntry.detail?.trim() ||
+      workEntry.changedFiles?.length,
+    );
+  const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
