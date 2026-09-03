@@ -101,15 +101,17 @@ export function upsertProviderWorkspaceSnapshot(
 }
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
+  const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
   const hasAuthoritativeInventoryProbe =
+    isAntigravity ||
     provider.driver === ProviderDriverKind.make("opencode") ||
     provider.driver === ProviderDriverKind.make("pi");
   if (!hasAuthoritativeInventoryProbe) return true;
-
-  // OpenCode and Pi pending/error snapshots are non-authoritative because no
-  // current inventory was established. Successful ready/warning snapshots are
-  // authoritative, including an empty inventory after logout, configuration
-  // removal, or provider/plugin removal.
+  if (isAntigravity && (!provider.enabled || provider.auth.status === "unauthenticated")) {
+    return false;
+  }
+  const isPendingAntigravityAuthentication =
+    isAntigravity && provider.status === "warning" && provider.auth.status === "unknown";
   const isPendingInitialProbe =
     provider.enabled && !provider.installed && provider.status === "warning";
   const didInstalledProviderProbeFail = provider.installed && provider.status === "error";
