@@ -944,9 +944,7 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
           Effect.gen(function* () {
             sends.push(input);
             preparedPayloads.push(binding.runtimePayload);
-            return yield* Effect.fail(
-              new ProviderSessionNotFoundError({ threadId: input.threadId }),
-            );
+            return yield* new ProviderSessionNotFoundError({ threadId: input.threadId });
           }),
       },
       directory: {
