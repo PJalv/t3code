@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseTurnDiffFilesFromNumstat } from "./Diffs.ts";
+import { parseTurnDiffFilesFromNumstat, parseTurnDiffFilesFromUnifiedDiff } from "./Diffs.ts";
 
 describe("parseTurnDiffFilesFromNumstat", () => {
   it("returns an empty list when no files changed", () => {
