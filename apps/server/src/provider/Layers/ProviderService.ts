@@ -59,6 +59,7 @@ import {
 } from "../../observability/Metrics.ts";
 import {
   type ProviderAdapterError,
+  ProviderAdapterRequestError,
   ProviderSessionDirectoryPersistenceError,
   ProviderValidationError,
 } from "../Errors.ts";

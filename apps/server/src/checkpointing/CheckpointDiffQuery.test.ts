@@ -97,6 +97,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            getUserInputActivity: () => Effect.die("provider diff should not query projections"),
             getCommandReadModel: () => Effect.die("provider diff should not query projections"),
             getSnapshot: () => Effect.die("provider diff should not query projections"),
             getShellSnapshot: () => Effect.die("provider diff should not query projections"),
@@ -104,6 +105,7 @@ describe("CheckpointDiffQuery.layer", () => {
               Effect.die("provider diff should not query projections"),
             getSnapshotSequence: () => Effect.die("provider diff should not query projections"),
             getCounts: () => Effect.die("provider diff should not query projections"),
+            getEventReplayStats: () => Effect.die("provider diff should not query projections"),
             getActiveProjectByWorkspaceRoot: () =>
               Effect.die("provider diff should not query projections"),
             getProjectShellById: () => Effect.die("provider diff should not query projections"),
@@ -115,6 +117,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.die("provider diff should not query projections"),
             getThreadDetailById: () => Effect.die("provider diff should not query projections"),
             getThreadDetailSnapshot: () => Effect.die("provider diff should not query projections"),
+            getThreadRuntimeContext: () => Effect.die("provider diff should not query projections"),
             searchThreads: () => Effect.die("provider diff should not query projections"),
           }),
         ),
@@ -185,12 +188,14 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            getUserInputActivity: () => Effect.die("unused"),
             getCommandReadModel: () => Effect.die("unused"),
             getSnapshot: () => Effect.die("unused"),
             getShellSnapshot: () => Effect.die("unused"),
             getArchivedShellSnapshot: () => Effect.die("unused"),
             getSnapshotSequence: () => Effect.die("unused"),
             getCounts: () => Effect.die("unused"),
+            getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
             getProjectShellById: () => Effect.die("unused"),
             getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
@@ -199,6 +204,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.die("unused"),
             getThreadDetailById: () => Effect.die("unused"),
             getThreadDetailSnapshot: () => Effect.die("unused"),
+            getThreadRuntimeContext: () => Effect.die("unused"),
             searchThreads: () => Effect.die("unused"),
           }),
         ),

@@ -5508,7 +5508,7 @@ export default function ChatView(props: ChatViewProps) {
     !activeProject ||
     !isServerThread ||
     (selectedProvider !== "claudeAgent" && selectedProvider !== "pi") ||
-    !compactionProviderAvailable ||
+    !manualCompactionProviderAvailable ||
     isWorking ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -5523,7 +5523,7 @@ export default function ChatView(props: ChatViewProps) {
       ? "Send or clear your draft before compacting"
       : !activeProject
         ? "Choose a project before compacting"
-        : !compactionProviderAvailable
+        : !manualCompactionProviderAvailable
           ? "Enable a Claude or Pi provider before compacting"
           : "Compacting is unavailable right now"
     : null;

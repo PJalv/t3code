@@ -319,6 +319,7 @@ describe("ProviderRuntimeIngestion", () => {
     }
     const provider = createProviderServiceHarness();
     const sessionDirectory = createProviderSessionDirectoryHarness();
+    const sqlCounter = makeSqlStatementCounter();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),

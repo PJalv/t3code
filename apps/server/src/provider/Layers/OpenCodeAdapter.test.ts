@@ -400,13 +400,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
                 yield* runtimeMock.state.subscribedEventStream;
                 return;
               }
-              if (runtimeMock.state.autoConnect) {
-                yield { id: "evt-auto-connected", type: "server.connected", properties: {} };
-              }
-              for (const event of runtimeMock.state.subscribedEvents) {
-                const resolved = await event;
-                while (runtimeMock.state.promptEchoEvents.length > 0) {
-                  yield runtimeMock.state.promptEchoEvents.shift();
+              const aborted = promiseWithResolvers<void>();
+              const onAbort = () => aborted.resolve(undefined);
+              options?.signal?.addEventListener("abort", onAbort, { once: true });
+              try {
+                if (runtimeMock.state.autoConnect) {
+                  yield { id: "evt-auto-connected", type: "server.connected", properties: {} };
                 }
                 for (const event of runtimeMock.state.subscribedEvents) {
                   if (options?.signal?.aborted) return;

@@ -339,6 +339,7 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  turnTokenUsage: OpenCodeTurnTokenUsageAccumulator | undefined;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   readonly fileDiffsByTurnId: Map<TurnId, Map<string, string[]>>;
   readonly fileDiffsByCallId: Map<string, { readonly file: string; readonly patch: string }>;
@@ -370,6 +371,75 @@ interface OpenCodeSessionContext {
    *   - tears down the OpenCode server process for scope-owned servers.
    */
   readonly sessionScope: Scope.Closeable;
+}
+
+interface OpenCodeTurnTokenUsageAccumulator {
+  readonly partIds: Set<string>;
+  readonly promptMessageIds: Set<string>;
+  readonly assistantOwnershipByMessageId: Map<string, "owned" | "other" | "unknown">;
+  readonly unresolvedStepPartIds: Set<string>;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  complete: boolean;
+  hasSubagents: boolean;
+}
+
+function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumulator {
+  return {
+    partIds: new Set(),
+    promptMessageIds: new Set(),
+    assistantOwnershipByMessageId: new Map(),
+    unresolvedStepPartIds: new Set(),
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    complete: true,
+    hasSubagents: false,
+  };
+}
+
+function accumulateOpenCodeStepUsage(
+  accumulator: OpenCodeTurnTokenUsageAccumulator,
+  part: Extract<Part, { readonly type: "step-finish" }>,
+): void {
+  if (accumulator.partIds.has(part.id)) return;
+  accumulator.partIds.add(part.id);
+  accumulator.inputTokens += part.tokens.input + part.tokens.cache.read + part.tokens.cache.write;
+  accumulator.cachedInputTokens += part.tokens.cache.read;
+  accumulator.cacheCreationTokens += part.tokens.cache.write;
+  accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
+  accumulator.reasoningTokens += part.tokens.reasoning;
+}
+
+function takeOpenCodeTurnTokenUsage(
+  context: OpenCodeSessionContext,
+  complete: boolean,
+): TurnTokenUsage {
+  const usage = context.turnTokenUsage;
+  context.turnTokenUsage = undefined;
+  if (!usage || usage.partIds.size === 0) {
+    return {
+      usageStatus: "unavailable",
+      usageScope: "main_agent",
+      hasSubagents: usage?.hasSubagents ?? false,
+    };
+  }
+  return {
+    usageStatus:
+      complete && usage.complete && usage.unresolvedStepPartIds.size === 0 ? "complete" : "partial",
+    usageScope: "main_agent",
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: Math.min(usage.outputTokens, usage.reasoningTokens),
+    hasSubagents: usage.hasSubagents,
+  };
 }
 
 function fileDiffFromToolPart(
@@ -3103,6 +3173,7 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          turnTokenUsage: undefined,
           turns: [],
           fileDiffsByTurnId: new Map(),
           fileDiffsByCallId: new Map(),
