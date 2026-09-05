@@ -2800,7 +2800,7 @@ describe("PiAdapter", () => {
         assert.ok(
           sessions.length === 0 || sessions[0]?.status === "closed",
           "expected the wedged Pi session to be closed, got: " +
-            JSON.stringify(sessions.map((s) => s.status)),
+            sessions.map((s) => s.status).join(", "),
         );
       }),
     );

@@ -397,24 +397,14 @@ function normalizeRuntimeTurnState(
 }
 
 function orchestrationSessionStatusFromRuntimeState(
-  state:
-    | "starting"
-    | "running"
-    | "waiting"
-    | "ready"
-    | "compacting"
-    | "interrupted"
-    | "stopped"
-    | "error",
-): "starting" | "running" | "ready" | "compacting" | "interrupted" | "stopped" | "error" {
+  state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
+): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
   switch (state) {
     case "starting":
       return "starting";
     case "running":
     case "waiting":
       return "running";
-    case "compacting":
-      return "compacting";
     case "ready":
       return "ready";
     case "interrupted":
@@ -429,10 +419,7 @@ function orchestrationSessionStatusFromRuntimeState(
 function sessionStatusAllowsActiveTurn(
   status: ReturnType<typeof orchestrationSessionStatusFromRuntimeState>,
 ): boolean {
-  // Compaction blocks the agent but the active turn is only paused — it
-  // resumes (or is continued by a follow-up) once compaction_end fires, so
-  // keep the active turn id instead of clearing it.
-  return status === "starting" || status === "running" || status === "compacting";
+  return status === "starting" || status === "running";
 }
 
 function requestKindFromCanonicalRequestType(
