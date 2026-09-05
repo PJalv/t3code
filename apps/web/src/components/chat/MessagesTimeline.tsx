@@ -2212,7 +2212,16 @@ function CompactingActivityRow() {
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
-/** Live elapsed time for the "Working for" label. */
+/** Live "Working for Xs" label. */
+function CompactingLabel() {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Minimize2Icon aria-hidden="true" className="size-3" />
+      Compacting…
+    </span>
+  );
+}
+
 function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
@@ -4168,6 +4177,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
+  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
+  const hasSpecialToolIcon = toolPresentation !== null || workEntry.toolSurface !== undefined;
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
@@ -4175,6 +4186,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     showWarningIndicator || (showFailedIndicator && !hasSpecialToolIcon)
       ? "circle-alert"
       : workEntryIconName(workEntry);
+  const entryToolIcon =
+    showWarningIndicator || showDestructiveRowStyle
+      ? undefined
+      : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
   const canExpandTool =
     (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
     Boolean(
@@ -4215,10 +4230,18 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const expanded = isFileChangeEntry
     ? (ctx.fileChangeExpandedByEntryId.get(workEntry.id) ?? shouldAutoExpandInlineDiff)
     : locallyExpanded;
-  const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
   const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
   const displayText =
     !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
+  const commandMatchesVisibleLabel = workEntry.command?.trim() === previewText.trim();
+  const expandedBody = expanded
+    ? buildToolCallExpandedBody(
+        workEntry,
+        workspaceRoot,
+        previewText,
+        viewedImage ? viewedImagePath : null,
+      )
+    : null;
   const canExpand = canExpandTool || canShowInlineFileDiff || expandedBody !== null;
   // Ordinary tool failures stay muted; only runtime errors and warnings get
   // color. The red treatment is reserved for severe failures.
