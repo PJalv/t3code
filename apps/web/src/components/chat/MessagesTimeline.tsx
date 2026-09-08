@@ -156,6 +156,7 @@ import {
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   keepTimelineEndVisibleAfterOverlayGrowth,
+  timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -404,6 +405,7 @@ interface MessagesTimelineProps {
   latestTurn: TimelineLatestTurn | null;
   runningTurnId: TurnId | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  turnDiffSummaries?: ReadonlyArray<TurnDiffSummary>;
   checkpointTurnCountByTurnId: ReadonlyMap<TurnId, number>;
   routeThreadKey: string;
   /**
@@ -474,6 +476,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   latestTurn,
   runningTurnId,
   turnDiffSummaryByAssistantMessageId,
+  turnDiffSummaries: providedTurnDiffSummaries,
   checkpointTurnCountByTurnId,
   routeThreadKey,
   displayThreadKey,
@@ -713,29 +716,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     workspaceRoot: string | undefined;
     projection: MessagesTimelineRowsProjection;
   } | null>(null);
-  // Match the row header's liveness, retaining projection input identity
-  // across unrelated panel updates.
-  const liveAgentTaskKey = useMemo(() => {
-    if (agentPanelModel === undefined) return undefined;
-    const ids: string[] = [];
-    const consider = (agent: { id: string; status: RuntimeSubagent["status"] }) => {
-      if (isActiveSubagentStatus(agent.status)) ids.push(agent.id);
-    };
-    agentPanelModel.directAgents.forEach(consider);
-    for (const group of agentPanelModel.workflows) {
-      if (!isTerminalSubagentStatus(group.workflow.status)) ids.push(group.workflow.id);
-      group.unphasedMembers.forEach(consider);
-      group.phases.forEach((phase) => phase.members.forEach(consider));
-    }
-    return ids.sort().join("\n");
-  }, [agentPanelModel]);
-  const liveAgentTaskIds = useMemo(
-    () =>
-      liveAgentTaskKey === undefined
-        ? undefined
-        : new Set(liveAgentTaskKey.length > 0 ? liveAgentTaskKey.split("\n") : []),
-    [liveAgentTaskKey],
+  const derivedTurnDiffSummaries = useMemo(
+    () => [...turnDiffSummaryByAssistantMessageId.values()],
+    [turnDiffSummaryByAssistantMessageId],
   );
+  const turnDiffSummaries = providedTurnDiffSummaries ?? derivedTurnDiffSummaries;
   const rawRows = useMemo(() => {
     const previous = rowsProjectionRef.current;
     const projection = deriveMessagesTimelineRowsWithState(
@@ -2723,6 +2708,8 @@ function AssistantChangedFilesSectionInner({
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId],
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
+  const activity = use(TimelineRowActivityCtx);
+  const isLatestTurn = activity.latestTurnId === turnSummary.turnId;
   const hasProviderNativeInlineDiff = String(turnSummary.checkpointRef).startsWith(
     "provider-diff:",
   );

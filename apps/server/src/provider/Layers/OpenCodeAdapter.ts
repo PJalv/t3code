@@ -350,6 +350,7 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  readonly textPartsByMessageId: Map<string, Map<string, OpenCodeTextPartState>>;
   turnTokenUsage: OpenCodeTurnTokenUsageAccumulator | undefined;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   readonly fileDiffsByTurnId: Map<TurnId, Map<string, string[]>>;
@@ -389,6 +390,7 @@ interface OpenCodeTurnTokenUsageAccumulator {
   readonly promptMessageIds: Set<string>;
   readonly assistantOwnershipByMessageId: Map<string, "owned" | "other" | "unknown">;
   readonly unresolvedStepPartIds: Set<string>;
+  readonly unresolvedStepsByMessageId: Map<string, Map<string, OpenCodeStepUsage>>;
   inputTokens: number;
   cachedInputTokens: number;
   cacheCreationTokens: number;
@@ -404,6 +406,7 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
     promptMessageIds: new Set(),
     assistantOwnershipByMessageId: new Map(),
     unresolvedStepPartIds: new Set(),
+    unresolvedStepsByMessageId: new Map(),
     inputTokens: 0,
     cachedInputTokens: 0,
     cacheCreationTokens: 0,
@@ -416,7 +419,7 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
 
 function accumulateOpenCodeStepUsage(
   accumulator: OpenCodeTurnTokenUsageAccumulator,
-  part: Extract<Part, { readonly type: "step-finish" }>,
+  part: Pick<Extract<Part, { readonly type: "step-finish" }>, "id" | "tokens">,
 ): void {
   if (accumulator.partIds.has(part.id)) return;
   accumulator.partIds.add(part.id);
@@ -3196,6 +3199,8 @@ export function makeOpenCodeAdapter(
           pendingPermissions: new Map(),
           pendingQuestions: new Map(),
           textPartsByMessageId: new Map(),
+          partById: new Map(),
+          emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
           turnTokenUsage: undefined,

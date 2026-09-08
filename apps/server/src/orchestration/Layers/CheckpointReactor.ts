@@ -19,7 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
 import * as Stream from "effect/Stream";
-import { makeKeyedDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeDrainableWorker, makeKeyedDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
@@ -441,7 +441,9 @@ const make = Effect.gen(function* () {
         thread,
         cwd: checkpointCwd,
         turnCount: nextTurnCount,
-        status: checkpointStatusFromRuntime(event.payload.state),
+        status: checkpointStatusFromRuntime(
+          "state" in event.payload ? event.payload.state : undefined,
+        ),
         assistantMessageId: existingProviderCheckpoint?.assistantMessageId ?? undefined,
         ...(existingProviderCheckpoint ? { providerFiles: existingProviderCheckpoint.files } : {}),
         createdAt: event.createdAt,

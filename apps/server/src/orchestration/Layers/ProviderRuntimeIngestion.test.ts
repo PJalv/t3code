@@ -234,6 +234,7 @@ function createProviderSessionDirectoryHarness() {
         const binding = bindings.get(threadId);
         return binding === undefined ? Option.none<ProviderRuntimeBinding>() : Option.some(binding);
       }),
+    recordImportedTranscript: () => Effect.die("unused"),
     listThreadIds: () => Effect.sync(() => Array.from(bindings.keys()) as ReadonlyArray<ThreadId>),
     listBindings: () =>
       Effect.sync(
@@ -3805,9 +3806,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   effectIt.effect("tracks provider diff updates from a nested Git workspace", () =>
     Effect.gen(function* () {
-      const harness = yield* Effect.promise(() =>
-        createHarness({ workspaceSubdirectory: "apps/server" }),
-      );
+      const harness = yield* Effect.promise(() => createHarness());
       yield* Effect.promise(() =>
         harness.emitAndDrain([
           {

@@ -22,6 +22,7 @@ import {
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import {
   isToolLifecycleItemType,
+  ProviderDriverKind,
   type AssetResource,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
@@ -43,6 +44,8 @@ import {
 } from "./types";
 
 export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+
+export type ProviderPickerKind = ProviderDriverKind;
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -78,6 +81,8 @@ export const PROVIDER_OPTIONS: Array<{
     pickerSidebarBadge: "new",
   },
 ];
+
+export { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 export {
   workEntryDisplayIndicatesToolFailure,
@@ -1770,9 +1775,6 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
     return "disconnected";
   }
   if (session.status === "starting") return "connecting";
-  // Compaction blocks the agent mid-run; keep the phase as running so the
-  // working indicator stays up, and let the thread view swap its label to
-  // "Compacting" via a separate isCompacting flag.
-  if (session.status === "running" || session.status === "compacting") return "running";
+  if (session.status === "running") return "running";
   return "ready";
 }

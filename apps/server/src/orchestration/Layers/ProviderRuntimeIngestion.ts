@@ -13,7 +13,7 @@ import {
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
-  type ProjectId,
+  type OrchestrationThread,
   type ProviderRuntimeEvent,
   type ResponseStreamingMode,
   RuntimeRequestId,
@@ -978,8 +978,14 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const resolveThreadDetail = (threadId: ThreadId) =>
+    projectionSnapshotQuery
+      .getThreadDetailById(threadId, {})
+      .pipe(Effect.map(Option.getOrUndefined));
   const providerService = yield* ProviderService;
   const providerSessionDirectory = yield* ProviderSessionDirectory;
+  const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
+  const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const serverSettingsService = yield* ServerSettingsService;
@@ -2163,7 +2169,12 @@ const make = Effect.gen(function* () {
             checkpointTurnCount,
             createdAt: now,
           });
-        } else if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd)) {
+        } else if (
+          turnId &&
+          checkpointContext &&
+          workspaceCwd &&
+          (yield* checkpointStore.isGitRepository(workspaceCwd))
+        ) {
           // Skip if a checkpoint already exists for this turn. A real
           // (non-placeholder) capture from CheckpointReactor should not
           // be clobbered, and dispatching a duplicate placeholder for the

@@ -13,7 +13,6 @@ import {
 import {
   CheckpointRef,
   CommandId,
-  CheckpointRef,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
