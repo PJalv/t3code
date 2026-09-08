@@ -4,6 +4,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
+  type ProviderSendTurnInput,
   type ProviderSession,
   type ProviderUserInputAnswers,
   RuntimeItemId,
@@ -3232,6 +3233,24 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       }),
     );
   };
+  const compactThread = Effect.fn("compactThread")(function* (
+    threadId: ThreadId,
+    _requestedModelSelection?: ProviderSendTurnInput["modelSelection"],
+  ) {
+    yield* withThreadLock(
+      threadId,
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        if (!isIdle(ctx)) {
+          return yield* validation(
+            "compactThread",
+            "Pi compaction requires an idle session with no active background work.",
+          );
+        }
+        yield* ctx.client.compact().pipe(Effect.mapError((cause) => request("compact", cause)));
+      }),
+    );
+  });
   const stopSession = (threadId: ThreadId) =>
     sessions.has(threadId) ? close(sessions.get(threadId)!, "explicit") : Effect.void;
   const stopAll = () =>
@@ -3245,6 +3264,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     capabilities: { sessionModelSwitch: "in-session" },
     startSession,
     sendTurn,
+    compaction: { type: "native", start: compactThread },
     interruptTurn,
     respondToRequest: (threadId) => unsupported("respondToRequest", threadId),
     respondToUserInput,
