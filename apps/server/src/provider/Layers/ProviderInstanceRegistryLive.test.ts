@@ -50,6 +50,7 @@ import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
@@ -394,57 +395,59 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
   );
 
   it.live("runs Codex and Claude readiness probes from configured tilde paths", () =>
-    Effect.gen(function* () {
-      if (yield* isHostWindows) return;
+    Effect.scoped(
+      Effect.gen(function* () {
+        if (yield* isHostWindows) return;
 
-      const fixtures = yield* makeTildeProviderFixtures();
+        const fixtures = yield* makeTildeProviderFixtures();
 
-      const codexId = ProviderInstanceId.make("codex_tilde");
-      const claudeId = ProviderInstanceId.make("claude_tilde");
-      const configMap: ProviderInstanceConfigMap = {
-        [codexId]: {
-          driver: ProviderDriverKind.make("codex"),
-          enabled: true,
-          environment: [
-            {
-              name: "T3_CODEX_COLLAB_SCRIPT",
-              value: fixtures.codexScriptPath,
-              sensitive: false,
-            },
-          ],
-          config: makeCodexConfig({ enabled: true, binaryPath: fixtures.codexBinaryPath }),
-        },
-        [claudeId]: {
-          driver: ProviderDriverKind.make("claudeAgent"),
-          enabled: true,
-          config: makeClaudeConfig({
+        const codexId = ProviderInstanceId.make("codex_tilde");
+        const claudeId = ProviderInstanceId.make("claude_tilde");
+        const configMap: ProviderInstanceConfigMap = {
+          [codexId]: {
+            driver: ProviderDriverKind.make("codex"),
             enabled: true,
-            binaryPath: fixtures.claudeBinaryPath,
-            homePath: fixtures.claudeHomePath,
-          }),
-        },
-      };
+            environment: [
+              {
+                name: "T3_CODEX_COLLAB_SCRIPT",
+                value: fixtures.codexScriptPath,
+                sensitive: false,
+              },
+            ],
+            config: makeCodexConfig({ enabled: true, binaryPath: fixtures.codexBinaryPath }),
+          },
+          [claudeId]: {
+            driver: ProviderDriverKind.make("claudeAgent"),
+            enabled: true,
+            config: makeClaudeConfig({
+              enabled: true,
+              binaryPath: fixtures.claudeBinaryPath,
+              homePath: fixtures.claudeHomePath,
+            }),
+          },
+        };
 
-      const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver],
-        configMap,
-      });
-      const codex = yield* registry.getInstance(codexId);
-      const claude = yield* registry.getInstance(claudeId);
-      expect(codex).toBeDefined();
-      expect(claude).toBeDefined();
+        const { registry } = yield* makeProviderInstanceRegistry({
+          drivers: [CodexDriver, ClaudeDriver],
+          configMap,
+        });
+        const codex = yield* registry.getInstance(codexId);
+        const claude = yield* registry.getInstance(claudeId);
+        expect(codex).toBeDefined();
+        expect(claude).toBeDefined();
 
-      const [codexSnapshot, claudeSnapshot] = yield* Effect.all(
-        [codex!.snapshot.refresh, claude!.snapshot.refresh],
-        { concurrency: "unbounded" },
-      );
-      expect(codexSnapshot).toMatchObject({ status: "ready", installed: true, version: "0.0.0" });
-      expect(claudeSnapshot).toMatchObject({
-        status: "ready",
-        installed: true,
-        version: "2.1.219",
-      });
-    }).pipe(Effect.provide(testLayer)),
+        const [codexSnapshot, claudeSnapshot] = yield* Effect.all(
+          [codex!.snapshot.refresh, claude!.snapshot.refresh],
+          { concurrency: "unbounded" },
+        );
+        expect(codexSnapshot).toMatchObject({ status: "ready", installed: true, version: "0.0.0" });
+        expect(claudeSnapshot).toMatchObject({
+          status: "ready",
+          installed: true,
+          version: "2.1.219",
+        });
+      }),
+    ).pipe(Effect.provide(testLayer)),
   );
 
   const redeemClaudeReset = (claim: { result: string; usageFailsAfterClaim: boolean }) =>

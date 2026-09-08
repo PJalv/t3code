@@ -172,7 +172,9 @@ import {
   isImageAttachment,
   type SessionPhase,
   type Thread,
+  type TurnDiffSummary,
 } from "../types";
+import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
