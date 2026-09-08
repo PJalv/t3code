@@ -76,6 +76,7 @@ import {
   ProviderAdapterRequestError,
   ProviderSessionDirectoryPersistenceError,
   ProviderValidationError,
+  ProviderWorkspaceMissingError,
 } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
