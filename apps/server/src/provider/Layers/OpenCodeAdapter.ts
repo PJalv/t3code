@@ -389,7 +389,6 @@ interface OpenCodeTurnTokenUsageAccumulator {
   readonly partIds: Set<string>;
   readonly promptMessageIds: Set<string>;
   readonly assistantOwnershipByMessageId: Map<string, "owned" | "other" | "unknown">;
-  readonly unresolvedStepPartIds: Set<string>;
   readonly unresolvedStepsByMessageId: Map<string, Map<string, OpenCodeStepUsage>>;
   inputTokens: number;
   cachedInputTokens: number;
@@ -405,7 +404,6 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
     partIds: new Set(),
     promptMessageIds: new Set(),
     assistantOwnershipByMessageId: new Map(),
-    unresolvedStepPartIds: new Set(),
     unresolvedStepsByMessageId: new Map(),
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -445,7 +443,9 @@ function takeOpenCodeTurnTokenUsage(
   }
   return {
     usageStatus:
-      complete && usage.complete && usage.unresolvedStepPartIds.size === 0 ? "complete" : "partial",
+      complete && usage.complete && usage.unresolvedStepsByMessageId.size === 0
+        ? "complete"
+        : "partial",
     usageScope: "main_agent",
     inputTokens: usage.inputTokens,
     cachedInputTokens: usage.cachedInputTokens,
@@ -2675,51 +2675,23 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
-          context.pendingPermissions.set(event.properties.id, event.properties);
+          // Capture the provider-native file diff keyed by call id before the
+          // standard pump registers (and possibly auto-replies to) the request.
           const fileDiff = fileDiffFromPermissionRequest(event.properties);
           const callId = event.properties.tool?.callID;
           if (callId && fileDiff) {
             context.fileDiffsByCallId.set(callId, fileDiff);
           }
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: context.session.threadId,
-              turnId,
-              requestId: event.properties.id,
-              raw: event,
-            })),
-            type: "request.opened",
-            payload: {
-              requestType: mapPermissionToRequestType(event.properties.permission),
-              detail:
-                event.properties.patterns.length > 0
-                  ? event.properties.patterns.join("\n")
-                  : event.properties.permission,
-              args: event.properties.metadata,
-            },
-          });
+          yield* emitPendingOpenCodeRequest(context, event, event);
           break;
         }
 
         case "permission.replied": {
           const request = context.pendingPermissions.get(event.properties.requestID);
-          context.pendingPermissions.delete(event.properties.requestID);
           if (event.properties.reply === "reject" && request?.tool?.callID) {
             context.fileDiffsByCallId.delete(request.tool.callID);
           }
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: context.session.threadId,
-              turnId,
-              requestId: event.properties.requestID,
-              raw: event,
-            })),
-            type: "request.resolved",
-            payload: {
-              requestType: "unknown",
-              decision: mapPermissionDecision(event.properties.reply),
-            },
-          });
+          yield* emitTerminalOpenCodeRequest(context, event);
           break;
         }
 

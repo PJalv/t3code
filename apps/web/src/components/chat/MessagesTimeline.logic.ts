@@ -1405,8 +1405,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.createdAt === (b as typeof a).createdAt;
     case "thinking":
       return (
-        a.createdAt === (b as typeof a).createdAt &&
-        a.isCompacting === (b as typeof a).isCompacting
+        a.createdAt === (b as typeof a).createdAt && a.isCompacting === (b as typeof a).isCompacting
       );
 
     case "assistant-meta": {

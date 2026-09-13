@@ -716,6 +716,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     workspaceRoot: string | undefined;
     projection: MessagesTimelineRowsProjection;
   } | null>(null);
+  // Match the row header's liveness, retaining projection input identity
+  // across unrelated panel updates.
+  const liveAgentTaskKey = useMemo(() => {
+    if (agentPanelModel === undefined) return undefined;
+    const ids: string[] = [];
+    const consider = (agent: { id: string; status: RuntimeSubagent["status"] }) => {
+      if (isActiveSubagentStatus(agent.status)) ids.push(agent.id);
+    };
+    agentPanelModel.directAgents.forEach(consider);
+    for (const group of agentPanelModel.workflows) {
+      if (!isTerminalSubagentStatus(group.workflow.status)) ids.push(group.workflow.id);
+      group.unphasedMembers.forEach((member) => consider(member));
+      group.phases.forEach((phase) => phase.members.forEach((member) => consider(member)));
+    }
+    return ids.sort().join("\n");
+  }, [agentPanelModel]);
+  const liveAgentTaskIds = useMemo(
+    () =>
+      liveAgentTaskKey === undefined
+        ? undefined
+        : new Set(liveAgentTaskKey.length > 0 ? liveAgentTaskKey.split("\n") : []),
+    [liveAgentTaskKey],
+  );
   const derivedTurnDiffSummaries = useMemo(
     () => [...turnDiffSummaryByAssistantMessageId.values()],
     [turnDiffSummaryByAssistantMessageId],
@@ -760,7 +783,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     liveAgentTaskIds,
     worktreeSetup,
   ]);
-  const rows = useStableRows(rawRows);
+  const rows = useStableRows(rawRows, listIdentityKey);
   const turnDiffSummaryByTurnId = useMemo(() => {
     const byTurnId = new Map<TurnId, TurnDiffSummary>();
     for (const summary of turnDiffSummaryByAssistantMessageId.values()) {
@@ -3902,6 +3925,10 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
     return null;
   }
   const expanded = expandedSpawnEntryIds.has(workEntry.id);
+  const toggleExpanded = () => {
+    props.onToggleEntry?.(expanded);
+    onToggleSpawnRow(workEntry.id, !expanded);
+  };
 
   const memberIds = new Set(spawn.agentTaskIds);
   const workflowGroup = spawn.workflowId
@@ -3984,7 +4011,7 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
           label={workflowName ? `${lead} · ${workflowName}` : lead}
           iconName="bot"
           active={live && props.active !== false}
-          failed={failed}
+          failed={failed > 0}
         />
       </button>
       {expanded ? (
@@ -4218,6 +4245,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     ? (ctx.fileChangeExpandedByEntryId.get(workEntry.id) ?? shouldAutoExpandInlineDiff)
     : locallyExpanded;
   const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const answerPreview = workEntry.questionAnswer
+    ? getQuestionAnswerPreview(workEntry.questionAnswer)
+    : null;
   const displayText =
     !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
   const commandMatchesVisibleLabel = workEntry.command?.trim() === previewText.trim();
