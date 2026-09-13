@@ -172,10 +172,12 @@ it.effect("revokeThreadExcept retains only the named provider session", () =>
     const first = yield* registry.issue({
       threadId,
       providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(),
     });
     const second = yield* registry.issue({
       threadId,
       providerInstanceId: ProviderInstanceId.make("claude"),
+      capabilities: new Set(),
     });
     const firstToken = first.config.authorizationHeader.replace(/^Bearer\s+/, "");
     const secondToken = second.config.authorizationHeader.replace(/^Bearer\s+/, "");
@@ -191,6 +193,7 @@ it.effect("revokeThreadExcept retains only the named provider session", () =>
     const other = yield* registry.issue({
       threadId: ThreadId.make("thread-other"),
       providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(),
     });
     yield* registry.revokeThreadExcept(threadId, first.config.providerSessionId);
     const otherToken = other.config.authorizationHeader.replace(/^Bearer\s+/, "");
