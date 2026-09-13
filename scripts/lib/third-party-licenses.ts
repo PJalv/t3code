@@ -1002,6 +1002,7 @@ export function thirdPartyLicensesPlugin(options: ThirdPartyLicensesPluginOption
         packageManifests: options.packageManifests,
         bundledModuleIds: moduleIdsFromBundle(bundle),
         bundleName: options.bundleName,
+        allowMissingGeneratedNotices: true,
         ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
       });
       this.emitFile({
