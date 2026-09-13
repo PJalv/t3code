@@ -101,6 +101,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCommandReadModel: () => Effect.die("provider diff should not query projections"),
             getSnapshot: () => Effect.die("provider diff should not query projections"),
             getShellSnapshot: () => Effect.die("provider diff should not query projections"),
+            getProjectShells: () => Effect.die("provider diff should not query projections"),
             getArchivedShellSnapshot: () =>
               Effect.die("provider diff should not query projections"),
             getSnapshotSequence: () => Effect.die("provider diff should not query projections"),
@@ -192,6 +193,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCommandReadModel: () => Effect.die("unused"),
             getSnapshot: () => Effect.die("unused"),
             getShellSnapshot: () => Effect.die("unused"),
+            getProjectShells: () => Effect.die("unused"),
             getArchivedShellSnapshot: () => Effect.die("unused"),
             getSnapshotSequence: () => Effect.die("unused"),
             getCounts: () => Effect.die("unused"),

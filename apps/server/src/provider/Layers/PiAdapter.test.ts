@@ -490,6 +490,7 @@ describe("PiAdapter", () => {
       threadId,
       providerSessionId: "provider-session",
       providerInstanceId: instanceId,
+      capabilities: new Set(),
       endpoint: "http://127.0.0.1:43123/mcp",
       authorizationHeader: "Bearer secret-token",
     });
