@@ -3820,7 +3820,6 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
-
   effectIt.effect(
     "processes a Stop on thread A while another thread's session start is busy (per-thread control lanes)",
     () =>
