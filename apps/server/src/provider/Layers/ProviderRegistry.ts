@@ -104,14 +104,22 @@ export function upsertProviderWorkspaceSnapshot(
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
+  const isCodex = provider.driver === ProviderDriverKind.make("codex");
   const hasAuthoritativeInventoryProbe =
     isAntigravity ||
+    isCodex ||
     provider.driver === ProviderDriverKind.make("opencode") ||
     provider.driver === ProviderDriverKind.make("pi");
   if (!hasAuthoritativeInventoryProbe) return true;
-  if (isAntigravity && (!provider.enabled || provider.auth.status === "unauthenticated")) {
+  if (
+    (isAntigravity || isCodex) &&
+    (!provider.enabled || provider.auth.status === "unauthenticated")
+  ) {
     return false;
   }
+
+  // Successful discovery replaces these inventories so cached retired models disappear.
+  // Antigravity's local health check does not authenticate or discover models.
   const isPendingAntigravityAuthentication =
     isAntigravity && provider.status === "warning" && provider.auth.status === "unknown";
   const isPendingInitialProbe =
