@@ -18,7 +18,10 @@ const [left, right] = WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS[requested as SnapShotMo
 async function poll() {
   const api = await loadWindowsForegroundApi();
   let active = false;
-  process.send?.("ready");
+  try {
+    process.send?.("ready");
+  } catch {}
+
   const timer = setInterval(() => {
     const pressed = api.isKeyDown(left) && api.isKeyDown(right);
     if (pressed && !active) {
