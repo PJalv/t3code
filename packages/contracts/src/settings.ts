@@ -1454,7 +1454,7 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   // Server settings
-  enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
+  responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   providerNativeFileChangesEnabled: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
