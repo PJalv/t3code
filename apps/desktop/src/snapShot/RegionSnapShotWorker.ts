@@ -4,10 +4,22 @@ import type { RegionSnapShotRequest, RegionSnapShotResult } from "./RegionSnapSh
 
 process.once("disconnect", () => process.exit(0));
 
+// The parent may tear the IPC channel down while a send is in flight; an
+// unhandled EPIPE here would crash this worker noisily for a condition the
+// parent already handles.
+const send = (message: unknown): void => {
+  try {
+    process.send?.(message);
+  } catch {
+    process.exit(0);
+  }
+};
+process.on("error", () => process.exit(0));
+
 async function capture() {
   const imported = await import("@crowecawcaw/xa11y");
   const xa11y = (imported as unknown as { readonly default?: typeof imported }).default ?? imported;
-  process.send?.("ready");
+  send("ready");
   const request = await new Promise<RegionSnapShotRequest>((resolve) => {
     process.once("message", resolve);
   });
@@ -18,11 +30,11 @@ async function capture() {
     height: shot.height,
     png: shot.toPng().toString("base64"),
   };
-  process.send?.(result);
+  send(result);
 }
 
 void capture().catch((error: unknown) =>
-  process.send?.({
+  send({
     type: "error",
     message: error instanceof Error ? error.message : "Windows window capture failed.",
   } satisfies RegionSnapShotResult),
