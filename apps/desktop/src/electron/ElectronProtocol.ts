@@ -139,9 +139,20 @@ function registerDesktopSchemePrivilegesSync(): void {
   ]);
 }
 
-const registerDesktopSchemePrivileges = Effect.sync(registerDesktopSchemePrivilegesSync).pipe(
-  Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"),
-);
+// Electron requires scheme privileges to be registered before the `ready`
+// event; a later call throws and leaves `t3code://` non-privileged, so the
+// renderer never finishes loading and the window stays hidden. Register as
+// soon as this module is imported (process bootstrap) and keep the layer as a
+// tolerated no-op for the post-ready path.
+registerDesktopSchemePrivilegesSync();
+
+const registerDesktopSchemePrivileges = Effect.sync(() => {
+  try {
+    registerDesktopSchemePrivilegesSync();
+  } catch {
+    // Already registered before `ready`; Electron rejects repeat/late calls.
+  }
+}).pipe(Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"));
 
 export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
 
