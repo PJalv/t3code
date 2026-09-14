@@ -14,6 +14,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
   type OrchestrationThread,
+  type ProjectId,
   type ProviderRuntimeEvent,
   type ResponseStreamingMode,
   RuntimeRequestId,

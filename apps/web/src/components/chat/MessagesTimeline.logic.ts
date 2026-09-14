@@ -395,6 +395,12 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string | null;
       isCompacting: boolean;
+    }
+  | {
+      kind: "worktree-setup";
+      id: string;
+      createdAt: string | null;
+      snapshot: WorktreeSetupSnapshot;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -1407,6 +1413,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.createdAt === (b as typeof a).createdAt && a.isCompacting === (b as typeof a).isCompacting
       );
+
+    case "worktree-setup":
+      return a.snapshot === (b as typeof a).snapshot;
 
     case "assistant-meta": {
       const bm = b as typeof a;
