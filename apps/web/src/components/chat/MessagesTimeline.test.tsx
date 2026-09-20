@@ -216,7 +216,6 @@ function buildProps() {
     latestTurn: null,
     runningTurnId: null,
     turnDiffSummaries: [],
-    turnDiffSummaries: [],
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
     supportsConversationRollback: false,
