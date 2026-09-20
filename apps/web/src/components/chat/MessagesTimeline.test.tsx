@@ -215,8 +215,8 @@ function buildProps() {
     listRef: createRef<LegendListRef | null>(),
     latestTurn: null,
     runningTurnId: null,
-    turnDiffSummaryByAssistantMessageId: new Map(),
-    checkpointTurnCountByTurnId: new Map(),
+    turnDiffSummaries: [],
+    turnDiffSummaries: [],
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
     supportsConversationRollback: false,
@@ -620,23 +620,17 @@ describe("MessagesTimeline", () => {
             },
           },
         ]}
-        checkpointTurnCountByTurnId={new Map([[turnId, 1]])}
-        turnDiffSummaryByAssistantMessageId={
-          new Map([
-            [
-              assistantMessageId,
-              {
-                turnId,
-                checkpointTurnCount: 1,
-                checkpointRef: CheckpointRef.make(`provider-diff:${turnId}`),
-                status: "ready",
-                files: [{ path: "src/second.ts", kind: "modified", additions: 1, deletions: 1 }],
-                assistantMessageId,
-                completedAt: MESSAGE_CREATED_AT,
-              },
-            ],
-          ])
-        }
+        turnDiffSummaries={[
+          {
+            turnId,
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make(`provider-diff:${turnId}`),
+            status: "ready",
+            files: [{ path: "src/second.ts", kind: "modified", additions: 1, deletions: 1 }],
+            assistantMessageId,
+            completedAt: MESSAGE_CREATED_AT,
+          },
+        ]}
       />,
     );
 
