@@ -51,6 +51,8 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as NetAddress from "effect/unstable/net/NetAddress";
+import * as Result from "effect/Result";
 
 import {
   ProviderAdapterRequestError,
@@ -5175,7 +5177,7 @@ describe("agent browser access", () => {
   );
 });
 const fakeMcpHttpServer = HttpServer.HttpServer.of({
-  address: { _tag: "InetAddressV4", hostname: "127.0.0.1", port: 43123 },
+  address: Result.getOrThrow(NetAddress.inetAddressV4(NetAddress.ipv4Loopback, 43123)),
   serve: (() => Effect.void) as HttpServer.HttpServer["Service"]["serve"],
 });
 const fakeMcpEnvironment = ServerEnvironment.ServerEnvironment.of({

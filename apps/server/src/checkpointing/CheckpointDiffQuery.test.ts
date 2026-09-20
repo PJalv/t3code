@@ -120,6 +120,8 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadDetailSnapshot: () => Effect.die("provider diff should not query projections"),
             getThreadRuntimeContext: () => Effect.die("provider diff should not query projections"),
             searchThreads: () => Effect.die("provider diff should not query projections"),
+            listActivitiesByKind: () => Effect.die("unused"),
+            getDeletedWorktreeThreads: () => Effect.die("unused"),
           }),
         ),
       );
@@ -208,6 +210,8 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadDetailSnapshot: () => Effect.die("unused"),
             getThreadRuntimeContext: () => Effect.die("unused"),
             searchThreads: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
+            getDeletedWorktreeThreads: () => Effect.die("unused"),
           }),
         ),
       );
