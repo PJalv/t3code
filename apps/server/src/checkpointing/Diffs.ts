@@ -40,7 +40,7 @@ export function parseTurnDiffFilesFromUnifiedDiff(
     return [];
   }
 
-  const filesByPath = new Map<string, TurnDiffFileSummary>();
+  const filesByPath = new Map<string, { path: string; additions: number; deletions: number }>();
   let path: string | undefined;
   for (const line of normalized.split("\n")) {
     if (line.startsWith("+++ ")) {
@@ -50,7 +50,16 @@ export function parseTurnDiffFilesFromUnifiedDiff(
       continue;
     }
     // Count only hunk body lines; headers and file metadata are not changes.
-    if (path === undefined || line.startsWith("@@") || line.startsWith("--- ") || line.startsWith("diff ") || line.startsWith("Index:") || line.startsWith("===") || line.startsWith("\\\\")) continue;
+    if (
+      path === undefined ||
+      line.startsWith("@@") ||
+      line.startsWith("--- ") ||
+      line.startsWith("diff ") ||
+      line.startsWith("Index:") ||
+      line.startsWith("===") ||
+      line.startsWith("\\\\")
+    )
+      continue;
     const existing = filesByPath.get(path) ?? { path, additions: 0, deletions: 0 };
     if (line.startsWith("+")) existing.additions += 1;
     else if (line.startsWith("-")) existing.deletions += 1;
