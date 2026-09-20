@@ -2321,6 +2321,9 @@ function useChatMarkdownState({
   const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
     reportFailure: false,
   });
+  const [workspaceBasenamePaths, setWorkspaceBasenamePaths] = useState<Map<string, string>>(
+    () => new Map(),
+  );
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
@@ -2577,6 +2580,58 @@ function useChatMarkdownState({
     },
     [cwd, environmentId, searchProjectEntries],
   );
+  // Resolve bare references before rendering them. Explicit paths are deliberately
+  // left alone; ambiguous basenames are omitted by the shared picker.
+  useEffect(() => {
+    if (!cwd || environmentId === null) {
+      setWorkspaceBasenamePaths(new Map());
+      return;
+    }
+    const candidates = new Set<string>();
+    for (const meta of [
+      ...markdownFileLinkMetaByHref.values(),
+      ...inlineCodeFileLinkMetaByText.values(),
+    ]) {
+      if (meta.workspaceRelativePath && needsWorkspaceBasenameLookup(meta.workspaceRelativePath)) {
+        candidates.add(meta.workspaceRelativePath);
+      }
+    }
+    if (candidates.size === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      [...candidates].map(
+        async (basename) => [basename, await findWorkspaceBasenameMatch(basename)] as const,
+      ),
+    ).then((matches) => {
+      if (!cancelled)
+        setWorkspaceBasenamePaths(
+          new Map(matches.filter(([, path]) => path !== null) as Array<[string, string]>),
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    cwd,
+    environmentId,
+    findWorkspaceBasenameMatch,
+    inlineCodeFileLinkMetaByText,
+    markdownFileLinkMetaByHref,
+  ]);
+  const resolveWorkspaceBasename = useCallback(
+    (path: string) =>
+      cwd && needsWorkspaceBasenameLookup(path) ? (workspaceBasenamePaths.get(path) ?? path) : path,
+    [cwd, workspaceBasenamePaths],
+  );
+  const resolvedFileLinkMeta = useCallback(
+    (meta: MarkdownFileLinkMeta) => {
+      const resolved = meta.workspaceRelativePath
+        ? workspaceBasenamePaths.get(meta.workspaceRelativePath)
+        : undefined;
+      return resolved && cwd ? (resolveMarkdownFileLinkMeta(resolved, cwd) ?? meta) : meta;
+    },
+    [cwd, workspaceBasenamePaths],
+  );
   // A bare filename resolves to the workspace root, which is rarely where the
   // file is, so ask the index before opening. Absolute host paths open as-is.
   const openFileInPanel = useCallback(
@@ -2611,7 +2666,13 @@ function useChatMarkdownState({
     [cwd, findWorkspaceBasenameMatch, revealFileInFileManager],
   );
   const fileLinkChip = useCallback(
-    (fileLinkMeta: MarkdownFileLinkMeta, copyMarkdown: string, mediaSource?: string) => {
+    (
+      fileLinkMeta: MarkdownFileLinkMeta,
+      copyMarkdown: string,
+      className?: string,
+      mediaSource?: string,
+    ) => {
+      fileLinkMeta = resolvedFileLinkMeta(fileLinkMeta);
       const parentSuffix = fileLinkParentSuffixByPath.get(
         fileLinkMeta.filePath.replaceAll("\\", "/"),
       );
@@ -2683,6 +2744,7 @@ function useChatMarkdownState({
       revealInFileManagerLabel,
       revealMarkdownFileInFileManager,
       threadRef,
+      resolvedFileLinkMeta,
     ],
   );
 
@@ -2717,6 +2779,7 @@ function useChatMarkdownState({
       text,
       threadRef,
       updateThreadPullRequestLink,
+      resolveWorkspaceBasename,
     }),
     [
       cwd,
@@ -2748,6 +2811,7 @@ function useChatMarkdownState({
       text,
       threadRef,
       updateThreadPullRequestLink,
+      resolveWorkspaceBasename,
     ],
   );
   return {
@@ -3139,6 +3203,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       imageBaseDir,
       threadRef,
       renderContextReference,
+      resolveWorkspaceBasename,
     } = use(ChatMarkdownRendererContext);
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
@@ -3163,7 +3228,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle);
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
-    const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
+    const resolvedClassifiedSrc =
+      cwd && needsWorkspaceBasenameLookup(classifiedSrc)
+        ? resolveWorkspaceBasename(classifiedSrc)
+        : classifiedSrc;
+    const imageSource = classifyMarkdownImageSource(resolvedClassifiedSrc, imageBaseDir ?? cwd);
     const kind = mediaKindFromPath(classifiedSrc) ?? "image";
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const githubMediaUrl =
