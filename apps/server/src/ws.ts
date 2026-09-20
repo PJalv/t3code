@@ -1079,7 +1079,11 @@ const makeWsRpcLayer = (
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
         Effect.gen(function* () {
           const bootstrap = command.bootstrap;
-          const { bootstrap: _bootstrap, ...finalTurnStartCommand } = command;
+          const { bootstrap: _bootstrap, ...turnStartCommand } = command;
+          const finalTurnStartCommand = {
+            ...turnStartCommand,
+            ...(bootstrap?.createThread ? { messageAlreadyPersisted: true as const } : {}),
+          };
           let createdThread = false;
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
