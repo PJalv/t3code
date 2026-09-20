@@ -397,13 +397,14 @@ function normalizeRuntimeTurnState(
 }
 
 function orchestrationSessionStatusFromRuntimeState(
-  state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
+  state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error" | "compacting",
 ): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
   switch (state) {
     case "starting":
       return "starting";
     case "running":
     case "waiting":
+    case "compacting":
       return "running";
     case "ready":
       return "ready";
