@@ -1,5 +1,3 @@
-import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
-
 export interface TurnDiffFileSummary {
   readonly path: string;
   readonly additions: number;
@@ -42,20 +40,22 @@ export function parseTurnDiffFilesFromUnifiedDiff(
     return [];
   }
 
-  const parsedPatches = parsePatchFiles(normalized);
   const filesByPath = new Map<string, TurnDiffFileSummary>();
-  for (const patch of parsedPatches) {
-    for (const file of patch.files) {
-      const existing = filesByPath.get(file.name);
-      const additions = file.hunks.reduce((total, hunk) => total + hunk.additionLines, 0);
-      const deletions = file.hunks.reduce((total, hunk) => total + hunk.deletionLines, 0);
-      filesByPath.set(file.name, {
-        path: file.name,
-        additions: (existing?.additions ?? 0) + additions,
-        deletions: (existing?.deletions ?? 0) + deletions,
-      });
+  let path: string | undefined;
+  for (const line of normalized.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const candidate = line.slice(4).split("\t", 1)[0]!;
+      path = candidate === "/dev/null" ? undefined : candidate;
+      if (path?.startsWith("b/")) path = path.slice(2);
+      continue;
     }
+    // Count only hunk body lines; headers and file metadata are not changes.
+    if (path === undefined || line.startsWith("@@") || line.startsWith("--- ") || line.startsWith("diff ") || line.startsWith("Index:") || line.startsWith("===") || line.startsWith("\\\\")) continue;
+    const existing = filesByPath.get(path) ?? { path, additions: 0, deletions: 0 };
+    if (line.startsWith("+")) existing.additions += 1;
+    else if (line.startsWith("-")) existing.deletions += 1;
+    else continue;
+    filesByPath.set(path, existing);
   }
-
   return [...filesByPath.values()].toSorted((left, right) => left.path.localeCompare(right.path));
 }
