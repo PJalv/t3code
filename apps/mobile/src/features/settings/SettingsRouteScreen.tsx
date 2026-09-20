@@ -38,7 +38,6 @@ import {
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
 import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
 import { cn } from "../../lib/cn";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
@@ -88,7 +87,6 @@ export function SettingsRouteScreen() {
 
   return (
     <>
-      <WorkspaceSidebarToolbar />
       {Platform.OS !== "android" ? (
         <NativeStackScreenOptions
           options={{
