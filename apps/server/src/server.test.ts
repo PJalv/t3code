@@ -11362,6 +11362,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assertTrue(finalCommand?.type === "thread.turn.start");
         if (finalCommand?.type === "thread.turn.start") {
           assert.equal(finalCommand.bootstrap, undefined);
+          assert.equal(finalCommand.messageAlreadyPersisted, true);
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

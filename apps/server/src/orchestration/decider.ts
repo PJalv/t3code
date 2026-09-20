@@ -1399,7 +1399,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (targetThread.messages.some((message) => message.id === command.message.messageId)) {
+      const existingMessage = targetThread.messages.find(
+        (message) => message.id === command.message.messageId,
+      );
+      const persistedUserMessage =
+        command.messageAlreadyPersisted === true &&
+        existingMessage?.role === "user" &&
+        existingMessage.turnId === null
+          ? existingMessage
+          : null;
+      if (existingMessage && !persistedUserMessage) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Message '${command.message.messageId}' already exists on thread '${command.threadId}'.`,
@@ -1431,12 +1440,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // A worktree bootstrap persists the message ahead of the turn with
       // `thread.message.user.append`; the turn then only references it.
-      const persistedUserMessage = targetThread.messages.find(
-        (message) =>
-          message.id === command.message.messageId &&
-          message.role === "user" &&
-          message.turnId === null,
-      );
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> | null = persistedUserMessage
         ? null
         : {
