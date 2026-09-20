@@ -1322,6 +1322,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
+  // The server sets this after persisting a bootstrap message before worktree setup.
+  messageAlreadyPersisted: Schema.optional(Schema.Literal(true)),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });

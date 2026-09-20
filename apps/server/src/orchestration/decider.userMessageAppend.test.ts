@@ -81,6 +81,7 @@ const turnStartCommand = {
   message: { messageId, role: "user" as const, text: "Build it", attachments: [] },
   runtimeMode: "full-access" as const,
   interactionMode: "default" as const,
+  messageAlreadyPersisted: true as const,
   createdAt,
 };
 
