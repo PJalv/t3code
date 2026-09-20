@@ -5175,7 +5175,7 @@ describe("agent browser access", () => {
   );
 });
 const fakeMcpHttpServer = HttpServer.HttpServer.of({
-  address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 43123 },
+  address: { _tag: "InetAddressV4", hostname: "127.0.0.1", port: 43123 },
   serve: (() => Effect.void) as HttpServer.HttpServer["Service"]["serve"],
 });
 const fakeMcpEnvironment = ServerEnvironment.ServerEnvironment.of({
