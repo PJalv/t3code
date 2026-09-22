@@ -90,6 +90,26 @@ describe("PiRpcClient transport", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("accepts Pi 0.87 state responses with no selected model", () =>
+    Effect.gen(function* () {
+      const test = yield* makeIo();
+      const client = yield* makePiRpcTransport(test.io);
+      const stateFiber = yield* client.getState().pipe(Effect.forkScoped);
+      yield* Queue.take(test.writes);
+      yield* Queue.offer(
+        test.stdout,
+        bytes(
+          '{"type":"response","command":"get_state","success":true,"id":"t3-pi-1","data":{"sessionId":"s1","model":null,"isStreaming":false}}\n',
+        ),
+      );
+      expect(yield* Fiber.join(stateFiber)).toEqual({
+        sessionId: "s1",
+        model: null,
+        isStreaming: false,
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("tolerates plain and bracket-prefixed extension output before RPC JSON starts", () =>
     Effect.gen(function* () {
       const test = yield* makeIo();
