@@ -29,7 +29,7 @@ export const PiRpcState = Schema.Struct({
   messageCount: Schema.optional(Schema.Number),
   pendingMessageCount: Schema.optional(Schema.Number),
   isStreaming: Schema.optional(Schema.Boolean),
-  model: Schema.optional(PiRpcModel),
+  model: Schema.optional(Schema.NullOr(PiRpcModel)),
   thinkingLevel: Schema.optional(PiThinkingLevel),
 });
 export type PiRpcState = typeof PiRpcState.Type;
