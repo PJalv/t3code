@@ -27,7 +27,23 @@ const PRESENTATION = {
   requiresNewThreadForModelChange: false,
 } as const;
 const DETERMINISTIC_ARGS = ["--no-session", "--offline"] as const;
-const PROVIDER_PROBE_TIMEOUT = "5 seconds";
+/**
+ * Pi's probe is heavier than it looks: `binaryPath` is often a shell wrapper
+ * that resolves the CLI first, and each attempt boots Node and loads the
+ * pinned MCP/subagent extensions. That settles around a second on an idle
+ * machine, but the probe also runs during server startup, when checkpointing,
+ * PR sync, and VCS discovery saturate the host; observed startup probes have
+ * taken 12s. Match the other providers' cold-start budgets (Cursor 15s,
+ * Claude 25s) instead of the old 5s, which expired mid-stall and left the
+ * model picker empty until the next refresh or a manual provider toggle.
+ */
+const PROVIDER_PROBE_TIMEOUT = "20 seconds";
+/**
+ * A timeout is usually startup contention rather than a broken Pi install, so
+ * spend one more attempt before reporting failure. The retry reuses the same
+ * budget and only runs after the first attempt has fully torn down its child.
+ */
+const PROVIDER_PROBE_ATTEMPTS = 2;
 
 type PiRpcClientFactory = (
   options: PiRpcSpawnOptions,
@@ -116,7 +132,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
 ): Effect.fn.Return<ServerProviderDraft, never, ChildProcessSpawner.ChildProcessSpawner> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   if (!settings.enabled) return yield* makePendingPiProvider(settings);
-  const discovery = yield* Effect.scoped(
+  const attemptProbe = Effect.scoped(
     Effect.gen(function* () {
       const client = yield* makeRpcClient({
         command: settings.binaryPath,
@@ -129,7 +145,18 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         commands: client.getCommands(),
       });
     }),
-  ).pipe(Effect.timeoutOption(PROVIDER_PROBE_TIMEOUT), Effect.exit);
+  ).pipe(Effect.timeoutOption(PROVIDER_PROBE_TIMEOUT));
+  const discovery = yield* Effect.gen(function* () {
+    let last = yield* attemptProbe;
+    for (let attempt = 1; attempt < PROVIDER_PROBE_ATTEMPTS && Option.isNone(last); attempt += 1) {
+      yield* Effect.logWarning("Pi model discovery timed out; retrying", {
+        timeout: PROVIDER_PROBE_TIMEOUT,
+        attempt,
+      });
+      last = yield* attemptProbe;
+    }
+    return last;
+  }).pipe(Effect.exit);
   if (discovery._tag === "Failure") {
     const error = Cause.squash(discovery.cause);
     return buildServerProvider({
