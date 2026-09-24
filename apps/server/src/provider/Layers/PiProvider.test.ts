@@ -173,14 +173,45 @@ it.effect("reports a binary missing error wrapped by the Pi RPC protocol as not 
 
 it.effect("bounds a stalled Pi provider probe", () =>
   Effect.gen(function* () {
+    // Effect.never stalls every attempt, so the probe exhausts its budget twice
+    // (the retry included) and only then reports the timeout.
     const checking = yield* checkPiProviderStatus(settings, {}, () => Effect.never).pipe(
       Effect.forkChild,
     );
-    yield* TestClock.adjust("5 seconds");
+    yield* TestClock.adjust("40 seconds");
     const snapshot = yield* Fiber.join(checking);
     assert.equal(snapshot.status, "error");
     assert.equal(snapshot.installed, true);
-    assert.match(snapshot.message ?? "", /timed out after 5 seconds/u);
+    assert.match(snapshot.message ?? "", /timed out after 20 seconds/u);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("recovers when a stalled first probe attempt succeeds on retry", () =>
+  Effect.gen(function* () {
+    let attempts = 0;
+    const factory = () => {
+      attempts += 1;
+      // The first attempt stalls past its budget; the retry answers normally.
+      return attempts === 1
+        ? Effect.never
+        : Effect.succeed({
+            ...unusedClientMethods,
+            getState: () => Effect.succeed({ model: null }),
+            getAvailableModels: () =>
+              Effect.succeed({
+                models: [{ provider: "openai compatible", id: "gpt/5", name: "GPT Five" }],
+              }),
+          } satisfies PiRpcClient);
+    };
+    const checking = yield* checkPiProviderStatus(settings, {}, factory).pipe(Effect.forkChild);
+    yield* TestClock.adjust("20 seconds");
+    const snapshot = yield* Fiber.join(checking);
+    assert.equal(attempts, 2);
+    assert.notEqual(snapshot.status, "error");
+    assert.deepEqual(
+      snapshot.models.map((model) => model.slug),
+      ["openai%20compatible/gpt%2F5"],
+    );
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
