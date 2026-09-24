@@ -3638,7 +3638,6 @@ export default function ChatView(props: ChatViewProps) {
     attachDraftHeroTransitionGroupRef,
     attachDraftHeroComposerAnchorRef,
     captureDraftHeroComposerRect,
-<<<<<<< HEAD
   ] = useDraftHeroLayoutTransition(
     isDraftHeroState,
     panelAnimationsActive,
