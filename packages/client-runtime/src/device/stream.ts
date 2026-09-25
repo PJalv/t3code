@@ -364,6 +364,7 @@ export function createDeviceStreamClient(
   const retryTimers = new Map<"video" | "input", ReturnType<typeof setTimeout>>();
   let primeController: AbortController | null = null;
   let videoDecoder: VideoDecoder | null = null;
+  let awaitingSessionAck = false;
   let timestamp = 0;
   let awaitingKeyframe = true;
   let screen: DeviceScreenSize | null = null;
@@ -603,10 +604,18 @@ export function createDeviceStreamClient(
     }
   };
 
-  const requestKeyframe = () => {
-    if (platform === "android" && socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "reset-video", ack: false }));
-    }
+  // serve-emu re-announces video-session for every reset-video request.
+  let lastKeyframeRequestAt = -Infinity;
+  const KEYFRAME_REQUEST_INTERVAL_MS = 1_000;
+  const requestKeyframe = (force = false) => {
+    if (platform !== "android" || socket?.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (!force && now - lastKeyframeRequestAt < KEYFRAME_REQUEST_INTERVAL_MS) return;
+    lastKeyframeRequestAt = now;
+    // The hub answers with a video-session; record it so that reply is not
+    // mistaken for a rotation and cannot start the teardown/request loop.
+    awaitingSessionAck = true;
+    socket.send(JSON.stringify({ type: "reset-video", ack: false }));
   };
 
   const scheduleRetry = (channel: "video" | "input", run: () => void) => {
@@ -871,6 +880,8 @@ export function createDeviceStreamClient(
   // Android: one socket for video and input.
   const connectAndroid = () => {
     if (stopped) return;
+    awaitingSessionAck = false;
+    lastKeyframeRequestAt = -Infinity;
     const ws = new WebSocket(wsUrl(`/ws?device=${device}&frame-meta=1`));
     ws.binaryType = "arraybuffer";
     socket = ws;
@@ -882,13 +893,20 @@ export function createDeviceStreamClient(
     ws.onmessage = (event) => {
       if (stopped || socket !== ws) return;
       if (typeof event.data === "string") {
-        // The encoder restarts at a new size when the device rotates; the
-        // next keyframe carries a fresh SPS, so the decoder is rebuilt from it.
         if (isVideoSessionMessage(event.data)) {
+          // A video-session answering our own keyframe request is an ack, not
+          // a rotation. Resetting here would request another keyframe forever.
+          if (awaitingSessionAck) {
+            awaitingSessionAck = false;
+            return;
+          }
+          // The encoder restarts at a new size when the device rotates; the
+          // next keyframe carries a fresh SPS, so the decoder is rebuilt on
+          // the keyframe below.
           closeDecoder();
           configuring = false;
           connecting();
-          requestKeyframe();
+          requestKeyframe(true);
         }
         return;
       }
@@ -900,16 +918,21 @@ export function createDeviceStreamClient(
       const scanned = needsScan ? scanAccessUnit(packet.data) : null;
       const isKey = packet.isKey ?? scanned?.isKey ?? false;
       if (scanned?.sps && (!videoDecoder || videoDecoder.state !== "configured")) {
-        if (configuring) return;
-        configuring = true;
         const epoch = decoderEpoch;
         const isCurrent = () => !stopped && socket === ws;
+        if (configuring) return;
+        configuring = true;
         void configureDecoder({ codec: avcCodecString(scanned.sps) }, isCurrent).then(
           (configured) => {
             if (!isCurrent() || epoch !== decoderEpoch) return;
             configuring = false;
             awaitingKeyframe = true;
-            if (configured) requestKeyframe();
+            // This SPS arrived in a keyframe. Decode it after configuration
+            // instead of discarding it and asking serve-emu to restart again.
+            if (configured) {
+              decode(isKey, packet.data, packet.timestamp);
+              if (awaitingKeyframe) requestKeyframe();
+            }
           },
         );
         return;

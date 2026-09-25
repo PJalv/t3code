@@ -634,6 +634,51 @@ describe("shared device stream readiness and recovery", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("does not rebuild the decoder for the video-session acking a keyframe request", async () => {
+    // serve-emu announces the session on connect and again in reply to every
+    // reset-video. Treating the reply as a rotation tore the decoder down and
+    // requested another keyframe, which looped until the first-frame timeout
+    // and left physical Android devices showing no video.
+    const { client, sockets, sps, events, decodedFrame, drawImage, decoders, Decoder } =
+      recoveryFixture("android");
+    client.start();
+    const countResets = () =>
+      sockets[0]!.send.mock.calls.filter(([payload]) => String(payload).includes("reset-video"))
+        .length;
+
+    // 1. The hub's opening announcement. The decoder is not configured yet, so
+    //    this legitimately requests a keyframe.
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(countResets()).toBe(1);
+
+    // 2. Its reply to that request is an ack, not a rotation.
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(countResets()).toBe(1);
+
+    // 3. The requested keyframe configures and decodes.
+    sockets[0]!.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decodedFrame()).toHaveBeenCalledOnce();
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    const decoderCount = decoders.length;
+    const configures = Decoder.isConfigSupported.mock.calls.length;
+
+    // 4. A later unsolicited announcement must not tear down a live stream.
+    sockets[0]!.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decodedFrame()).toHaveBeenCalledOnce();
+    expect(drawImage).toHaveBeenCalledTimes(2);
+    expect(decoders).toHaveLength(decoderCount);
+    expect(decoders[decoderCount - 1]!.state).toBe("configured");
+    expect(Decoder.isConfigSupported.mock.calls.length).toBe(configures);
+    expect(events.onStatus.mock.calls.some(([status]) => status === "error")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    client.stop();
+  });
+
   it("discards decoder support results and output from a previous Android socket", async () => {
     const { client, sockets, sps, events, Decoder, decoders, decodedFrame, drawImage } =
       recoveryFixture("android");
