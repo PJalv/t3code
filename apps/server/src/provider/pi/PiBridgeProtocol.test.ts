@@ -28,6 +28,7 @@ const makeFakePi = () => {
   const hooks = new Map<string, Set<Handler>>();
   const commands = new Map<string, { handler: Handler }>();
   const notifications: string[] = [];
+  const mcpServers: Array<{ name: string; config: unknown }> = [];
   const on = (map: Map<string, Set<Handler>>, event: string, handler: Handler) => {
     const handlers = map.get(event) ?? new Set<Handler>();
     handlers.add(handler);
@@ -43,6 +44,7 @@ const makeFakePi = () => {
     },
     on: (event: string, handler: Handler) => on(hooks, event, handler),
     registerCommand: (name: string, command: { handler: Handler }) => commands.set(name, command),
+    registerMcpServer: (name: string, config: unknown) => mcpServers.push({ name, config }),
     sendMessage: () => {
       throw new Error("bridge must not send model-context messages");
     },
@@ -54,7 +56,7 @@ const makeFakePi = () => {
   const emitHook = async (event: string, data: unknown = {}) => {
     for (const handler of hooks.get(event) ?? []) await handler(data, ctx);
   };
-  return { pi, ctx, commands, notifications, eventHandlers, emitHook };
+  return { pi, ctx, commands, notifications, eventHandlers, emitHook, mcpServers };
 };
 
 const loadBridge = async () => {
@@ -72,6 +74,40 @@ const decodedNotifications = async (notifications: ReadonlyArray<string>) => {
 };
 
 describe("PiBridgeProtocol", () => {
+  it("registers T3 MCP natively during enabled extension loading", async () => {
+    const previous = {
+      bridge: process.env.T3CODE_PI_BRIDGE,
+      endpoint: process.env.T3CODE_PI_MCP_ENDPOINT,
+      authorization: process.env.T3CODE_PI_MCP_AUTHORIZATION,
+    };
+    process.env.T3CODE_PI_BRIDGE = "1";
+    process.env.T3CODE_PI_MCP_ENDPOINT = "http://127.0.0.1:43123/mcp";
+    process.env.T3CODE_PI_MCP_AUTHORIZATION = "Bearer secret";
+    try {
+      const extension = await loadBridge();
+      const harness = makeFakePi();
+      extension(harness.pi);
+      assert.deepEqual(harness.mcpServers, [
+        {
+          name: "t3-code",
+          config: {
+            url: "http://127.0.0.1:43123/mcp",
+            headers: { Authorization: "Bearer secret" },
+            exposure: "direct",
+          },
+        },
+      ]);
+    } finally {
+      for (const [key, value] of Object.entries({
+        T3CODE_PI_BRIDGE: previous.bridge,
+        T3CODE_PI_MCP_ENDPOINT: previous.endpoint,
+        T3CODE_PI_MCP_AUTHORIZATION: previous.authorization,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
   it.effect("round-trips valid envelopes and ignores unrelated notifications", () =>
     Effect.gen(function* () {
       const encoded = yield* encodePiBridgeNotification({

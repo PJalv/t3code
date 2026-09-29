@@ -5,8 +5,8 @@ skills, tools, configuration, and session files.
 
 ## Set Up Pi
 
-Install and configure Pi first. Confirm that the command works in the same environment as the T3
-server:
+Install and configure Pi 0.99.1 or newer. Confirm that the command works in the same environment
+as the T3 server:
 
 ```bash
 pi --version
@@ -27,17 +27,19 @@ the selected model.
 
 ## MCP, Subagents, Commands, And Skills
 
-Pi keeps MCP and subagents outside its core. A useful T3 setup must enable extensions for both.
-Install the MCP adapter in Pi's normal configuration:
+Pi's built-in MCP support reads `~/.pi/agent/mcp.json` and trusted projects' `.pi/mcp.json`.
+Use `pi mcp add` to configure servers, `pi mcp list` to check connections, and `pi mcp login`
+for servers that require OAuth. T3 reports a warning when built-in MCP is disabled.
 
-```bash
-pi install npm:pi-mcp-adapter
-```
+If you previously installed `pi-mcp-adapter`, remove it with `pi remove npm:pi-mcp-adapter`.
+That extension replaces Pi's native MCP support. Move any servers configured only in the
+adapter's files into Pi's `mcp.json`; adapter-specific options are not native MCP settings.
+Use `exposure: "direct"` to declare a server's tools directly, or leave the default exposure
+to call them through codemode.
 
-T3 reports a warning when it cannot detect that adapter. The adapter reads `.mcp.json`,
-`~/.config/mcp/mcp.json`, and its Pi-specific override files. Its proxy and direct MCP calls appear
-as MCP tool activity in T3. Remote OAuth can use the adapter's `auth-start` and `auth-complete`
-tool actions.
+T3 adds its authenticated `t3-code` server to each session without changing your config files.
+A user or project server named `t3-code` overrides that session connection. Native MCP calls,
+including calls made through codemode, appear as MCP tool activity in T3.
 
 Enable a Pi subagent extension for isolated agents. T3 supports Pi's current `subagent` extension
 result format, including single, parallel, and chained work. It also supports the older

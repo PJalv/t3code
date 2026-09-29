@@ -65,9 +65,9 @@ it.effect("maps Pi RPC inventory into selectable models", () =>
                 description: "Show MCP server status",
                 source: "extension" as const,
                 sourceInfo: {
-                  path: "/home/test/.pi/extensions/mcp.ts",
-                  source: "auto",
-                  scope: "user",
+                  path: "builtin:mcp",
+                  source: "builtin",
+                  scope: "temporary",
                   origin: "top-level",
                 },
               },
@@ -152,6 +152,39 @@ it.effect("maps Pi RPC inventory into selectable models", () =>
         enabled: true,
       },
     ]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("warns when mcp command is absent or supplied by a third-party extension", () =>
+  Effect.gen(function* () {
+    for (const commands of [
+      [],
+      [
+        {
+          name: "mcp",
+          description: "Third-party MCP",
+          source: "extension" as const,
+          sourceInfo: {
+            path: "/home/test/.pi/extensions/mcp-adapter.ts",
+            source: "auto",
+            scope: "user",
+            origin: "top-level",
+          },
+        },
+      ],
+    ]) {
+      const snapshot = yield* checkPiProviderStatus(settings, {}, () =>
+        Effect.succeed({
+          ...unusedClientMethods,
+          getState: () => Effect.succeed({ model: null }),
+          getAvailableModels: () =>
+            Effect.succeed({ models: [{ provider: "openai", id: "gpt-5", name: "GPT 5" }] }),
+          getCommands: () => Effect.succeed({ commands }),
+        } satisfies PiRpcClient),
+      );
+      assert.equal(snapshot.status, "warning");
+      assert.match(snapshot.message ?? "", /built-in MCP support was not detected/u);
+    }
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

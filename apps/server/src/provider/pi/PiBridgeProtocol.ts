@@ -105,6 +105,16 @@ const SUPPORTED_SUBAGENTS_RPC = 2;
 export default function t3codePiBridge(pi) {
   if (process.env.T3CODE_PI_BRIDGE !== "1") return;
 
+  const mcpEndpoint = process.env.T3CODE_PI_MCP_ENDPOINT;
+  const mcpAuthorization = process.env.T3CODE_PI_MCP_AUTHORIZATION;
+  if (mcpEndpoint && mcpAuthorization) {
+    pi.registerMcpServer("t3-code", {
+      url: mcpEndpoint,
+      headers: { Authorization: mcpAuthorization },
+      exposure: "direct",
+    });
+  }
+
   let currentCtx;
   let subagentsRpcVersion;
   let negotiation;
