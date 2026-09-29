@@ -2652,6 +2652,7 @@ describe("PiAdapter", () => {
             // client can drop the "compacting" indicator before the
             // continuation lands.
             "session.state.changed",
+            "thread.state.changed",
             "item.started",
             "content.delta",
             "item.completed",
@@ -2728,6 +2729,59 @@ describe("PiAdapter", () => {
           yield* Effect.yieldNow;
         }
         yield* Queue.offer(h.client.input, { type: "agent_settled" });
+        yield* Fiber.interrupt(eventsFiber);
+      }),
+    );
+  });
+
+  it.effect("reports idle manual compaction completion without inventing an active turn", () => {
+    const h = makeHarness();
+    return withAdapter(h, (adapter) =>
+      Effect.gen(function* () {
+        yield* start(adapter);
+        const events: ProviderRuntimeEvent[] = [];
+        const compacted = yield* Deferred.make<void>();
+        const failed = yield* Deferred.make<void>();
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.gen(function* () {
+              events.push(event);
+              if (event.type === "thread.state.changed" && event.payload.state === "compacted") {
+                yield* Deferred.succeed(compacted, undefined);
+              }
+              if (event.type === "runtime.warning") yield* Deferred.succeed(failed, undefined);
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* Queue.offerAll(h.client.input, [
+          { type: "compaction_start", reason: "manual" },
+          {
+            type: "compaction_end",
+            reason: "manual",
+            result: { summary: "A shorter context.", firstKeptEntryId: "entry", tokensBefore: 100 },
+          },
+        ]);
+        yield* Deferred.await(compacted);
+        assert.deepEqual(
+          events
+            .filter((event) => event.type === "session.state.changed")
+            .map((event) => event.payload.state),
+          ["compacting", "ready"],
+        );
+        assert.ok(events.every((event) => event.turnId === undefined));
+        yield* Queue.offerAll(h.client.input, [
+          { type: "compaction_start", reason: "manual" },
+          { type: "compaction_end", reason: "manual", aborted: true },
+        ]);
+        yield* Deferred.await(failed);
+        assert.deepEqual(
+          events
+            .filter((event) => event.type === "session.state.changed")
+            .map((event) => event.payload.state),
+          ["compacting", "ready", "compacting", "ready"],
+        );
+        assert.equal(events.filter((event) => event.type === "thread.state.changed").length, 1);
         yield* Fiber.interrupt(eventsFiber);
       }),
     );

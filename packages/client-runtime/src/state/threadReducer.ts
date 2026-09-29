@@ -428,7 +428,7 @@ export function applyThreadDetailEvent(
       // same record, so the previous reference is kept when nothing changed.
       const turnStillRunning =
         event.payload.turnId !== null &&
-        thread.session?.status === "running" &&
+        (thread.session?.status === "running" || thread.session?.status === "compacting") &&
         thread.session.activeTurnId === event.payload.turnId;
       const settlesTurn = !event.payload.streaming && !turnStillRunning;
       const latestTurn = reuseLatestTurn(
@@ -493,7 +493,9 @@ export function applyThreadDetailEvent(
       const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status);
       const latestTurn = reuseLatestTurn(
         thread.latestTurn,
-        event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
+        (event.payload.session.status === "running" ||
+          event.payload.session.status === "compacting") &&
+          event.payload.session.activeTurnId !== null
           ? {
               turnId: event.payload.session.activeTurnId,
               state: "running",
@@ -598,7 +600,7 @@ export function applyThreadDetailEvent(
       // Mid-turn diff updates produce placeholder checkpoints; record the
       // checkpoint, but don't settle a turn its session is still running.
       const diffTurnStillRunning =
-        thread.session?.status === "running" &&
+        (thread.session?.status === "running" || thread.session?.status === "compacting") &&
         thread.session.activeTurnId === event.payload.turnId;
       const latestTurn =
         !diffTurnStillRunning &&

@@ -788,53 +788,56 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
-    it("keeps latestTurn running for interim assistant messages while the session runs the turn", () => {
-      const threadWithRunningSession: OrchestrationThread = {
-        ...baseThread,
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "running",
-          providerName: "claude",
-          runtimeMode: "full-access",
-          activeTurnId: TurnId.make("turn-1"),
-          lastError: null,
-          updatedAt: "2026-04-01T06:59:00.000Z",
-        },
-        latestTurn: {
-          turnId: TurnId.make("turn-1"),
-          state: "running",
-          requestedAt: "2026-04-01T06:59:00.000Z",
-          startedAt: "2026-04-01T06:59:00.000Z",
-          completedAt: null,
-          assistantMessageId: null,
-        },
-      };
+    it.each(["running", "compacting"] as const)(
+      "keeps latestTurn running for interim assistant messages while %s",
+      (status) => {
+        const threadWithRunningSession: OrchestrationThread = {
+          ...baseThread,
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status,
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: TurnId.make("turn-1"),
+            lastError: null,
+            updatedAt: "2026-04-01T06:59:00.000Z",
+          },
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "running",
+            requestedAt: "2026-04-01T06:59:00.000Z",
+            startedAt: "2026-04-01T06:59:00.000Z",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        };
 
-      const result = applyThreadDetailEvent(threadWithRunningSession, {
-        ...baseEventFields,
-        sequence: 8,
-        occurredAt: "2026-04-01T07:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
-        type: "thread.message-sent",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          messageId: MessageId.make("msg-3"),
-          role: "assistant",
-          text: "Interim commentary between tool calls.",
-          turnId: TurnId.make("turn-1"),
-          streaming: false,
-          createdAt: "2026-04-01T07:00:00.000Z",
-          updatedAt: "2026-04-01T07:00:00.000Z",
-        },
-      });
+        const result = applyThreadDetailEvent(threadWithRunningSession, {
+          ...baseEventFields,
+          sequence: 8,
+          occurredAt: "2026-04-01T07:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.message-sent",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make("msg-3"),
+            role: "assistant",
+            text: "Interim commentary between tool calls.",
+            turnId: TurnId.make("turn-1"),
+            streaming: false,
+            createdAt: "2026-04-01T07:00:00.000Z",
+            updatedAt: "2026-04-01T07:00:00.000Z",
+          },
+        });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn?.state).toBe("running");
-        expect(result.thread.latestTurn?.completedAt).toBeNull();
-      }
-    });
+        expect(result.kind).toBe("updated");
+        if (result.kind === "updated") {
+          expect(result.thread.latestTurn?.state).toBe("running");
+          expect(result.thread.latestTurn?.completedAt).toBeNull();
+        }
+      },
+    );
 
     it("keeps latestTurn and checkpoints references across a streaming delta", () => {
       const streamingThread: OrchestrationThread = {
@@ -971,6 +974,90 @@ describe("applyThreadDetailEvent", () => {
   });
 
   describe("thread.session-set", () => {
+    it("keeps the active turn through compaction and settles it only when ready", () => {
+      let thread = baseThread;
+      const turnId = TurnId.make("turn-1");
+      for (const status of ["running", "compacting", "running", "ready"] as const) {
+        const result = applyThreadDetailEvent(thread, {
+          ...baseEventFields,
+          sequence: 9,
+          occurredAt: "2026-04-01T08:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: thread.id,
+          type: "thread.session-set",
+          payload: {
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status,
+              providerName: "pi",
+              runtimeMode: "full-access",
+              activeTurnId: status === "ready" ? null : turnId,
+              lastError: null,
+              updatedAt: "2026-04-01T08:00:00.000Z",
+            },
+          },
+        });
+        expect(result.kind).toBe("updated");
+        if (result.kind !== "updated") throw new Error("Expected session update");
+        thread = result.thread;
+        if (status === "compacting") {
+          const diff = applyThreadDetailEvent(thread, {
+            ...baseEventFields,
+            sequence: 10,
+            occurredAt: "2026-04-01T08:00:00.000Z",
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            type: "thread.turn-diff-completed",
+            payload: {
+              threadId: thread.id,
+              turnId,
+              checkpointTurnCount: 1,
+              checkpointRef: CheckpointRef.make("compaction-ref"),
+              status: "ready",
+              files: [],
+              assistantMessageId: null,
+              completedAt: "2026-04-01T08:00:00.000Z",
+            },
+          });
+          expect(diff.kind).toBe("updated");
+          if (diff.kind !== "updated") throw new Error("Expected checkpoint update");
+          thread = diff.thread;
+          expect(thread.checkpoints).toHaveLength(1);
+        }
+        expect(thread.latestTurn?.turnId).toBe(turnId);
+        expect(thread.latestTurn?.state).toBe(status === "ready" ? "completed" : "running");
+        expect(thread.latestTurn?.completedAt).toBe(
+          status === "ready" ? "2026-04-01T08:00:00.000Z" : null,
+        );
+      }
+    });
+
+    it("does not create a turn for idle manual compaction", () => {
+      const result = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 9,
+        occurredAt: "2026-04-01T08:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.session-set",
+        payload: {
+          threadId: baseThread.id,
+          session: {
+            threadId: baseThread.id,
+            status: "compacting",
+            providerName: "pi",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-04-01T08:00:00.000Z",
+          },
+        },
+      });
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") expect(result.thread.latestTurn).toBe(baseThread.latestTurn);
+    });
+
     it("settles a running latestTurn when the session leaves the running status", () => {
       const threadWithRunningTurn: OrchestrationThread = {
         ...baseThread,
@@ -1012,35 +1099,38 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
-    it("updates session and latestTurn for a running session", () => {
-      const result = applyThreadDetailEvent(baseThread, {
-        ...baseEventFields,
-        sequence: 9,
-        occurredAt: "2026-04-01T08:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
-        type: "thread.session-set",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          session: {
+    it.each(["running", "compacting"] as const)(
+      "updates session and latestTurn for a %s session",
+      (status) => {
+        const result = applyThreadDetailEvent(baseThread, {
+          ...baseEventFields,
+          sequence: 9,
+          occurredAt: "2026-04-01T08:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.session-set",
+          payload: {
             threadId: ThreadId.make("thread-1"),
-            status: "running",
-            providerName: "codex",
-            runtimeMode: "full-access",
-            activeTurnId: TurnId.make("turn-1"),
-            lastError: null,
-            updatedAt: "2026-04-01T08:00:00.000Z",
+            session: {
+              threadId: ThreadId.make("thread-1"),
+              status,
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.make("turn-1"),
+              lastError: null,
+              updatedAt: "2026-04-01T08:00:00.000Z",
+            },
           },
-        },
-      });
+        });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.session?.status).toBe("running");
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-        expect(result.thread.latestTurn?.state).toBe("running");
-      }
-    });
+        expect(result.kind).toBe("updated");
+        if (result.kind === "updated") {
+          expect(result.thread.session?.status).toBe(status);
+          expect(result.thread.latestTurn?.turnId).toBe("turn-1");
+          expect(result.thread.latestTurn?.state).toBe("running");
+        }
+      },
+    );
   });
 
   describe("thread.session-stop-requested", () => {

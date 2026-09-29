@@ -1436,6 +1436,19 @@ describe("resolveComposerInteractionMode", () => {
 });
 
 describe("buildRunningThreadTurnInterruptInput", () => {
+  it.each([TurnId.make("compacting-turn"), null])(
+    "allows stopping compaction with active turn %s",
+    (activeTurnId) => {
+      const thread = makeThread({
+        session: { ...readySession, status: "compacting", activeTurnId },
+      });
+      expect(buildRunningThreadTurnInterruptInput(thread, "running")).toEqual({
+        threadId,
+        ...(activeTurnId !== null ? { turnId: activeTurnId } : {}),
+      });
+    },
+  );
+
   it("targets only the active turn of a running thread", () => {
     const activeTurnId = TurnId.make("turn-running");
     const runningThread = makeThread({

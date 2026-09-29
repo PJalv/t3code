@@ -1174,7 +1174,10 @@ export function useThreadOutboxDrain(): void {
         threadExists: thread !== undefined,
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
-        threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
+        threadBusy:
+          thread?.session?.status === "running" ||
+          thread?.session?.status === "starting" ||
+          thread?.session?.status === "compacting",
       });
       // The delivery action resolves first; capability checks apply only to
       // a message that will send. Checking earlier would restore a
@@ -1281,7 +1284,9 @@ export function useThreadOutboxDrain(): void {
             nextQueuedMessage,
           );
           const liveThreadBusy =
-            liveThread?.session?.status === "running" || liveThread?.session?.status === "starting";
+            liveThread?.session?.status === "running" ||
+            liveThread?.session?.status === "starting" ||
+            liveThread?.session?.status === "compacting";
           const liveDeliveryAction = resolveThreadOutboxDeliveryAction({
             isCreation: creation !== undefined,
             threadExists: liveThread !== undefined,

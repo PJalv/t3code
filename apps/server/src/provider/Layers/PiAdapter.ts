@@ -1870,14 +1870,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       }
     }
     if (type === "compaction_end") {
-      // Always resume the running session state when compaction ends, even if
-      // there is no active turn; the continuation logic below (which needs a
-      // turn) is handled separately after the active-turn guard.
+      // Idle manual compaction must return to ready. The compacted receipt
+      // releases ProviderService's pending request and clears the optimistic UI.
       ctx.compactionActive = false;
       const aborted = event.aborted === true;
       const errorMessage = trimmedString(event.errorMessage);
+      yield* emitSessionState(ctx, turn && !turn.terminal ? "running" : "ready");
       if (aborted || errorMessage) {
-        yield* emitSessionState(ctx, "running");
         yield* offer({
           type: "runtime.warning",
           ...(yield* base(
@@ -1892,8 +1891,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           },
           raw: raw(native),
         });
-      } else {
-        yield* emitSessionState(ctx, "running");
+      } else if (isRecord(event.result)) {
+        yield* offer({
+          type: "thread.state.changed",
+          ...(yield* base(ctx, turn && !turn.terminal ? turn : undefined)),
+          payload: {
+            state: "compacted",
+            detail: { source: "pi.compaction", reason: trimmedString(event.reason) },
+          },
+        });
       }
     }
     if (!turn || turn.terminal) return;

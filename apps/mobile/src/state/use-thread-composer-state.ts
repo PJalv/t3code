@@ -297,6 +297,7 @@ export function useThreadComposerState() {
       return payload?.requestId === latestCompactMessage?.id;
     });
     return (
+      selectedThread?.session?.status === "compacting" ||
       queuedMessage !== undefined ||
       ((selectedThread?.session?.status === "starting" ||
         selectedThread?.session?.status === "running") &&

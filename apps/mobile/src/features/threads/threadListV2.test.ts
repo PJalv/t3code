@@ -124,6 +124,24 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
 });
 
 describe("resolveThreadListV2Status", () => {
+  it("shows compaction without treating the thread as ready", () => {
+    const thread = makeThread({
+      id: ThreadId.make("compacting-thread"),
+      title: "Compacting",
+      session: {
+        threadId: ThreadId.make("compacting-thread"),
+        status: "compacting",
+        providerName: "pi",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: NOW,
+      },
+    });
+    expect(resolveThreadListV2Status(thread)).toBe("compacting");
+    expect(resolveThreadListV2Status({ ...thread, hasPendingApprovals: true })).toBe("approval");
+  });
+
   it("prioritizes approval over a running session", () => {
     const thread = makeThread({
       id: ThreadId.make("t"),

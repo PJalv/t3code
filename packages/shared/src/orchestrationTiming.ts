@@ -37,7 +37,8 @@ function isLatestTurnSettled(
   if (!latestTurn) return false;
   if (!latestTurn.completedAt) return false;
   if (!session) return true;
-  if (session.orchestrationStatus === "running") return false;
+  if (session.orchestrationStatus === "running" || session.orchestrationStatus === "compacting")
+    return false;
   return true;
 }
 

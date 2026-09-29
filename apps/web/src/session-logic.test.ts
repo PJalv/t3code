@@ -5,6 +5,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
+  type OrchestrationSession,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveWorkEntryToolPresentation } from "@t3tools/client-runtime/work-log/presentation";
@@ -13,6 +14,7 @@ import {
   createMessageAttachmentPreviewProjector,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  derivePhase,
   deriveTimelineEntries,
   deriveTimelineEntriesWithState,
   deriveWorkLogEntries,
@@ -23,6 +25,28 @@ import {
   selectMessageImageResources,
   workEntryIndicatesToolNeutralStatus,
 } from "./session-logic";
+
+describe("derivePhase", () => {
+  it.each([null, TurnId.make("compacting-turn")])(
+    "keeps compaction busy with active turn %s so it can be interrupted",
+    (activeTurnId) => {
+      const session: OrchestrationSession = {
+        threadId: ThreadId.make("compacting-thread"),
+        status: "compacting",
+        providerName: "pi",
+        runtimeMode: "full-access",
+        activeTurnId,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      expect(derivePhase(session)).toBe("running");
+      expect(derivePhase({ ...session, status: "ready", activeTurnId: null })).toBe("ready");
+      expect(derivePhase({ ...session, status: "interrupted", activeTurnId: null })).toBe(
+        "disconnected",
+      );
+    },
+  );
+});
 
 let nextActivityId = 0;
 

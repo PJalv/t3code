@@ -397,15 +397,24 @@ function normalizeRuntimeTurnState(
 }
 
 function orchestrationSessionStatusFromRuntimeState(
-  state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error" | "compacting",
-): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
+  state:
+    | "starting"
+    | "running"
+    | "waiting"
+    | "ready"
+    | "interrupted"
+    | "stopped"
+    | "error"
+    | "compacting",
+): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" | "compacting" {
   switch (state) {
     case "starting":
       return "starting";
     case "running":
     case "waiting":
-    case "compacting":
       return "running";
+    case "compacting":
+      return "compacting";
     case "ready":
       return "ready";
     case "interrupted":
@@ -420,7 +429,7 @@ function orchestrationSessionStatusFromRuntimeState(
 function sessionStatusAllowsActiveTurn(
   status: ReturnType<typeof orchestrationSessionStatusFromRuntimeState>,
 ): boolean {
-  return status === "starting" || status === "running";
+  return status === "starting" || status === "running" || status === "compacting";
 }
 
 function requestKindFromCanonicalRequestType(
