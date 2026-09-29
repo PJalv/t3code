@@ -207,7 +207,10 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
   );
   const commands = mapPiCommands(snapshot.commands.commands);
   const hasMcp = snapshot.commands.commands.some(
-    (command) => command.source === "extension" && command.name.trim() === "mcp",
+    (command) =>
+      command.source === "extension" &&
+      command.sourceInfo.path === "builtin:mcp" &&
+      command.name.trim() === "mcp",
   );
   return buildServerProvider({
     presentation: PRESENTATION,
@@ -226,7 +229,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
           ? "Pi is available, but it did not report any models."
           : hasMcp
             ? `Pi reported ${discovered.length} available model${discovered.length === 1 ? "" : "s"}; MCP support is available.`
-            : `Pi reported ${discovered.length} available model${discovered.length === 1 ? "" : "s"}, but pi-mcp-adapter was not detected. Install it with 'pi install npm:pi-mcp-adapter'.`,
+            : `Pi reported ${discovered.length} available model${discovered.length === 1 ? "" : "s"}, but built-in MCP support was not detected. Enable the built-in 'mcp' extension in Pi settings.`,
     },
   });
 });

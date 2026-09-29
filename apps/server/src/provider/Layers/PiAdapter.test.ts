@@ -355,7 +355,9 @@ const makeHarness = (harnessOptions: { readonly failStart?: boolean } = {}): Har
 const withAdapter = <A>(
   harness: Harness,
   use: (adapter: Adapter) => Effect.Effect<A, ProviderAdapterError>,
-  adapterOptions: Partial<Pick<PiAdapterOptions, "readAttachment" | "onBeforePrompt">> = {},
+  adapterOptions: Partial<
+    Pick<PiAdapterOptions, "readAttachment" | "onBeforePrompt" | "environment">
+  > = {},
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -482,7 +484,7 @@ describe("PiAdapter", () => {
     );
   });
 
-  it.effect("injects T3 browser MCP into the Pi process without changing project config", () => {
+  it.effect("passes T3 browser MCP credentials through the environment", () => {
     const h = makeHarness();
     const threadId = ThreadId.make("mcp-thread");
     McpProviderSession.setMcpProviderSession({
@@ -505,25 +507,34 @@ describe("PiAdapter", () => {
         });
         const args = h.spawns[0]?.args ?? [];
         assert.equal(args.includes("--mcp-config"), false);
-        const configFile = h.spawns[0]?.env?.T3CODE_PI_MCP_CONFIG;
-        assert.ok(configFile);
-        assert.equal(path.resolve(configFile).startsWith(path.resolve(h.stateDir)), true);
-        assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
-        const config = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(
-            Schema.Struct({ mcpServers: Schema.Record(Schema.String, Schema.Unknown) }),
-          ),
-        )(fs.readFileSync(configFile, "utf8")).pipe(Effect.orDie);
-        assert.deepEqual(config.mcpServers["t3-code"], {
-          url: "http://127.0.0.1:43123/mcp",
-          headers: { Authorization: "Bearer secret-token" },
-          lifecycle: "keep-alive",
-        });
+        assert.equal(h.spawns[0]?.env?.T3CODE_PI_MCP_ENDPOINT, "http://127.0.0.1:43123/mcp");
+        assert.equal(h.spawns[0]?.env?.T3CODE_PI_MCP_AUTHORIZATION, "Bearer secret-token");
+        assert.equal(h.spawns[0]?.env?.T3CODE_PI_MCP_CONFIG, undefined);
+        assert.equal(fs.existsSync(path.resolve(h.stateDir, "..", "mcp")), false);
         yield* adapter.stopSession(threadId);
-        assert.equal(fs.existsSync(configFile), false);
       }),
     ).pipe(
       Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
+    );
+  });
+
+  it.effect("clears inherited T3 MCP environment when no provider session exists", () => {
+    const h = makeHarness();
+    return withAdapter(
+      h,
+      (adapter) =>
+        Effect.gen(function* () {
+          yield* start(adapter);
+          assert.equal(h.spawns[0]?.env?.T3CODE_PI_MCP_ENDPOINT, undefined);
+          assert.equal(h.spawns[0]?.env?.T3CODE_PI_MCP_AUTHORIZATION, undefined);
+        }),
+      {
+        environment: {
+          ...process.env,
+          T3CODE_PI_MCP_ENDPOINT: "https://stale.invalid/mcp",
+          T3CODE_PI_MCP_AUTHORIZATION: "Bearer stale",
+        },
+      },
     );
   });
 
@@ -1442,6 +1453,21 @@ describe("PiAdapter", () => {
             },
             isError: false,
           },
+          {
+            type: "tool_execution_start",
+            toolCallId: "mcp-native",
+            parentToolCallId: "parent-call",
+            toolName: "mcp__github__get_issue__detail",
+            args: { issue: 42 },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "mcp-native",
+            parentToolCallId: "parent-call",
+            toolName: "mcp__github__get_issue__detail",
+            result: { content: [{ type: "text", text: "native result" }] },
+            isError: false,
+          },
           { type: "agent_settled" },
         ]);
 
@@ -1455,6 +1481,12 @@ describe("PiAdapter", () => {
         assert.equal(items[0]?.payload.detail, "github");
         assert.equal(items[1]?.payload.itemType, "mcp_tool_call");
         assert.equal(items[1]?.payload.title, "MCP: get_issue");
+        assert.equal(items[2]?.payload.itemType, "mcp_tool_call");
+        assert.equal(items[2]?.payload.title, "MCP: get_issue__detail");
+        assert.equal(
+          (items[2]?.payload.data as Record<string, unknown> | undefined)?.parentToolCallId,
+          "parent-call",
+        );
       }),
     );
   });
