@@ -4104,7 +4104,8 @@ export default function Sidebar() {
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
               isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
+                thread.session?.status === "compacting" ||
+                (thread.session?.status === "running" && thread.session.activeTurnId != null),
               supports: {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,

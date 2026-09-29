@@ -2474,8 +2474,31 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       });
 
-      // Interim assistant message completes mid-turn (commentary between
-      // tool calls) — the turn must stay running and unsettled.
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-tl-compacting"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        commandId: CommandId.make("cmd-tl-compacting"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tl-compacting"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "compacting",
+            providerName: "pi",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:02.000Z",
+          },
+        },
+      });
+
+      // A completed message during compaction must not settle the active turn.
       yield* eventStore.append({
         type: "thread.message-sent",
         eventId: EventId.make("evt-tl3"),

@@ -300,7 +300,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const showStopAction =
     !hasContent &&
     (props.selectedThread.session?.status === "running" ||
-      props.selectedThread.session?.status === "starting");
+      props.selectedThread.session?.status === "starting" ||
+      props.selectedThread.session?.status === "compacting");
 
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   const attachmentsUploading =

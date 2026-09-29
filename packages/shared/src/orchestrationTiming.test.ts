@@ -31,6 +31,24 @@ describe("formatDuration", () => {
 });
 
 describe("deriveActiveWorkStartedAt", () => {
+  it("keeps timing a turn that resumes through compaction", () => {
+    const turn = {
+      turnId: "turn-1",
+      startedAt: "2026-09-06T23:33:00.000Z",
+      completedAt: "2026-09-06T23:33:05.000Z",
+    };
+    expect(
+      deriveActiveWorkStartedAt(
+        turn,
+        { orchestrationStatus: "compacting", activeTurnId: "turn-1" },
+        null,
+      ),
+    ).toBe(turn.startedAt);
+    expect(
+      deriveActiveWorkStartedAt(turn, { orchestrationStatus: "ready", activeTurnId: null }, null),
+    ).toBeNull();
+  });
+
   it.each([null, "2026-09-06T23:34:00.000Z"])(
     "does not time a superseded turn when the active turn differs",
     (sendStartedAt) => {

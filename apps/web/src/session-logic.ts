@@ -237,7 +237,7 @@ export function isLatestTurnSettled(
   if (!latestTurn?.startedAt) return false;
   if (!latestTurn.completedAt) return false;
   if (!session) return true;
-  if (session.status === "running") return false;
+  if (session.status === "running" || session.status === "compacting") return false;
   return true;
 }
 
@@ -247,7 +247,8 @@ export function deriveActiveWorkStartedAt(
   sendStartedAt: string | null,
   latestUserMessageAt: string | null = null,
 ): string | null {
-  const runningTurnId = session?.status === "running" ? session.activeTurnId : null;
+  const runningTurnId =
+    session?.status === "running" || session?.status === "compacting" ? session.activeTurnId : null;
   if (runningTurnId !== null) {
     if (latestTurn?.turnId === runningTurnId) {
       return latestTurn.startedAt ?? sendStartedAt ?? latestUserMessageAt;
@@ -1783,6 +1784,6 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
     return "disconnected";
   }
   if (session.status === "starting") return "connecting";
-  if (session.status === "running") return "running";
+  if (session.status === "running" || session.status === "compacting") return "running";
   return "ready";
 }

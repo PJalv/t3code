@@ -1432,7 +1432,8 @@ const make = Effect.gen(function* () {
         compactingThreadIds.has(event.payload.threadId) ||
         turnsAfterCompaction.has(event.payload.threadId) ||
         latestThread?.session?.status === "starting" ||
-        latestThread?.session?.status === "running"
+        latestThread?.session?.status === "running" ||
+        latestThread?.session?.status === "compacting"
       ) {
         yield* appendTurnStartFailure(
           "Context compaction failed",

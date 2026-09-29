@@ -1960,6 +1960,14 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Awaiting Input", pulse: false });
   });
 
+  it("shows compaction rather than working in the legacy sidebar", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, session: { ...baseThread.session, status: "compacting" } },
+      }),
+    ).toMatchObject({ label: "Compacting", pulse: false });
+  });
+
   it("falls back to working when the thread is actively running without blockers", () => {
     expect(
       resolveThreadStatusPill({

@@ -1194,6 +1194,74 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  effectIt.effect("rejects manual compaction while the provider is already compacting", () =>
+    Effect.gen(function* () {
+      const firstSent = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() => createHarness());
+      const threadId = ThreadId.make("thread-1");
+      harness.sendTurn.mockImplementation(() =>
+        Deferred.succeed(firstSent, undefined).pipe(
+          Effect.as({ threadId, turnId: asTurnId("turn-1") }),
+        ),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-before-auto-compact"),
+        threadId,
+        message: {
+          messageId: asMessageId("before-auto-compact"),
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+      yield* Deferred.await(firstSent);
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-auto-compact-session"),
+        threadId,
+        session: {
+          threadId,
+          status: "compacting",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-manual-during-auto-compact"),
+        threadId,
+        message: {
+          messageId: asMessageId("manual-during-auto-compact"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.compactThread).not.toHaveBeenCalled();
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      expect(thread?.session?.status).toBe("compacting");
+      expect(
+        thread?.activities.some((activity) => activity.summary === "Context compaction failed"),
+      ).toBe(true);
+    }),
+  );
+
   effectIt.effect.each(["resume", "stop before resume", "stop after send"])(
     "queues messages until compaction restores the session (%s)",
     (scenario) =>

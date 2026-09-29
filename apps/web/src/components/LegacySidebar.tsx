@@ -461,7 +461,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     [discoveredPorts, navigateToThread, openPreview, threadRef],
   );
   const isThreadRunning =
-    thread.session?.status === "running" && thread.session.activeTurnId != null;
+    thread.session?.status === "compacting" ||
+    (thread.session?.status === "running" && thread.session.activeTurnId != null);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -1901,7 +1902,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return threadRef && thread ? [{ threadKey, threadRef, thread }] : [];
       });
       const hasRunningThread = selectedThreadEntries.some(
-        ({ thread }) => thread.session?.status === "running" && thread.session.activeTurnId != null,
+        ({ thread }) =>
+          thread.session?.status === "compacting" ||
+          (thread.session?.status === "running" && thread.session.activeTurnId != null),
       );
 
       const clicked = await api.contextMenu.show(

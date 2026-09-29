@@ -1445,7 +1445,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
-          if (turnId === null || event.payload.session.status !== "running") {
+          if (
+            turnId === null ||
+            (event.payload.session.status !== "running" &&
+              event.payload.session.status !== "compacting")
+          ) {
             if (
               (event.payload.session.status === "ready" &&
                 event.commandId?.startsWith("server:provider-session-set:") === true) ||
@@ -1596,7 +1600,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           const turnStillRunning =
             Option.isSome(session) &&
-            session.value.status === "running" &&
+            (session.value.status === "running" || session.value.status === "compacting") &&
             session.value.activeTurnId === event.payload.turnId;
           const settlesTurn = !event.payload.streaming && !turnStillRunning;
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
@@ -1686,7 +1690,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           const turnStillRunning =
             Option.isSome(session) &&
-            session.value.status === "running" &&
+            (session.value.status === "running" || session.value.status === "compacting") &&
             session.value.activeTurnId === event.payload.turnId;
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,

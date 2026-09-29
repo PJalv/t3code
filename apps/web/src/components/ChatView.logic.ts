@@ -531,7 +531,10 @@ export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "sessi
   threadId: ThreadId;
   turnId?: TurnId;
 } {
-  const runningTurnId = thread.session?.status === "running" ? thread.session.activeTurnId : null;
+  const runningTurnId =
+    thread.session?.status === "running" || thread.session?.status === "compacting"
+      ? thread.session.activeTurnId
+      : null;
   return {
     threadId: thread.id,
     ...(runningTurnId !== null ? { turnId: runningTurnId } : {}),
@@ -650,7 +653,10 @@ export function buildRunningThreadTurnInterruptInput(
   thread: Pick<Thread, "id" | "session"> | null | undefined,
   phase: SessionPhase,
 ): { threadId: ThreadId; turnId?: TurnId } | null {
-  if (phase !== "running" || thread?.session?.status !== "running") {
+  if (
+    phase !== "running" ||
+    (thread?.session?.status !== "running" && thread?.session?.status !== "compacting")
+  ) {
     return null;
   }
   return buildThreadTurnInterruptInput(thread);

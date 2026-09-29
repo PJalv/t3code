@@ -131,7 +131,11 @@ function formatThreadError(cause: Cause.Cause<unknown>): string {
  * per second, so the disk cache waits for it to settle.
  */
 export function isThreadSessionRunning(session: OrchestrationThread["session"]): boolean {
-  return session?.status === "starting" || session?.status === "running";
+  return (
+    session?.status === "starting" ||
+    session?.status === "running" ||
+    session?.status === "compacting"
+  );
 }
 
 function shouldPersistThread(thread: OrchestrationThread): boolean {

@@ -900,6 +900,81 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBeNull();
   });
 
+  it.each(["running", "ready", "interrupted", "stopped", "error"] as const)(
+    "preserves automatic compaction and the active turn until the session becomes %s",
+    async (nextState) => {
+      const harness = await createHarness();
+      const threadId = asThreadId("thread-1");
+      const turnId = asTurnId("turn-auto-compaction");
+      const provider = ProviderDriverKind.make("pi");
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("evt-auto-compaction-turn-started"),
+        provider,
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await harness.drain();
+
+      harness.emit({
+        type: "session.state.changed",
+        eventId: asEventId("evt-auto-compaction-started"),
+        provider,
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        payload: { state: "compacting", reason: "Compacting context (threshold)." },
+      });
+      await harness.drain();
+      const compactingThread = (await harness.readModel()).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      expect(compactingThread?.session).toMatchObject({
+        status: "compacting",
+        activeTurnId: turnId,
+      });
+      expect(compactingThread?.latestTurn).toMatchObject({ turnId, state: "running" });
+
+      harness.emit({
+        type: "session.state.changed",
+        eventId: asEventId("evt-auto-compaction-settled"),
+        provider,
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:02.000Z",
+        payload: { state: nextState },
+      });
+      await harness.drain();
+      const settledThread = (await harness.readModel()).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      expect(settledThread?.session).toMatchObject({
+        status: nextState,
+        activeTurnId: nextState === "running" ? turnId : null,
+      });
+    },
+  );
+
+  it("projects manual compaction without inventing an active turn", async () => {
+    const harness = await createHarness();
+    for (const state of ["compacting", "ready"] as const) {
+      harness.emit({
+        type: "session.state.changed",
+        eventId: asEventId(`evt-manual-compaction-${state}`),
+        provider: ProviderDriverKind.make("pi"),
+        threadId: asThreadId("thread-1"),
+        createdAt: state === "compacting" ? "2026-01-01T00:00:00.000Z" : "2026-01-01T00:00:01.000Z",
+        payload: { state },
+      });
+      await harness.drain();
+      expect((await harness.readModel()).threads[0]?.session).toMatchObject({
+        status: state,
+        activeTurnId: null,
+      });
+    }
+  });
+
   it("clears active turn when provider session becomes ready", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
