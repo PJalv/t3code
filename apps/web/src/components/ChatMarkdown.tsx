@@ -2618,7 +2618,7 @@ function useChatMarkdownState({
   // left alone; ambiguous basenames are omitted by the shared picker.
   useEffect(() => {
     if (!cwd || environmentId === null) {
-      setWorkspaceBasenamePaths(new Map());
+      setWorkspaceBasenamePaths((previous) => (previous.size === 0 ? previous : new Map()));
       return;
     }
     const candidates = new Set<string>();
@@ -2637,10 +2637,25 @@ function useChatMarkdownState({
         async (basename) => [basename, await findWorkspaceBasenameMatch(basename)] as const,
       ),
     ).then((matches) => {
-      if (!cancelled)
-        setWorkspaceBasenamePaths(
-          new Map(matches.filter(([, path]) => path !== null) as Array<[string, string]>),
-        );
+      if (cancelled) return;
+      const next = new Map(matches.filter(([, path]) => path !== null) as Array<[string, string]>);
+      // Resolving is async and the deps can churn (the lookup callback is
+      // rebuilt when the project index runner changes), so a naive setState
+      // here re-renders forever. Keep the previous Map when the result is
+      // byte-identical and let React bail out.
+      setWorkspaceBasenamePaths((previous) => {
+        if (previous.size === next.size) {
+          let same = true;
+          for (const [key, value] of next) {
+            if (previous.get(key) !== value) {
+              same = false;
+              break;
+            }
+          }
+          if (same) return previous;
+        }
+        return next;
+      });
     });
     return () => {
       cancelled = true;
