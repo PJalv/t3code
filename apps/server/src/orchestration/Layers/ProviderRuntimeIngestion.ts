@@ -38,7 +38,7 @@ import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionT
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
-import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepository } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
@@ -139,7 +139,6 @@ type RuntimeIngestionInput =
       event: TurnStartRequestedDomainEvent;
     }
   | {
-      /** A diff whose workspace the diff worker confirmed is a Git repository. */
       source: "diff";
       event: ProviderDiffEvent;
     };
@@ -157,18 +156,6 @@ function sameId(left: string | null | undefined, right: string | null | undefine
     return false;
   }
   return left === right;
-}
-
-function hasCheckpointForTurn(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-  turnId: TurnId,
-): boolean {
-  for (let index = 0; index < checkpoints.length; index += 1) {
-    if (checkpoints[index]?.turnId === turnId) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function maxCheckpointTurnCount(
@@ -1061,7 +1048,6 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const serverSettingsService = yield* ServerSettingsService;
-  const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -2629,11 +2615,8 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 
-  // Records a mid-turn placeholder checkpoint for a provider diff. Runs on the
-  // lifecycle worker, after repository detection, so the running-turn check
-  // and the dispatch are ordered with the turn's terminal events: a diff that
-  // resolved after turn.completed must not rewrite the settled turn's state or
-  // move the latest-turn pointer back.
+  // Persist provider patches on the lifecycle worker before terminal events.
+  // They do not need Git, and late updates must not change settled turns.
   const recordProviderDiff = Effect.fn("recordProviderDiff")(function* (event: ProviderDiffEvent) {
     const thread = yield* resolveThreadRuntimeContext(event.threadId);
     const turnId = toTurnId(event.turnId);
@@ -2643,11 +2626,26 @@ const make = Effect.gen(function* () {
     const checkpointContext = yield* projectionSnapshotQuery
       .getThreadCheckpointContext(thread.id)
       .pipe(Effect.map(Option.getOrUndefined));
-    // Skip if a checkpoint already exists for this turn. A real
-    // (non-placeholder) capture from CheckpointReactor should not
-    // be clobbered, and dispatching a duplicate placeholder for the
-    // same turnId would produce an unstable checkpointTurnCount.
-    if (!checkpointContext || hasCheckpointForTurn(checkpointContext.checkpoints, turnId)) return;
+    if (!checkpointContext) return;
+    const existingCheckpoint = checkpointContext.checkpoints.find(
+      (checkpoint) => checkpoint.turnId === turnId,
+    );
+    const checkpointTurnCount =
+      existingCheckpoint?.checkpointTurnCount ??
+      maxCheckpointTurnCount(checkpointContext.checkpoints) + 1;
+    yield* projectionTurnRepository.upsertDiffBlob({
+      threadId: thread.id,
+      fromTurnCount: checkpointTurnCount - 1,
+      toTurnCount: checkpointTurnCount,
+      diff: event.payload.unifiedDiff,
+      createdAt: event.createdAt,
+    });
+    // Keep canonical Git checkpoints intact. Native patches remain a fallback.
+    if (
+      existingCheckpoint &&
+      !String(existingCheckpoint.checkpointRef).startsWith("provider-diff:")
+    )
+      return;
     const now = event.createdAt;
     yield* orchestrationEngine.dispatch({
       type: "thread.turn.diff.complete",
@@ -2655,13 +2653,17 @@ const make = Effect.gen(function* () {
       threadId: thread.id,
       turnId,
       completedAt: now,
-      checkpointRef: CheckpointRef.make(`provider-diff:${event.eventId}`),
+      checkpointRef:
+        existingCheckpoint?.checkpointRef ?? CheckpointRef.make(`provider-diff:${event.eventId}`),
       status: "missing",
-      files: [],
+      files: parseTurnDiffFilesFromUnifiedDiff(event.payload.unifiedDiff).map((file) => ({
+        ...file,
+        kind: "modified" as const,
+      })),
       assistantMessageId: MessageId.make(
         `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
       ),
-      checkpointTurnCount: maxCheckpointTurnCount(checkpointContext.checkpoints) + 1,
+      checkpointTurnCount,
       createdAt: now,
     });
   });
@@ -2697,30 +2699,12 @@ const make = Effect.gen(function* () {
     processInput(input).pipe(logIngestionFailure(input.source, input.event)),
   );
 
-  // Repository detection for a diff goes through VCS subprocesses, which can
-  // stall behind slow or hung git. It runs on its own worker so a stuck diff
-  // never delays the lifecycle worker; confirmed diffs are handed back to it.
-  const detectProviderDiffRepository = Effect.fn("detectProviderDiffRepository")(function* (
-    event: ProviderDiffEvent,
-  ) {
-    if (!toTurnId(event.turnId)) return;
-    const checkpointContext = yield* projectionSnapshotQuery
-      .getThreadCheckpointContext(event.threadId)
-      .pipe(Effect.map(Option.getOrUndefined));
-    const workspaceCwd = checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot;
-    if (!workspaceCwd || !(yield* checkpointStore.isGitRepository(workspaceCwd))) return;
-    yield* worker.enqueue({ source: "diff", event });
-  });
-  const diffWorker = yield* makeDrainableWorker((event: ProviderDiffEvent) =>
-    detectProviderDiffRepository(event).pipe(logIngestionFailure("diff", event)),
-  );
-
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
       yield* forkParked(
         Stream.runForEach(providerService.streamEvents, (event) =>
           event.type === "turn.diff.updated"
-            ? diffWorker.enqueue(event)
+            ? worker.enqueue({ source: "diff", event })
             : worker.enqueue({ source: "runtime", event }),
         ),
       );
@@ -2736,8 +2720,7 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    // The diff worker feeds the lifecycle worker, so drain it first.
-    drain: diffWorker.drain.pipe(Effect.andThen(worker.drain)),
+    drain: worker.drain,
   } satisfies ProviderRuntimeIngestionShape;
 });
 

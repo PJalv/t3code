@@ -14,6 +14,7 @@ import {
 import {
   ApprovalRequestId,
   CommandId,
+  CheckpointRef,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
@@ -29,7 +30,6 @@ import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
@@ -323,13 +323,16 @@ describe("ProviderRuntimeIngestion", () => {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
     workspaceSubdirectory?: string;
+    gitRepository?: boolean;
     isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
   }) {
     const repositoryRoot = makeTempDir("t3-provider-project-");
-    NodeChildProcess.execFileSync("git", ["init", "--initial-branch=main"], {
-      cwd: repositoryRoot,
-      stdio: "ignore",
-    });
+    if (options?.gitRepository !== false) {
+      NodeChildProcess.execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repositoryRoot,
+        stdio: "ignore",
+      });
+    }
     const workspaceRoot = NodePath.join(repositoryRoot, options?.workspaceSubdirectory ?? "");
     NodeFS.mkdirSync(workspaceRoot, { recursive: true });
     const provider = createProviderServiceHarness();
@@ -476,6 +479,12 @@ describe("ProviderRuntimeIngestion", () => {
         testRuntime.runPromise(
           Effect.flatMap(ProjectionTurnRepository, (turns) =>
             turns.getByTurnId({ threadId: asThreadId("thread-1"), turnId }),
+          ).pipe(Effect.map(Option.getOrUndefined), Effect.provide(ProjectionTurnRepositoryLive)),
+        ),
+      readDiff: (fromTurnCount: number, toTurnCount: number) =>
+        testRuntime.runPromise(
+          Effect.flatMap(ProjectionTurnRepository, (turns) =>
+            turns.getDiffBlob({ threadId: asThreadId("thread-1"), fromTurnCount, toTurnCount }),
           ).pipe(Effect.map(Option.getOrUndefined), Effect.provide(ProjectionTurnRepositoryLive)),
         ),
       readThreadShell: () =>
@@ -4152,104 +4161,185 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
-  effectIt.effect("settles the turn while repository detection for a diff is blocked", () =>
-    Effect.gen(function* () {
-      const detectionStarted = yield* Deferred.make<void>();
-      const releaseDetection = yield* Deferred.make<boolean>();
-      const harness = yield* Effect.promise(() =>
-        createHarness({
-          isGitRepository: () =>
-            Deferred.succeed(detectionStarted, undefined).pipe(
-              Effect.andThen(Deferred.await(releaseDetection)),
-            ),
-        }),
-      );
-      yield* Effect.addFinalizer(() => Deferred.succeed(releaseDetection, true));
+  it.each([true, false])(
+    "persists cumulative provider patches with Git enabled: %s",
+    async (gitRepository) => {
+      const harness = await createHarness({ gitRepository });
       const base = {
-        provider: ProviderDriverKind.make("codex"),
+        provider: ProviderDriverKind.make("pi"),
         threadId: asThreadId("thread-1"),
-        turnId: asTurnId("blocked-diff-turn"),
+        turnId: asTurnId("provider-patch-turn"),
         createdAt: "2026-01-01T00:00:00.000Z",
       };
-      yield* Effect.promise(() =>
-        harness.emitAndDrain([
-          { ...base, type: "turn.started", eventId: asEventId("evt-blocked-turn-start") },
-        ]),
-      );
-      harness.emit({
+      const patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n";
+      await harness.emitAndDrain([
+        { ...base, type: "turn.started", eventId: asEventId("evt-patch-start") },
+      ]);
+      await harness.emitAndDrain([
+        {
+          ...base,
+          type: "turn.diff.updated",
+          eventId: asEventId("evt-patch-first"),
+          payload: { unifiedDiff: patch },
+        },
+      ]);
+      expect(await harness.readDiff(0, 1)).toMatchObject({ diff: patch });
+      expect((await harness.readModel()).threads[0]?.checkpoints).toEqual([
+        expect.objectContaining({
+          turnId: base.turnId,
+          checkpointTurnCount: 1,
+          files: [{ path: "file.txt", kind: "modified", additions: 1, deletions: 1 }],
+        }),
+      ]);
+
+      const updatedPatch =
+        patch + "--- /dev/null\n+++ /tmp/external.txt\n@@ -0,0 +1 @@\n+external\n";
+      await harness.emitAndDrain([
+        {
+          ...base,
+          type: "turn.diff.updated",
+          eventId: asEventId("evt-patch-second"),
+          payload: { unifiedDiff: updatedPatch },
+        },
+      ]);
+      expect(await harness.readDiff(0, 1)).toMatchObject({ diff: updatedPatch });
+      expect(await harness.readDiff(1, 2)).toBeUndefined();
+      expect((await harness.readModel()).threads[0]?.checkpoints).toEqual([
+        expect.objectContaining({
+          turnId: base.turnId,
+          checkpointTurnCount: 1,
+          files: [
+            { path: "/tmp/external.txt", kind: "modified", additions: 1, deletions: 0 },
+            { path: "file.txt", kind: "modified", additions: 1, deletions: 1 },
+          ],
+        }),
+      ]);
+      await harness.emitAndDrain([
+        {
+          ...base,
+          type: "turn.completed",
+          eventId: asEventId("evt-patch-completed"),
+          payload: { state: "completed" },
+        },
+        {
+          ...base,
+          type: "turn.diff.updated",
+          eventId: asEventId("evt-patch-late"),
+          payload: { unifiedDiff: "late" },
+        },
+      ]);
+      expect(await harness.readDiff(0, 1)).toMatchObject({ diff: updatedPatch });
+      expect(await harness.readTurn(base.turnId)).toMatchObject({ state: "completed" });
+      const nextTurnId = asTurnId("provider-patch-next-turn");
+      await harness.emitAndDrain([
+        {
+          ...base,
+          type: "turn.started",
+          eventId: asEventId("evt-patch-next-start"),
+          turnId: nextTurnId,
+        },
+        {
+          ...base,
+          type: "turn.diff.updated",
+          eventId: asEventId("evt-patch-next-diff"),
+          turnId: nextTurnId,
+          payload: { unifiedDiff: patch },
+        },
+      ]);
+      expect(await harness.readDiff(0, 1)).toMatchObject({ diff: updatedPatch });
+      expect(await harness.readDiff(1, 2)).toMatchObject({ diff: patch });
+    },
+  );
+
+  it("preserves canonical Git checkpoints when a provider patch arrives", async () => {
+    const harness = await createHarness();
+    const base = {
+      provider: ProviderDriverKind.make("pi"),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("git-checkpoint-turn"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    await harness.emitAndDrain([
+      { ...base, type: "turn.started", eventId: asEventId("evt-git-checkpoint-start") },
+    ]);
+    await harness.dispatch({
+      type: "thread.turn.diff.complete",
+      commandId: CommandId.make("cmd-git-checkpoint"),
+      threadId: base.threadId,
+      turnId: base.turnId,
+      checkpointTurnCount: 1,
+      checkpointRef: CheckpointRef.make("refs/t3/checkpoints/git-turn"),
+      status: "ready",
+      files: [{ path: "git.txt", kind: "modified", additions: 2, deletions: 0 }],
+      assistantMessageId: asMessageId("git-turn-assistant"),
+      completedAt: base.createdAt,
+      createdAt: base.createdAt,
+    });
+    const before = (await harness.readModel()).threads[0]?.checkpoints;
+    const patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n";
+    await harness.emitAndDrain([
+      {
         ...base,
         type: "turn.diff.updated",
-        eventId: asEventId("evt-blocked-diff"),
-        payload: { unifiedDiff: "diff --git a/file.ts b/file.ts\n+new\n" },
-      });
-      yield* Deferred.await(detectionStarted);
+        eventId: asEventId("evt-git-native-diff"),
+        payload: { unifiedDiff: patch },
+      },
+    ]);
+    expect(await harness.readDiff(0, 1)).toMatchObject({ diff: patch });
+    expect((await harness.readModel()).threads[0]?.checkpoints).toEqual(before);
+  });
 
-      const settled = yield* harness.engine.streamDomainEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.type === "thread.session-set" &&
-            event.payload.threadId === base.threadId &&
-            event.payload.session.status === "error",
-        ),
-        Stream.runHead,
-        Effect.forkScoped({ startImmediately: true }),
-      );
-      harness.emit({
+  it("orders native patches before completion without probing Git", async () => {
+    const harness = await createHarness({
+      isGitRepository: () => Effect.die("provider patches must not probe Git"),
+    });
+    const base = {
+      provider: ProviderDriverKind.make("pi"),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("ordered-diff-turn"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n";
+    await harness.emitAndDrain([
+      { ...base, type: "turn.started", eventId: asEventId("evt-ordered-start") },
+      {
         ...base,
-        type: "item.completed",
-        eventId: asEventId("evt-blocked-final-reply"),
-        itemId: asItemId("blocked-final-reply"),
-        payload: { itemType: "assistant_message", status: "completed", detail: "Work finished." },
-      });
-      harness.emit({
+        type: "turn.diff.updated",
+        eventId: asEventId("evt-ordered-diff"),
+        payload: { unifiedDiff: patch },
+      },
+      {
         ...base,
         type: "turn.completed",
-        eventId: asEventId("evt-blocked-turn-completed"),
+        eventId: asEventId("evt-ordered-completed"),
         payload: { state: "failed" },
-      });
-      // Resolves only if turn.completed is processed while detection is still blocked.
-      yield* Fiber.join(settled);
-      const blocked = yield* Effect.promise(harness.readModel);
-      expect(blocked.threads[0]?.session).toMatchObject({ status: "error", activeTurnId: null });
-      expect(blocked.threads[0]?.messages).toEqual(
-        expect.arrayContaining([expect.objectContaining({ text: "Work finished." })]),
-      );
-      expect(blocked.threads[0]?.checkpoints).toEqual([]);
+      },
+    ]);
+    expect(await harness.readDiff(0, 1)).toMatchObject({ diff: patch });
+    expect(await harness.readTurn(base.turnId)).toMatchObject({ state: "error" });
 
-      // A newer turn starts before detection returns. The late placeholder
-      // must neither settle the failed turn as completed nor move the
-      // latest-turn pointer back to it.
-      const nextTurnId = asTurnId("next-turn");
-      const nextTurnStarted = yield* harness.engine.streamDomainEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.type === "thread.session-set" &&
-            event.payload.session.activeTurnId === nextTurnId,
-        ),
-        Stream.runHead,
-        Effect.forkScoped({ startImmediately: true }),
-      );
-      harness.emit({
+    const nextTurnId = asTurnId("next-turn");
+    await harness.emitAndDrain([
+      {
         ...base,
         type: "turn.started",
-        turnId: nextTurnId,
         eventId: asEventId("evt-next-turn-start"),
-      });
-      yield* Fiber.join(nextTurnStarted);
-      yield* Deferred.succeed(releaseDetection, true);
-      yield* Effect.promise(harness.drain);
-      const released = yield* Effect.promise(harness.readModel);
-      expect(released.threads[0]?.checkpoints).toEqual([]);
-      expect(released.threads[0]?.latestTurn).toMatchObject({
         turnId: nextTurnId,
-        state: "running",
-      });
-      expect(yield* Effect.promise(() => harness.readTurn(base.turnId))).toMatchObject({
-        state: "error",
-        checkpointRef: null,
-      });
-    }),
-  );
+      },
+      {
+        ...base,
+        type: "turn.diff.updated",
+        eventId: asEventId("evt-ordered-late-diff"),
+        payload: { unifiedDiff: "late" },
+      },
+    ]);
+    expect(await harness.readDiff(0, 1)).toMatchObject({ diff: patch });
+    expect((await harness.readModel()).threads[0]?.latestTurn).toMatchObject({
+      turnId: nextTurnId,
+      state: "running",
+    });
+    expect(await harness.readTurn(base.turnId)).toMatchObject({ state: "error" });
+  });
 
   effectIt.effect("ignores a diff for a missing turn without moving the latest turn", () =>
     Effect.gen(function* () {
