@@ -11,7 +11,7 @@ import {
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
-import { memo, Suspense, use, useMemo } from "react";
+import { lazy, memo, Suspense, use, useMemo, useState } from "react";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
@@ -24,6 +24,78 @@ import { Button } from "../ui/button";
 import ChatMarkdown from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
+
+const V2FileChangeDiffView = lazy(() =>
+  import("./V2FileChangeDiffView").then((module) => ({ default: module.V2FileChangeDiffView })),
+);
+
+function FileChangeInspector({
+  item,
+  workspaceRoot,
+  onOpenTurnDiff,
+}: {
+  readonly item: Extract<OrchestrationV2ProjectedTurnItem["item"], { type: "file_change" }>;
+  readonly workspaceRoot?: string | undefined;
+  readonly onOpenTurnDiff: V2ItemInspectorProps["onOpenTurnDiff"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDiff = Boolean(item.diffStr?.trim()) || item.newStr !== undefined;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-muted-foreground">
+          {formatWorkspaceRelativePath(item.fileName, workspaceRoot)}
+        </span>
+        {item.additions !== undefined || item.deletions !== undefined ? (
+          <span>
+            <span className="text-success">+{item.additions ?? 0}</span>{" "}
+            <span className="text-destructive">-{item.deletions ?? 0}</span>
+          </span>
+        ) : null}
+        {hasDiff ? (
+          <Button
+            size="xs"
+            variant="outline"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? "Hide diff" : "Show diff"}
+          </Button>
+        ) : null}
+        {item.runId !== null ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => onOpenTurnDiff(item.runId!, item.fileName)}
+          >
+            Open diff
+          </Button>
+        ) : null}
+      </div>
+      {item.status === "failed" && item.diffStr?.trim() ? (
+        <StructuredValue value={item.diffStr} />
+      ) : null}
+      {expanded && hasDiff ? (
+        <Suspense fallback={<div className="text-muted-foreground">Loading diff…</div>}>
+          <V2FileChangeDiffView item={item} cacheKey={`v2:${item.id}:${item.fileName}`} />
+        </Suspense>
+      ) : null}
+      {item.changes?.length ? (
+        <ul className="space-y-1 font-mono text-muted-foreground">
+          {item.changes.map((change, index) => (
+            <li key={`${change.operation}:${change.path}:${index}`}>
+              {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
+              {formatWorkspaceRelativePath(change.path, workspaceRoot)}
+              {change.fileType || change.mimeType
+                ? ` (${[change.fileType, change.mimeType].filter(Boolean).join(", ")})`
+                : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -223,44 +295,12 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "file_change" ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-muted-foreground">
-              {formatWorkspaceRelativePath(item.fileName, props.workspaceRoot)}
-            </span>
-            {item.additions !== undefined || item.deletions !== undefined ? (
-              <span>
-                <span className="text-success">+{item.additions ?? 0}</span>{" "}
-                <span className="text-destructive">-{item.deletions ?? 0}</span>
-              </span>
-            ) : null}
-            {item.runId !== null ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => props.onOpenTurnDiff(item.runId!, item.fileName)}
-              >
-                Open diff
-              </Button>
-            ) : null}
-          </div>
-          {item.status === "failed" && item.diffStr?.trim() ? (
-            <StructuredValue value={item.diffStr} />
-          ) : null}
-          {item.changes !== undefined && item.changes.length > 0 ? (
-            <ul className="space-y-1 font-mono text-muted-foreground">
-              {item.changes.map((change, index) => (
-                <li key={`${change.operation}:${change.path}:${index}`}>
-                  {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
-                  {formatWorkspaceRelativePath(change.path, props.workspaceRoot)}
-                  {change.fileType || change.mimeType
-                    ? ` (${[change.fileType, change.mimeType].filter(Boolean).join(", ")})`
-                    : ""}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <FileChangeInspector
+          key={item.id}
+          item={item}
+          workspaceRoot={props.workspaceRoot}
+          onOpenTurnDiff={props.onOpenTurnDiff}
+        />
       ) : null}
 
       {item.type === "file_search" && item.pattern?.trim() ? (
