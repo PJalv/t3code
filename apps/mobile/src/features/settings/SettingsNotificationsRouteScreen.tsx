@@ -10,6 +10,7 @@ import { Alert, AppState, Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
+import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
   isAtomCommandInterrupted,
   reportAtomCommandResult,
@@ -23,6 +24,12 @@ import {
   supportsAndroidLiveUpdateSettings,
 } from "../agent-awareness/androidNotifications";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
+import {
+  enableLocalAgentNotifications,
+  disableLocalAgentNotifications,
+  setLocalAgentOngoing,
+} from "../agent-awareness/localNotifications";
+import { loadOrCreateAgentAwarenessDeviceId, loadPreferences } from "../../persistence/imperative";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
   getAgentAwarenessRegistrationStatus,
@@ -58,6 +65,7 @@ function useDeviceRegistered(): boolean {
 
 export function SettingsNotificationsRouteScreen() {
   if (!hasCloudPublicConfig()) {
+    if (Platform.OS === "android") return <LocalAndroidNotificationsSettings />;
     return (
       <SettingsScreen title="Notifications">
         <ScrollView
@@ -75,6 +83,106 @@ export function SettingsNotificationsRouteScreen() {
   return <ConfiguredSettingsNotificationsRouteScreen />;
 }
 
+function LocalSenderConfigurationRow({ enabled }: { readonly enabled: boolean }) {
+  return (
+    <SettingsRow
+      icon="doc.on.doc"
+      label="Copy local sender configuration"
+      disabled={!enabled}
+      onPress={() => {
+        void (async () => {
+          const deviceId = await loadOrCreateAgentAwarenessDeviceId();
+          const token = (await Notifications.getDevicePushTokenAsync()).data;
+          const copied = await tryCopyTextWithHaptic(
+            JSON.stringify({ token, deviceId, userId: `local:${deviceId}` }, null, 2),
+          );
+          if (!copied) Alert.alert("Could not copy", "Try again.");
+          else Alert.alert("Copied", "Sender configuration copied. Keep the push token private.");
+        })().catch(() =>
+          Alert.alert("Could not get push token", "Enable notifications and try again."),
+        );
+      }}
+    />
+  );
+}
+
+function LocalAndroidNotificationsSettings() {
+  const [enabled, setEnabled] = useState(false);
+  const [ongoing, setOngoing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(async () => {
+    const preferences = await loadPreferences();
+    setEnabled(preferences.localNotificationsEnabled === true);
+    setOngoing(preferences.localNotificationsOngoing === true);
+  }, []);
+  useEffect(() => {
+    void refresh().catch(() => {});
+  }, [refresh]);
+
+  const enable = useCallback(async (withOngoing = false) => {
+    setBusy(true);
+    try {
+      const permission = await runtime.runPromiseExit(requestAgentNotificationPermission);
+      if (permission._tag !== "Success" || permission.value.type !== "granted") {
+        Alert.alert("Notifications unavailable", "Notification permission is required.");
+        return;
+      }
+      await enableLocalAgentNotifications(withOngoing);
+      setEnabled(true);
+      setOngoing(withOngoing);
+    } catch {
+      Alert.alert("Notifications unavailable", "Could not enable local notifications.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return (
+    <SettingsScreen title="Notifications">
+      <ScrollView contentContainerClassName="gap-6 px-5 pt-4">
+        <SettingsSection title="Device-local Android notifications">
+          <SettingsSwitchRow
+            icon="bell.badge"
+            label="Device Notifications"
+            value={enabled}
+            disabled={busy}
+            onValueChange={(value) => {
+              if (value) void enable(ongoing);
+              else
+                void disableLocalAgentNotifications()
+                  .then(() => {
+                    setEnabled(false);
+                    setOngoing(false);
+                  })
+                  .catch(() =>
+                    Alert.alert("Notifications unavailable", "Could not save the setting."),
+                  );
+            }}
+          />
+          <SettingsSwitchRow
+            icon="bolt.circle"
+            label="Ongoing Agent Activity"
+            value={ongoing}
+            disabled={!enabled || busy}
+            onValueChange={(value) => {
+              void setLocalAgentOngoing(value)
+                .then(() => setOngoing(value))
+                .catch(() =>
+                  Alert.alert("Notifications unavailable", "Could not update ongoing activity."),
+                );
+            }}
+          />
+          <Text className="text-base text-foreground-muted">
+            No T3 Connect account or relay is used. Delivery requires a separate sender configured
+            with this app's Firebase project.
+          </Text>
+          <LocalSenderConfigurationRow enabled={enabled} />
+        </SettingsSection>
+      </ScrollView>
+    </SettingsScreen>
+  );
+}
+
 function ConfiguredSettingsNotificationsRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
@@ -90,6 +198,8 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
+  const [localNotificationsEnabled, setLocalNotificationsEnabled] = useState(false);
+  const [localOngoingEnabled, setLocalOngoingEnabled] = useState(false);
   const liveActivityWriteInFlight = useRef(false);
   const deviceRegistered = useDeviceRegistered();
   const liveActivitiesPreferenceEnabled = AsyncResult.isSuccess(preferencesResult)
@@ -117,6 +227,20 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === "android" && !isSignedIn) {
+      void loadPreferences()
+        .then((preferences) => {
+          setLocalNotificationsEnabled(preferences.localNotificationsEnabled === true);
+          setLocalOngoingEnabled(preferences.localNotificationsOngoing === true);
+        })
+        .catch(() => setLocalNotificationsEnabled(false));
+    } else {
+      setLocalNotificationsEnabled(false);
+      setLocalOngoingEnabled(false);
+    }
+  }, [isSignedIn]);
+
+  useEffect(() => {
     void refreshNotifications();
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void refreshNotifications();
@@ -130,7 +254,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       return;
     }
     if (!isSignedIn) {
-      setLiveActivityStatus("signed-out");
+      setLiveActivityStatus(localOngoingEnabled ? "enabled" : "signed-out");
       return;
     }
     if (!AsyncResult.isSuccess(preferencesResult)) {
@@ -145,7 +269,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     setLiveActivityStatus(
       preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
     );
-  }, [isLoaded, isSignedIn, preferencesResult]);
+  }, [isLoaded, isSignedIn, localOngoingEnabled, preferencesResult]);
 
   const requestNotifications = useCallback(async () => {
     const result = await settleAsyncResult(() =>
@@ -324,6 +448,27 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
       if (enabled) {
+        if (!isSignedIn && Platform.OS === "android") {
+          void (async () => {
+            const permission = await settleAsyncResult(() =>
+              runtime.runPromiseExit(requestAgentNotificationPermission),
+            );
+            if (permission._tag !== "Success" || permission.value.type !== "granted") {
+              Alert.alert("Notifications unavailable", "Notification permission is required.");
+              return;
+            }
+            await enableLocalAgentNotifications(false);
+            setLocalNotificationsEnabled(true);
+            setNotificationStatus("enabled");
+            Alert.alert(
+              "Notifications enabled",
+              "Local notifications are enabled. A local Firebase sender is required for delivery.",
+            );
+          })().catch(() =>
+            Alert.alert("Notifications unavailable", "Could not enable local notifications."),
+          );
+          return;
+        }
         if (!isSignedIn) {
           promptSignIn();
           return;
@@ -332,6 +477,14 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         return;
       }
 
+      if (!isSignedIn && Platform.OS === "android") {
+        void disableLocalAgentNotifications().catch(() => {
+          Alert.alert("Notifications unavailable", "Could not save the notification setting.");
+        });
+        setLocalNotificationsEnabled(false);
+        setLocalOngoingEnabled(false);
+        return;
+      }
       Alert.alert(
         "Disable notifications",
         "Open system Settings to disable notifications for T3 Code.",
@@ -347,6 +500,24 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const handleLiveActivitiesChange = useCallback(
     (enabled: boolean) => {
       if (liveActivityWriteInFlight.current) return;
+      if (!isSignedIn && Platform.OS === "android") {
+        if (!localNotificationsEnabled && enabled) {
+          Alert.alert(
+            "Enable notifications first",
+            "Turn on Device Notifications before enabling ongoing activity.",
+          );
+          return;
+        }
+        void setLocalAgentOngoing(enabled)
+          .then(() => {
+            setLocalOngoingEnabled(enabled);
+            setLiveActivityStatus(enabled ? "enabled" : "disabled");
+          })
+          .catch(() =>
+            Alert.alert("Ongoing activity unavailable", "Could not update local ongoing activity."),
+          );
+        return;
+      }
       if (!enabled) {
         liveActivityWriteInFlight.current = true;
         setLiveActivityStatus("linking");
@@ -408,6 +579,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       connections,
       getToken,
       isSignedIn,
+      localNotificationsEnabled,
       linkEnvironments,
       liveActivitiesPreferenceEnabled,
       promptSignIn,
@@ -441,7 +613,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             // relay; otherwise notifications cannot be delivered regardless of
             // the local iOS permission.
             value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+              agentAwarenessPushAvailable &&
+              notificationStatus === "enabled" &&
+              (deviceRegistered || localNotificationsEnabled)
             }
             onValueChange={handleDeviceNotificationsChange}
           />
@@ -467,7 +641,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             value={
               agentAwarenessPushAvailable &&
               (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
-              deviceRegistered
+              (deviceRegistered || localOngoingEnabled)
             }
             onValueChange={handleLiveActivitiesChange}
           />
@@ -477,6 +651,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
               label="Turn off Live Activity preference"
               onPress={() => handleLiveActivitiesChange(false)}
             />
+          ) : null}
+          {!isSignedIn && Platform.OS === "android" ? (
+            <LocalSenderConfigurationRow enabled={localNotificationsEnabled} />
           ) : null}
           {supportsAndroidLiveUpdateSettings() ? (
             <SettingsRow

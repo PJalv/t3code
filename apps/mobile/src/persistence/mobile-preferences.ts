@@ -18,6 +18,9 @@ const PREFERENCES_FALLBACK_KEY = "t3code.preferences.fallback";
 
 export interface Preferences {
   readonly liveActivitiesEnabled?: boolean;
+  /** Explicit device-local Android agent notification opt-in. */
+  readonly localNotificationsEnabled?: boolean;
+  readonly localNotificationsOngoing?: boolean;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
@@ -94,6 +97,8 @@ export class MobilePreferencesStore extends Context.Service<
 function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     liveActivitiesEnabled?: boolean;
+    localNotificationsEnabled?: boolean;
+    localNotificationsOngoing?: boolean;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
@@ -119,6 +124,12 @@ function sanitizePreferences(parsed: Preferences): Preferences {
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
+  }
+  if (typeof parsed.localNotificationsEnabled === "boolean") {
+    preferences.localNotificationsEnabled = parsed.localNotificationsEnabled;
+  }
+  if (typeof parsed.localNotificationsOngoing === "boolean") {
+    preferences.localNotificationsOngoing = parsed.localNotificationsOngoing;
   }
   if (
     typeof parsed.themeId === "string" &&
