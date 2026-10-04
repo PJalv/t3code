@@ -42,8 +42,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function setup() {
+async function setup(platform: "ios" | "android" = "ios") {
   vi.useFakeTimers();
+  if (platform === "android") {
+    vi.stubGlobal("VideoDecoder", vi.fn());
+    vi.stubGlobal("EncodedVideoChunk", vi.fn());
+  }
+  const messages: Array<string | Uint8Array> = [];
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", () => {
     primes++;
@@ -54,7 +59,9 @@ async function setup() {
     class {
       static OPEN = 1;
       readyState = 1;
-      send() {}
+      send(message: string | Uint8Array) {
+        messages.push(message);
+      }
       close() {}
     },
   );
@@ -71,7 +78,7 @@ async function setup() {
       hostId="local"
       environmentId={EnvironmentId.make("test")}
       deviceId="test"
-      platform="ios"
+      platform={platform}
       visible={visible}
     />
   );
@@ -90,7 +97,7 @@ async function setup() {
       },
     });
   });
-  return { images, view };
+  return { images, view, messages };
 }
 
 it("removes MJPEG requests while hidden and reconnects when shown", async () => {
@@ -124,6 +131,42 @@ it("offers Reconnect after the shared timeout and receives a frame after retry w
   expect(renderer!.root.findAllByProps({ role: "status" })).toHaveLength(0);
   expect(renderer!.root.findAllByType("button")).toHaveLength(0);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("sends Ctrl shortcuts to Android and lets a browser paste insert clipboard text once", async () => {
+  const { messages } = await setup("android");
+  const screen = renderer!.root.findByProps({ role: "application" });
+  const target = {};
+  const key = (value: string) => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const nativeEvent = { key: value, ctrlKey: true } as KeyboardEvent;
+    screen.props.onKeyDown({
+      target,
+      currentTarget: target,
+      key: value,
+      ctrlKey: true,
+      nativeEvent,
+      preventDefault,
+      stopPropagation,
+    });
+    return preventDefault;
+  };
+  expect(key("a")).toHaveBeenCalledOnce();
+  expect(key("c")).toHaveBeenCalledOnce();
+  expect(key("v")).not.toHaveBeenCalled();
+  screen.props.onPaste({
+    target,
+    currentTarget: target,
+    clipboardData: { getData: () => "Pasted from the computer" },
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  });
+  expect(messages.map((message) => JSON.parse(message as string) as unknown)).toEqual([
+    { type: "key", keycode: 29, metaState: 0x1000 },
+    { type: "key", keycode: 31, metaState: 0x1000 },
+    { type: "text", text: "Pasted from the computer" },
+  ]);
 });
 
 it("starts exactly one new stream per Reconnect press", async () => {

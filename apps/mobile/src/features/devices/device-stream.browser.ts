@@ -179,8 +179,21 @@ export function start(configuration: DeviceStreamConfiguration) {
   frame.addEventListener("pointercancel", endTouch);
   frame.addEventListener("lostpointercapture", endTouch);
   frame.addEventListener("keydown", (event) => {
+    if (
+      configuration.platform === "android" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "v"
+    ) {
+      return;
+    }
     event.preventDefault();
     client.sendKey(event, "down");
+  });
+  frame.addEventListener("paste", (event) => {
+    if (configuration.platform !== "android") return;
+    event.preventDefault();
+    client.sendText(event.clipboardData?.getData("text/plain") ?? "");
   });
   frame.addEventListener("keyup", (event) => client.sendKey(event, "up"));
   window.addEventListener("pagehide", stop, { once: true });

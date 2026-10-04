@@ -158,6 +158,110 @@ describe("native device stream transport", () => {
     expect(socket.close).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards Android typing and editing keys without duplicating keyup", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    for (const key of ["a", "A", " ", "Enter", "Backspace", "ArrowLeft", "Escape"]) {
+      const event = { key, metaKey: false, ctrlKey: false } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    expect(
+      socket.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+    ).toEqual([
+      { type: "text", text: "a" },
+      { type: "text", text: "A" },
+      { type: "text", text: " " },
+      { type: "key", keycode: 66 },
+      { type: "key", keycode: 67 },
+      { type: "key", keycode: 21 },
+      { type: "back" },
+    ]);
+    client.stop();
+  });
+
+  it("preserves Android modifiers for editing shortcuts and selection", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    for (const key of ["a", "c", "x", "v", "z"]) {
+      const event = { key, ctrlKey: true } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    client.sendKey({ key: "ArrowLeft", ctrlKey: true, shiftKey: true } as KeyboardEvent, "down");
+    client.sendKey({ key: "ArrowRight", shiftKey: true } as KeyboardEvent, "down");
+    client.sendKey({ key: "A", ctrlKey: true, shiftKey: true } as KeyboardEvent, "down");
+    expect(
+      socket.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+    ).toEqual([
+      ...[29, 31, 52, 50, 54].map((keycode) => ({ type: "key", keycode, metaState: 0x1000 })),
+      { type: "key", keycode: 21, metaState: 0x1001 },
+      { type: "key", keycode: 22, metaState: 0x1 },
+      { type: "key", keycode: 29, metaState: 0x1001 },
+    ]);
+    client.stop();
+  });
+
+  it("chunks pasted Android text at the hub's UTF-8 limit without losing characters", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    const text = "a".repeat(299) + "🙂é".repeat(120) + "\nend";
+    client.sendText(text);
+    client.sendText("");
+    const messages = socket.send.mock.calls.map(
+      ([message]) => JSON.parse(message as string) as { type: string; text: string },
+    );
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.every((message) => message.type === "text")).toBe(true);
+    expect(messages.map((message) => message.text).join("")).toBe(text);
+    for (const message of messages) {
+      expect(new TextEncoder().encode(message.text).length).toBeLessThanOrEqual(300);
+      expect(message.text).not.toContain("\ufffd");
+    }
+    expect(messages[0]!.text).toBe("a".repeat(299));
+    client.stop();
+  });
+
+  it("does not inject Android paste messages on an iOS socket", async () => {
+    const { client, opened } = setup("ios");
+    client.start();
+    const socket = await opened;
+    socket.send.mockClear();
+    client.sendText("hello");
+    expect(socket.send).not.toHaveBeenCalled();
+    client.stop();
+  });
+
+  it("forwards iOS keyboard press and release events, including modifiers", async () => {
+    const { client, opened } = setup("ios");
+    client.start();
+    const socket = await opened;
+    socket.onopen?.();
+    socket.send.mockClear();
+    for (const code of ["ShiftLeft", "KeyA", "Enter", "Backspace", "ArrowLeft"]) {
+      const event = { code } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    const messages = socket.send.mock.calls.map(([bytes]) => {
+      const packet = bytes as Uint8Array;
+      return {
+        tag: packet[0],
+        body: JSON.parse(new TextDecoder().decode(packet.subarray(1))) as unknown,
+      };
+    });
+    expect(messages).toEqual(
+      [0xe1, 0x04, 0x28, 0x2a, 0x50].flatMap((usage) => [
+        { tag: 0x06, body: { type: "down", usage } },
+        { tag: 0x06, body: { type: "up", usage } },
+      ]),
+    );
+    client.stop();
+  });
+
   it("renews an expired Android ticket when the HTTP upgrade is rejected instead of retrying it forever", async () => {
     const { client, opened, events } = setup("android");
     client.start();
@@ -388,7 +492,7 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
     close() {
       this.state = "closed";
     }
-    decode() {}
+    decode = vi.fn();
     readonly callbacks: { output: (frame: VideoFrame) => void; error: () => void };
     constructor(callbacks: { output: (frame: VideoFrame) => void; error: () => void }) {
       this.callbacks = callbacks;
@@ -619,16 +723,32 @@ describe("shared device stream readiness and recovery", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("waits for decoded Android output and bounds a rotation that never produces another frame", async () => {
-    const { client, sockets, sps, events, decodedFrame, drawImage } = recoveryFixture("android");
+  it("decodes the SPS keyframe and distinguishes reset acknowledgements from rotation", async () => {
+    const { client, sockets, sps, events, decodedFrame, drawImage, decoders } =
+      recoveryFixture("android");
     client.start();
     sockets[0]!.onmessage?.({ data: sps });
     await vi.advanceTimersByTimeAsync(0);
     expect(events.onStatus.mock.calls.some(([status]) => status === "streaming")).toBe(false);
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
     expect(decodedFrame()).toHaveBeenCalledOnce();
     expect(drawImage).toHaveBeenCalledOnce();
     expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    const initialResetCount = sockets[0]!.send.mock.calls.filter(([message]) =>
+      String(message).includes("reset-video"),
+    ).length;
+    expect(initialResetCount).toBe(0);
+    // A genuine, unsolicited encoder session change starts one reset request.
     sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    const afterRotationResetCount = sockets[0]!.send.mock.calls.filter(([message]) =>
+      String(message).includes("reset-video"),
+    ).length;
+    expect(afterRotationResetCount).toBe(1);
+    // Its session announcement is an acknowledgement, not another rotation.
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    expect(
+      sockets[0]!.send.mock.calls.filter(([message]) => String(message).includes("reset-video")),
+    ).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(15_000);
     expect(events.onStatus).toHaveBeenLastCalledWith("error", expect.stringContaining("No video"));
     expect(vi.getTimerCount()).toBe(0);

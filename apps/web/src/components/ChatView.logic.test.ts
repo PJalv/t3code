@@ -1828,6 +1828,12 @@ describe("shouldRefocusComposerOnWindowFocus", () => {
     ).toBe(false);
   });
 
+  it("leaves a focused device screen alone", () => {
+    expect(
+      shouldRefocusComposerOnWindowFocus(element("DIV", { within: 'role="application"' })),
+    ).toBe(false);
+  });
+
   it("leaves focus inside a dialog or popup alone", () => {
     expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "dialog" }))).toBe(false);
     expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "-popup" }))).toBe(false);

@@ -46,6 +46,11 @@ to the other screen switches the live display and touch input to that screen.
 **Restore 3D view** returns the device to a screen-facing position.
 On supported Android foldables, use **Fold device** and **Unfold device** beside
 the screen to change its posture in either view.
+On Android, Ctrl-based editing shortcuts such as `Ctrl+A` go to the device app.
+`Ctrl+C` and `Ctrl+X` use Android's clipboard. `Ctrl+V`, or `Cmd+V` on a Mac,
+inserts text from your computer's clipboard. Android's clipboard is not synced
+back to your computer, so copying inside the device does not change what you
+paste on the computer or through the Device panel.
 
 ## Tools
 

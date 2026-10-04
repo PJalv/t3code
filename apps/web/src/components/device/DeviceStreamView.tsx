@@ -395,12 +395,29 @@ export function DeviceStreamView(props: {
         )}
         tabIndex={0}
         role="application"
+        data-keybinding-capture=""
         aria-label={`${props.platform === "ios" ? "iOS Simulator" : "Android Emulator"} screen`}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
+          if (
+            props.platform === "android" &&
+            (event.ctrlKey || event.metaKey) &&
+            !event.altKey &&
+            event.key.toLowerCase() === "v"
+          ) {
+            // Let the browser deliver clipboard text through onPaste.
+            event.stopPropagation();
+            return;
+          }
           if (event.metaKey && !["r", "R"].includes(event.key)) return;
           event.preventDefault();
           clientRef.current?.sendKey(event.nativeEvent, "down");
+        }}
+        onPaste={(event) => {
+          if (props.platform !== "android" || event.target !== event.currentTarget) return;
+          event.preventDefault();
+          event.stopPropagation();
+          clientRef.current?.sendText(event.clipboardData.getData("text/plain"));
         }}
         onKeyUp={(event) => {
           if (event.target !== event.currentTarget) return;

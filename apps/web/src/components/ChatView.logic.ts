@@ -1292,10 +1292,8 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   );
 }
 
-// Returning to the window should land the caret in the composer, so the reader can type right
-// away. The exceptions are places where focus is deliberate: another text field, a terminal in
-// the drawer or the right panel, or an open dialog or popup. A focused button outside those is
-// not one of them, so it yields to the composer.
+// Returning to the window should focus the composer unless a text field, terminal, device
+// screen, dialog, or popup owns focus. A plain button outside those yields to the composer.
 export function shouldRefocusComposerOnWindowFocus(
   activeElement:
     | (Pick<Element, "tagName" | "closest" | "getAttribute"> & { isContentEditable?: boolean })
@@ -1315,7 +1313,7 @@ export function shouldRefocusComposerOnWindowFocus(
   }
   return (
     activeElement.closest(
-      '[role="dialog"], [role="alertdialog"], [data-slot$="-popup"], [data-terminal-owner]',
+      '[role="dialog"], [role="alertdialog"], [role="application"], [data-slot$="-popup"], [data-terminal-owner]',
     ) === null
   );
 }

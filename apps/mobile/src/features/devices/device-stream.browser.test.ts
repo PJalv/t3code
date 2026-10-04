@@ -11,15 +11,22 @@ class Element extends EventTarget {
     super();
     this.tag = tag;
   }
-  setAttribute() {}
+  readonly attributes = new Map<string, string>();
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
   removeAttribute(name: string) {
     if (name === "src") this.src = "";
   }
   append() {}
 }
 
-async function setup() {
+async function setup(platform: "ios" | "android" = "ios") {
   vi.useFakeTimers();
+  if (platform === "android") {
+    vi.stubGlobal("VideoDecoder", vi.fn());
+    vi.stubGlobal("EncodedVideoChunk", vi.fn());
+  }
   const elements: Element[] = [];
   vi.stubGlobal("document", {
     documentElement: { style: {} },
@@ -46,7 +53,7 @@ async function setup() {
   }
   vi.stubGlobal("WebSocket", Socket);
   const configuration = {
-    platform: "ios" as const,
+    platform,
     deviceId: "fixture-device",
     access: {
       httpBase: "https://device.test",
@@ -80,6 +87,30 @@ afterEach(() => {
   stop();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it("forwards Android editing shortcuts and browser clipboard text through the native WebView", async () => {
+  const { elements, sockets } = await setup("android");
+  const frame = elements.find((element) => element.attributes.get("role") === "application")!;
+  const key = (value: string) =>
+    Object.assign(new Event("keydown", { cancelable: true }), { key: value, ctrlKey: true });
+  const selectAll = key("a");
+  frame.dispatchEvent(selectAll);
+  expect(selectAll.defaultPrevented).toBe(true);
+  const paste = key("v");
+  frame.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(false);
+  frame.dispatchEvent(
+    Object.assign(new Event("paste", { cancelable: true }), {
+      clipboardData: { getData: () => "Clipboard text" },
+    }),
+  );
+  expect(
+    sockets[0]!.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+  ).toEqual([
+    { type: "key", keycode: 29, metaState: 0x1000 },
+    { type: "text", text: "Clipboard text" },
+  ]);
 });
 
 it("bridges shared first-frame readiness, image failure, and a successful fresh attempt to native", async () => {

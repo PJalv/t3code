@@ -273,6 +273,8 @@ export interface DeviceStreamClient {
   /** Normalized 0..1 coordinates in the displayed frame. */
   readonly sendTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
   readonly sendKey: (event: KeyboardEvent, phase: "down" | "up") => void;
+  /** Android text injection; iOS uses hardware key events instead. */
+  readonly sendText: (text: string) => void;
   readonly pressButton: (button: DeviceHardwareButton) => void;
   readonly rotate: () => void;
   readonly setOrientation: (orientation: DeviceScreenSize["orientation"]) => void;
@@ -364,6 +366,7 @@ export function createDeviceStreamClient(
   const retryTimers = new Map<"video" | "input", ReturnType<typeof setTimeout>>();
   let primeController: AbortController | null = null;
   let videoDecoder: VideoDecoder | null = null;
+  let awaitingSessionAck = false;
   let timestamp = 0;
   let awaitingKeyframe = true;
   let screen: DeviceScreenSize | null = null;
@@ -603,10 +606,16 @@ export function createDeviceStreamClient(
     }
   };
 
-  const requestKeyframe = () => {
-    if (platform === "android" && socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "reset-video", ack: false }));
-    }
+  // serve-emu re-announces video-session for every reset-video request.
+  let lastKeyframeRequestAt = -Infinity;
+  const KEYFRAME_REQUEST_INTERVAL_MS = 1_000;
+  const requestKeyframe = (force = false) => {
+    if (platform !== "android" || socket?.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (!force && now - lastKeyframeRequestAt < KEYFRAME_REQUEST_INTERVAL_MS) return;
+    lastKeyframeRequestAt = now;
+    awaitingSessionAck = true;
+    socket.send(JSON.stringify({ type: "reset-video", ack: false }));
   };
 
   const scheduleRetry = (channel: "video" | "input", run: () => void) => {
@@ -871,6 +880,8 @@ export function createDeviceStreamClient(
   // Android: one socket for video and input.
   const connectAndroid = () => {
     if (stopped) return;
+    awaitingSessionAck = false;
+    lastKeyframeRequestAt = -Infinity;
     const ws = new WebSocket(wsUrl(`/ws?device=${device}&frame-meta=1`));
     ws.binaryType = "arraybuffer";
     socket = ws;
@@ -882,13 +893,16 @@ export function createDeviceStreamClient(
     ws.onmessage = (event) => {
       if (stopped || socket !== ws) return;
       if (typeof event.data === "string") {
-        // The encoder restarts at a new size when the device rotates; the
-        // next keyframe carries a fresh SPS, so the decoder is rebuilt from it.
         if (isVideoSessionMessage(event.data)) {
+          if (awaitingSessionAck) {
+            awaitingSessionAck = false;
+            return;
+          }
+          // An unsolicited new session signals an encoder restart, typically rotation.
           closeDecoder();
           configuring = false;
           connecting();
-          requestKeyframe();
+          requestKeyframe(true);
         }
         return;
       }
@@ -909,7 +923,11 @@ export function createDeviceStreamClient(
             if (!isCurrent() || epoch !== decoderEpoch) return;
             configuring = false;
             awaitingKeyframe = true;
-            if (configured) requestKeyframe();
+            // Configure from this SPS-bearing keyframe, then decode it rather than discarding it.
+            if (configured) {
+              decode(isKey, packet.data, packet.timestamp);
+              if (awaitingKeyframe) requestKeyframe();
+            }
           },
         );
         return;
@@ -1048,11 +1066,39 @@ export function createDeviceStreamClient(
       }
       if (phase !== "down") return;
       if (event.key === "Escape") return send(JSON.stringify({ type: "back" }));
-      const keycode = ANDROID_KEYCODE_BY_KEY[event.key];
-      if (keycode !== undefined) return send(JSON.stringify({ type: "key", keycode }));
-      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
+      const modified = event.ctrlKey || event.altKey || event.metaKey;
+      const letter = event.key.toLowerCase();
+      const keycode =
+        ANDROID_KEYCODE_BY_KEY[event.key] ??
+        (modified && /^[a-z]$/.test(letter) ? 29 + letter.charCodeAt(0) - 97 : undefined);
+      if (keycode !== undefined) {
+        const metaState =
+          (event.shiftKey ? 0x1 : 0) |
+          (event.altKey ? 0x2 : 0) |
+          (event.ctrlKey ? 0x1000 : 0) |
+          (event.metaKey ? 0x10000 : 0);
+        return send(JSON.stringify({ type: "key", keycode, ...(metaState ? { metaState } : {}) }));
+      }
+      if (event.key.length === 1 && !modified) {
         send(JSON.stringify({ type: "text", text: event.key }));
       }
+    },
+    sendText: (text) => {
+      if (platform !== "android") return;
+      // serve-emu truncates each text message at 300 UTF-8 bytes.
+      let chunk = "";
+      let bytes = 0;
+      for (const character of text) {
+        const size = encoder.encode(character).length;
+        if (bytes + size > 300) {
+          send(JSON.stringify({ type: "text", text: chunk }));
+          chunk = "";
+          bytes = 0;
+        }
+        chunk += character;
+        bytes += size;
+      }
+      if (chunk) send(JSON.stringify({ type: "text", text: chunk }));
     },
     pressButton: (button) => {
       if (platform === "ios") {
