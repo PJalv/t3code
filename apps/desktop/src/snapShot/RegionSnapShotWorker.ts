@@ -1,13 +1,14 @@
 // Windows region capture. Runs in a forked Node-mode child so the native
 // screenshot call cannot crash or stall the main process. One request per child.
 import type { RegionSnapShotRequest, RegionSnapShotResult } from "./RegionSnapShot.ts";
+import { sendWorkerMessage } from "./WorkerIpc.ts";
 
 process.once("disconnect", () => process.exit(0));
 
 async function capture() {
   const imported = await import("@crowecawcaw/xa11y");
   const xa11y = (imported as unknown as { readonly default?: typeof imported }).default ?? imported;
-  process.send?.("ready");
+  sendWorkerMessage("ready");
   const request = await new Promise<RegionSnapShotRequest>((resolve) => {
     process.once("message", resolve);
   });
@@ -18,11 +19,11 @@ async function capture() {
     height: shot.height,
     png: shot.toPng().toString("base64"),
   };
-  process.send?.(result);
+  sendWorkerMessage(result);
 }
 
 void capture().catch((error: unknown) =>
-  process.send?.({
+  sendWorkerMessage({
     type: "error",
     message: error instanceof Error ? error.message : "Windows window capture failed.",
   } satisfies RegionSnapShotResult),
