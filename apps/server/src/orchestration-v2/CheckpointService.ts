@@ -273,8 +273,11 @@ export const layer: Layer.Layer<
     const withWorkspaceLock = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap(getWorkspaceSemaphore(cwd), (semaphore) => semaphore.withPermits(1)(effect));
 
+    // Keep run completion and provider-native diffs working without writing workspace snapshots.
     const isGitCheckpointable = (cwd: string) =>
-      checkpointStore.isGitRepository(cwd).pipe(Effect.orElseSucceed(() => false));
+      process.env.T3_DISABLE_CHECKPOINTS === "1"
+        ? Effect.succeed(false)
+        : checkpointStore.isGitRepository(cwd).pipe(Effect.orElseSucceed(() => false));
 
     const ensureScope: CheckpointServiceV2Shape["ensureScope"] = (scope) => Effect.succeed(scope);
 

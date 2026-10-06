@@ -17,6 +17,63 @@ import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 
+it.effect("disables baseline and completion snapshots without invoking Git", () =>
+  Effect.gen(function* () {
+    const previous = process.env.T3_DISABLE_CHECKPOINTS;
+    process.env.T3_DISABLE_CHECKPOINTS = "1";
+    try {
+      const scope: OrchestrationV2CheckpointScope = {
+        id: CheckpointScopeId.make("scope:disabled"),
+        threadId: ThreadId.make("thread:disabled"),
+        runId: RunId.make("run:disabled"),
+        nodeId: NodeId.make("node:disabled"),
+        parentScopeId: null,
+        providerThreadId: ProviderThreadId.make("provider:disabled"),
+        kind: "root_run",
+        ordinalWithinParent: 0,
+        advancesAppRunCount: true,
+        cwd: "/repo",
+        createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+      };
+      const testLayer = CheckpointService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            Layer.mock(CheckpointStore.CheckpointStore)({
+              isGitRepository: () => Effect.die("disabled checkpoints must not invoke Git"),
+              hasCheckpointRef: () => Effect.die("disabled checkpoints must not look up refs"),
+              captureCheckpoint: () => Effect.die("disabled checkpoints must not capture"),
+              diffCheckpoints: () => Effect.die("disabled checkpoints must not diff"),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+        yield* checkpoints.captureBaseline({ scope, ordinalWithinScope: 0 });
+        const baseline = yield* checkpoints.materializeBaselineCheckpoint({
+          scope,
+          ordinalWithinScope: 0,
+        });
+        const completion = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 1,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 1,
+          capturedAt: scope.createdAt,
+        });
+        assert.equal(baseline.status, "missing");
+        assert.equal(completion.status, "missing");
+        assert.deepEqual(completion.files, []);
+      }).pipe(Effect.provide(testLayer));
+    } finally {
+      if (previous === undefined) delete process.env.T3_DISABLE_CHECKPOINTS;
+      else process.env.T3_DISABLE_CHECKPOINTS = previous;
+    }
+  }),
+);
+
 it.effect.each([false, true, "interrupt"] as const)(
   "materializes baseline, lookup fails=%s",
   (lookupFails) => {
