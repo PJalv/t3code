@@ -236,6 +236,8 @@ function makeCheckpoint(input: {
   };
 }
 
+const checkpointsDisabled = () => process.env.T3_DISABLE_CHECKPOINTS === "1";
+
 export const layer: Layer.Layer<
   CheckpointServiceV2,
   never,
@@ -276,23 +278,25 @@ export const layer: Layer.Layer<
 
     // A failed probe is an operational error, not proof that the workspace has no repository.
     const probeRepository = (scope: OrchestrationV2CheckpointScope) =>
-      checkpointStore.isGitRepository(scope.cwd).pipe(
-        Effect.map((isRepository) =>
-          isRepository ? ("repository" as const) : ("missing" as const),
-        ),
-        Effect.catch((cause) =>
-          Effect.logWarning("orchestration V2 checkpoint repository probe failed", {
-            scopeId: scope.id,
-            cause: String(cause),
-          }).pipe(Effect.as("error" as const)),
-        ),
-      );
+      checkpointsDisabled()
+        ? Effect.succeed("missing" as const)
+        : checkpointStore.isGitRepository(scope.cwd).pipe(
+            Effect.map((isRepository) =>
+              isRepository ? ("repository" as const) : ("missing" as const),
+            ),
+            Effect.catch((cause) =>
+              Effect.logWarning("orchestration V2 checkpoint repository probe failed", {
+                scopeId: scope.id,
+                cause: String(cause),
+              }).pipe(Effect.as("error" as const)),
+            ),
+          );
 
     const captureBaseline: CheckpointServiceV2Shape["captureBaseline"] = (input) =>
       withWorkspaceLock(
         input.scope.cwd,
         Effect.gen(function* () {
-          if (!(yield* checkpointStore.isGitRepository(input.scope.cwd))) {
+          if (checkpointsDisabled() || !(yield* checkpointStore.isGitRepository(input.scope.cwd))) {
             return;
           }
 

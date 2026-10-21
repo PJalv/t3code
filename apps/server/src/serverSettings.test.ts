@@ -221,6 +221,45 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       }),
     ).pipe(Effect.provide(layerServerSettings())),
   );
+  it.effect("migrates saved custom ACP commands to native local configuration", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("acp_maki");
+      yield* fs.writeFileString(
+        config.settingsPath,
+        JSON.stringify({
+          providerInstances: {
+            [instanceId]: {
+              driver: "acpRegistry",
+              environment: [{ name: "PROFILE", value: "original", sensitive: false }],
+              config: {
+                launchMode: "custom",
+                commandPath: "nix",
+                args: ["run", "maki", "--", "acp"],
+                env: { PROFILE: "custom" },
+              },
+            },
+          },
+        }),
+      );
+      const migrated = (yield* service.getSettings).providerInstances[instanceId]!;
+      assert.deepEqual(migrated.config, {
+        source: "local",
+        commandPath: "nix",
+        commandArgs: ["run", "maki", "--", "acp"],
+      });
+      assert.deepEqual(migrated.environment, [
+        { name: "PROFILE", value: "custom", sensitive: false },
+      ]);
+      yield* service.updateSettings({});
+      const persisted = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.deepEqual(persisted.providerInstances[instanceId]?.config, migrated.config);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
   it.effect("migrates saved token delivery to paragraph buffering without resetting settings", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
