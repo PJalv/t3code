@@ -16,13 +16,15 @@ vi.mock(import("./DevicePhoneViewport"), () => ({
 import { DeviceStreamView } from "./DeviceStreamView";
 
 const access = { httpBase: "http://test", wsBase: "ws://test", query: {}, credentials: true };
-function setup() {
+function setup(platform: "ios" | "android" = "ios") {
   const registry = AtomRegistry.make();
   const touches: unknown[] = [];
+  const messages: unknown[] = [];
   const image = vi.spyOn(HTMLImageElement.prototype, "src", "set").mockImplementation(() => {});
   // Select MJPEG without starting a WebCodecs decoder. Input uses the real stream client.
-  const decoder = stubGlobal("VideoDecoder", undefined);
-  Reflect.deleteProperty(globalThis, "VideoDecoder");
+  const decoder = stubGlobal("VideoDecoder", platform === "android" ? vi.fn() : undefined);
+  const chunk = stubGlobal("EncodedVideoChunk", platform === "android" ? vi.fn() : undefined);
+  if (platform === "ios") Reflect.deleteProperty(globalThis, "VideoDecoder");
   const fetch = stubGlobal("fetch", () => Promise.resolve(new Response("prime")));
   // The client opens its input socket only after the MJPEG prime resolves.
   type InputSocket = {
@@ -42,6 +44,7 @@ function setup() {
       }
       onmessage?: (event: { data: ArrayBuffer }) => void;
       send(message: string | Uint8Array) {
+        if (typeof message === "string") messages.push(JSON.parse(message));
         if (typeof message !== "string" && message[0] === 0x03) {
           touches.push(JSON.parse(new TextDecoder().decode(message.subarray(1))));
         }
@@ -52,7 +55,7 @@ function setup() {
   return {
     view: () => (
       <RegistryContext.Provider value={registry}>
-        <div style={{ width: 400, height: 800 }}>{view()}</div>
+        <div style={{ width: 400, height: 800 }}>{view(platform)}</div>
       </RegistryContext.Provider>
     ),
     [Symbol.dispose]() {
@@ -61,8 +64,10 @@ function setup() {
       socket[Symbol.dispose]();
       fetch[Symbol.dispose]();
       decoder[Symbol.dispose]();
+      chunk[Symbol.dispose]();
     },
     touches,
+    messages,
     async configure(inputUnavailable = false) {
       const json = new TextEncoder().encode(
         JSON.stringify({ width: 400, height: 800, orientation: "portrait", inputUnavailable }),
@@ -77,13 +82,13 @@ function setup() {
   };
 }
 
-function view() {
+function view(platform: "ios" | "android" = "ios") {
   return (
     <DeviceStreamView
       hostId="local"
       environmentId={EnvironmentId.make("test")}
       deviceId="test"
-      platform="ios"
+      platform={platform}
       visible
       allowPhoneView={false}
       renderControls={(controls) => (
@@ -118,6 +123,34 @@ function flatPointer(container: HTMLElement) {
     },
   };
 }
+
+it("forwards Android shortcuts and browser clipboard text", async () => {
+  using input = setup("android");
+  await using screen = await render(input.view(), options);
+  await act(() => input.configure());
+  const surface = screen.container.querySelector('[role="application"]')!;
+  const shortcut = (key: string) => {
+    const event = new KeyboardEvent("keydown", {
+      key,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    surface.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(shortcut("a")).toBe(true);
+  expect(shortcut("v")).toBe(false);
+  const clipboardData = new DataTransfer();
+  clipboardData.setData("text/plain", "Pasted text");
+  surface.dispatchEvent(
+    new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
+  );
+  expect(input.messages).toEqual([
+    { type: "key", keycode: 29, metaState: 0x1000 },
+    { type: "text", text: "Pasted text" },
+  ]);
+});
 
 it("keeps the first flat pointer active when a second finger moves and lifts", async () => {
   using input = setup();
