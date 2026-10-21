@@ -477,6 +477,28 @@ function markdownServerConfigFieldsEqual(
   );
 }
 
+const workspaceBasenamePathsAtom = Atom.family((key: string | null) =>
+  Atom.make((get) => {
+    const paths = new Map<string, string>();
+    if (key === null) return paths;
+    const [environmentId, cwd, names] = JSON.parse(key) as [EnvironmentId, string, string[]];
+    for (const name of names) {
+      const result = AsyncResult.getOrElse(
+        get(
+          projectEnvironment.searchEntries({
+            environmentId,
+            input: { cwd, query: name, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
+          }),
+        ),
+        () => null,
+      );
+      const match = result && pickWorkspaceLinkMatch(name, cwd, result.entries);
+      if (match) paths.set(name, match);
+    }
+    return paths;
+  }).pipe(Atom.withLabel("markdown-workspace-basename-paths")),
+);
+
 // Compare only markdown config fields to avoid rerendering replies on every provider status push.
 const markdownServerConfigFieldsAtom = Atom.family((environmentId: EnvironmentId | null) =>
   Atom.make((get) => {
@@ -893,6 +915,34 @@ function useChatMarkdownState({
     }
     return findAgentDirectoryMatch(workspaceRelativePath, agentRoots, searchRoot);
   };
+  const imagePaths = [...text.matchAll(/!\[[^\]]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/g)].map(
+    (match) => match[1] ?? match[2] ?? "",
+  );
+  const candidates = [
+    ...new Set(
+      [
+        ...[
+          ...markdownFileLinkMetaByHref.values(),
+          ...inlineCodeFileLinkMetaByText.values(),
+        ].flatMap((meta) => (meta.workspaceRelativePath ? [meta.workspaceRelativePath] : [])),
+        ...imagePaths,
+      ].filter(needsWorkspaceBasenameLookup),
+    ),
+  ];
+  const basenameKey =
+    cwd && environmentId !== null && readEnvironmentScope(environmentId, AuthFilesystemReadScope)
+      ? JSON.stringify([environmentId, cwd, candidates])
+      : null;
+  const currentBasenamePaths = useAtomValue(workspaceBasenamePathsAtom(basenameKey));
+  const resolveWorkspaceBasename = (path: string) =>
+    cwd && needsWorkspaceBasenameLookup(path) ? (currentBasenamePaths.get(path) ?? path) : path;
+  const resolvedFileLinkMeta = (meta: MarkdownFileLinkMeta) => {
+    const resolved = meta.workspaceRelativePath
+      ? currentBasenamePaths.get(meta.workspaceRelativePath)
+      : undefined;
+    return resolved && cwd ? (resolveMarkdownFileLinkMeta(resolved, cwd) ?? meta) : meta;
+  };
+
   const openFileInPanel = (fileLinkMeta: MarkdownFileLinkMeta, panelPath: string) => {
     if (!threadRef) return;
     const openAt = (path: string) =>
@@ -920,10 +970,11 @@ function useChatMarkdownState({
     })();
   };
   const fileLinkChip = (
-    fileLinkMeta: MarkdownFileLinkMeta,
+    fileLinkMetaInput: MarkdownFileLinkMeta,
     copyMarkdown: string,
     mediaSource?: string,
   ) => {
+    const fileLinkMeta = resolvedFileLinkMeta(fileLinkMetaInput);
     const resolveHostPath = () =>
       resolveMarkdownFileHostPath({
         meta: fileLinkMeta,
@@ -1056,6 +1107,7 @@ function useChatMarkdownState({
     skills,
     threadRef,
     updateThreadPullRequestLink,
+    resolveWorkspaceBasename,
   };
   return {
     componentState,
@@ -1577,6 +1629,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       renderContextReference,
       fileLinkChip,
       resolvedTheme,
+      resolveWorkspaceBasename,
     } = use(ChatMarkdownRendererContext);
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
@@ -1597,7 +1650,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle);
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
-    const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
+    const resolvedSrc =
+      cwd && needsWorkspaceBasenameLookup(classifiedSrc)
+        ? resolveWorkspaceBasename(classifiedSrc)
+        : classifiedSrc;
+    const imageSource = classifyMarkdownImageSource(resolvedSrc, imageBaseDir ?? cwd);
     const mediaKind = mediaKindFromPath(classifiedSrc);
     if (mediaKind === "audio") {
       const filePath = imageSource._tag === "WorkspaceFile" ? imageSource.path : null;
@@ -1634,6 +1691,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       if (fileLinkMeta) return fileLinkChip(fileLinkMeta, copyMarkdown, srcString);
     }
     const kind = mediaKind ?? "image";
+
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const hostMediaUrl =
       directUri === null
