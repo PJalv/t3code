@@ -11,7 +11,7 @@ import { isInSideChatPane } from "../../lib/sideChatPane";
 import { getTerminalFocusOwner, type TerminalFocusOwner } from "../../lib/terminalFocus";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
-import { shouldTypeToFocusComposer } from "./composerFocusRedirect";
+import { eventPathContainsSelector, shouldTypeToFocusComposer } from "./composerFocusRedirect";
 import { composerShortcutCommands } from "./composerShortcuts";
 
 /** Returning false lets the key event through untouched. */
@@ -72,6 +72,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       return;
     }
     if (!input.enabled || isCommandPaletteOpen()) return;
+    if (eventPathContainsSelector(event, '[role="application"]')) return;
     const inSideChatPane = isInSideChatPane(event.target);
     const terminalFocusOwner = getTerminalFocusOwner();
     if (event.defaultPrevented && terminalFocusOwner === null) return;
