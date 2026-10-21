@@ -9,6 +9,7 @@ import {
 import {
   AuthProvidersManageScope,
   isManagedDriverAllowed,
+  ProviderDriverKind,
   type ProviderAuthResponse,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -32,6 +33,7 @@ import { useEnvironmentsWithScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
+import { CustomAcpCommandEditor } from "./components/CustomAcpCommandEditor";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import { AddClaudeAccount, ClaudeAccount } from "./ClaudeAccounts";
@@ -104,6 +106,12 @@ function EnvironmentProviders({
   );
   return (
     <>
+      {isManagedDriverAllowed(
+        environment.serverConfig.managedPolicy,
+        ProviderDriverKind.make("acpRegistry"),
+      ) ? (
+        <CustomAcpCommandEditor environment={environment} />
+      ) : null}
       {accounts.map((provider, index) => (
         <ProviderAccount
           key={provider.instanceId}
