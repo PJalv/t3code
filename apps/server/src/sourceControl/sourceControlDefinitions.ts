@@ -5,6 +5,7 @@ import { builtInSourceControlDefinitions } from "@t3tools/source-control-definit
 import * as ForgejoDriver from "@t3tools/source-control-forgejo/server/driver";
 import * as GitCafeDriver from "@t3tools/source-control-gitcafe/server/driver";
 import * as GitHubDriver from "@t3tools/source-control-github/server/driver";
+import * as GerritDriver from "@t3tools/source-control-gerrit/server/driver";
 import * as GitLabDriver from "@t3tools/source-control-gitlab/server/driver";
 import * as TanStackSourceDriver from "@t3tools/source-control-tanstack-source/server/driver";
 
@@ -19,6 +20,7 @@ export const BUILT_IN_SOURCE_CONTROL_DRIVER_LIST = [
   GitCafeDriver.driver,
   TanStackSourceDriver.driver,
   ForgejoDriver.driver,
+  GerritDriver.driver,
   BitbucketDriver.driver,
   AzureDevOpsDriver.driver,
 ];

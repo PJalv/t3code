@@ -1,5 +1,10 @@
-import type { CodeViewItem, File as FileInstance, FileDiff, PostRenderPhase } from "@pierre/diffs";
-import type { FileOptions } from "@pierre/diffs/react";
+import type {
+  CodeViewItem,
+  File as FileInstance,
+  FileDiff,
+  PostRenderPhase,
+} from "@pierre/diffs";
+import { type CodeViewHandle, type FileOptions } from "@pierre/diffs/react";
 import { type ClipboardEvent, useEffect, useRef, useState } from "react";
 
 import { StyledDiffCodeView } from "~/components/diffs/StyledDiffCodeView";
@@ -22,12 +27,29 @@ export default function ReadOnlySourcePreview(props: {
   readonly name: string;
   readonly text: string;
   readonly cacheKey?: string;
+  readonly initialLine?: number | null;
   readonly onPostRender?: FileOptions<unknown, undefined>["onPostRender"];
   /** A preview's own wrap toggle; omitted follows the word wrap setting. */
   readonly wordWrap?: boolean;
   /** Files with more lines than this render without highlighting; omitted keeps Pierre's limit. */
   readonly tokenizeMaxLength?: number;
 }) {
+  if (props.initialLine != null)
+    return (
+      <SourcePreviewAtLine
+        key={props.cacheKey ?? props.text}
+        name={props.name}
+        text={props.text}
+        cacheKey={props.cacheKey}
+        line={props.initialLine}
+      />
+    );
+  return <DefaultSourcePreview {...props} />;
+}
+
+function DefaultSourcePreview(
+  props: Parameters<typeof ReadOnlySourcePreview>[0],
+) {
   const resolvedTheme = useRenderedAppearance();
   const defaultWordWrap = useClientSettings((settings) => settings.wordWrap);
   const wordWrap = props.wordWrap ?? defaultWordWrap;
@@ -41,7 +63,10 @@ export default function ReadOnlySourcePreview(props: {
     cacheKey: props.cacheKey,
     version: 0,
   });
-  if (sourceRevision.text !== props.text || sourceRevision.cacheKey !== props.cacheKey) {
+  if (
+    sourceRevision.text !== props.text ||
+    sourceRevision.cacheKey !== props.cacheKey
+  ) {
     setSourceRevision({
       text: props.text,
       cacheKey: props.cacheKey,
@@ -50,7 +75,8 @@ export default function ReadOnlySourcePreview(props: {
   }
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the document's selection, which only it reports
   useEffect(() => {
-    const root = () => wrapper.current?.querySelector("diffs-container")?.shadowRoot;
+    const root = () =>
+      wrapper.current?.querySelector("diffs-container")?.shadowRoot;
     const sync = () => {
       const shadowRoot = root();
       if (shadowRoot) selection.sync(shadowRoot, text);
@@ -84,8 +110,10 @@ export default function ReadOnlySourcePreview(props: {
     instance: FileInstance<unknown, undefined> | FileDiff<unknown, undefined>,
     phase: PostRenderPhase,
   ) => {
-    if (phase !== "unmount" && node.shadowRoot) selection.render(node.shadowRoot, text);
-    if (onPostRender && "file" in instance) return onPostRender(node, instance, phase);
+    if (phase !== "unmount" && node.shadowRoot)
+      selection.render(node.shadowRoot, text);
+    if (onPostRender && "file" in instance)
+      return onPostRender(node, instance, phase);
   };
   const items: CodeViewItem<unknown>[] = [
     {
@@ -105,12 +133,17 @@ export default function ReadOnlySourcePreview(props: {
       className="contents"
       onCopy={copySelection}
       onPointerDown={(event) => {
-        if (event.target instanceof Element && event.target.closest("[data-search-panel]")) return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest("[data-search-panel]")
+        )
+          return;
         selection.press(event.button !== 0 || event.shiftKey);
       }}
       // Scrolling unmounts rows, and a selection made in the same task has not been reported yet.
       onScrollCapture={(event) => {
-        const root = event.currentTarget.querySelector("diffs-container")?.shadowRoot;
+        const root =
+          event.currentTarget.querySelector("diffs-container")?.shadowRoot;
         if (root) selection.sync(root, text);
       }}
     >
@@ -133,5 +166,61 @@ export default function ReadOnlySourcePreview(props: {
         }}
       />
     </div>
+  );
+}
+
+function SourcePreviewAtLine(props: {
+  readonly name: string;
+  readonly text: string;
+  readonly cacheKey: string | undefined;
+  readonly line: number;
+}) {
+  const theme = useRenderedAppearance();
+  const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const reveal = (viewer: CodeViewHandle<undefined, undefined> | null) => {
+    const item = viewer?.getItem(props.name);
+    if (
+      item?.type !== "file" ||
+      item.file.contents !== props.text ||
+      item.file.cacheKey !== props.cacheKey
+    )
+      return;
+    viewer?.setSelectedLines({
+      id: props.name,
+      range: { start: props.line, end: props.line },
+    });
+    viewer?.scrollTo({
+      type: "line",
+      id: props.name,
+      lineNumber: props.line,
+      align: "center",
+      behavior: "instant",
+    });
+  };
+  const items = [
+    {
+      id: props.name,
+      type: "file" as const,
+      file: {
+        name: props.name,
+        contents: props.text,
+        ...(props.cacheKey ? { cacheKey: props.cacheKey } : {}),
+      },
+    },
+  ];
+  return (
+    <StyledDiffCodeView
+      viewerRef={reveal}
+      items={items}
+      className="min-h-0 flex-1 overflow-auto"
+      options={{
+        disableFileHeader: true,
+        overflow: wordWrap ? "wrap" : "scroll",
+        theme: resolveDiffThemeName(theme),
+        themeType: theme,
+        preferredHighlighter: PREFERRED_HIGHLIGHTER,
+      }}
+      unsafeCSSExtra={READ_ONLY_SOURCE_UNSAFE_CSS}
+    />
   );
 }

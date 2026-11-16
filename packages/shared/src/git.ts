@@ -171,18 +171,19 @@ export function parseGitRemoteRepository(
       const repositorySegments = dropSuffix(url.pathname.replace(/\/+$/, ""))
         .split("/")
         .filter((segment) => segment.length > 0);
-      if (url.hostname && repositorySegments.length > 1) {
+      if (url.hostname && repositorySegments.length > 0) {
         return { host: url.hostname, path: canonicalRepositoryPath(repositorySegments.join("/")) };
       }
     } catch {
       return null;
     }
+    return null;
   }
 
   // A userless one-letter prefix is a Windows drive, not an SCP host.
   const scpStyleHostAndPath = /^[a-z]:/i.test(normalized)
     ? null
-    : /^(?:[a-zA-Z0-9._-]+@)?(\[[0-9a-f:.]+\]|[^@:/\\\s[\]]+):\/?([^/\s]+(?:\/[^/\s]+)+)$/i.exec(
+    : /^(?:[a-zA-Z0-9._-]+@)?(\[[0-9a-f:.]+\]|[^@:/\\\s[\]]+):\/?([^/\s]+(?:\/[^/\s]+)*)$/i.exec(
         normalized,
       );
   const scpHost = scpStyleHostAndPath?.[1];

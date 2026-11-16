@@ -6,6 +6,7 @@ import {
   buildMenuItems,
   type DefaultBranchConfirmableAction,
   hasUsableGitMenuContent,
+  isGerritUploadAvailable,
   requiresDefaultBranchConfirmation,
   resolveChangesTotals,
   resolveDefaultBranchActionDialogCopy,
@@ -40,6 +41,119 @@ function pushDisabledReason(gitStatus: VcsStatusResult): string | null {
   assert.isDefined(item);
   return getMenuActionDisabledReason({ item, gitStatus, isBusy: false, hasPrimaryRemote: true });
 }
+describe("Gerrit repository actions", () => {
+  const provider = {
+    kind: SourceControlProviderKind.make("gerrit"),
+    name: "Gerrit",
+    baseUrl: "https://review.example/",
+  };
+
+  it("requires a Gerrit checkout and permission to offer upload", () => {
+    const gerrit = status({ sourceControlProvider: provider });
+    assert.isTrue(isGerritUploadAvailable(gerrit, true));
+    assert.isFalse(isGerritUploadAvailable(gerrit, false));
+    assert.isFalse(isGerritUploadAvailable(status(), true));
+    assert.isFalse(isGerritUploadAvailable(null, true));
+  });
+
+  it("replaces PR creation with commit upload and never offers an ordinary push", () => {
+    const items = buildMenuItems(
+      status({ sourceControlProvider: provider, hasWorkingTreeChanges: true, aheadCount: 3 }),
+      false,
+    );
+    assert.deepEqual(
+      items.map((item) => item.id),
+      ["commit", "deliver"],
+    );
+    const deliver = items.find((item) => item.id === "deliver");
+    assert.deepInclude(deliver, {
+      label: "Upload commit for review",
+      icon: "upload",
+      kind: "open_dialog",
+      dialogAction: "gerrit_delivery",
+      disabled: false,
+    });
+    assert.notInclude(
+      items.map((item) => item.id),
+      "push",
+    );
+    assert.notInclude(
+      items.map((item) => item.id),
+      "pr",
+    );
+  });
+
+  it("routes a dirty Gerrit checkout to the delivery dialog, not a commit", () => {
+    assert.deepEqual(
+      resolveQuickAction(
+        status({ hasWorkingTreeChanges: true, sourceControlProvider: provider }),
+        false,
+      ),
+      {
+        label: "Upload commit for review",
+        disabled: false,
+        kind: "open_gerrit_delivery",
+      },
+    );
+  });
+
+  it.each([true, false])(
+    "opens delivery for a clean Gerrit checkout with upstream=%s",
+    (hasUpstream) => {
+      const quick = resolveQuickAction(
+        status({ aheadCount: 2, hasUpstream, sourceControlProvider: provider }),
+        false,
+      );
+      assert.deepInclude(quick, { kind: "open_gerrit_delivery", disabled: false });
+      assert.equal(quick.label, "Upload commit for review");
+    },
+  );
+
+  it("keeps GitHub delivery on GitHub even when a Gerrit review is attached", () => {
+    const github = { ...provider, kind: SourceControlProviderKind.make("github"), name: "GitHub" };
+    const quick = resolveQuickAction(
+      status({
+        hasWorkingTreeChanges: true,
+        sourceControlProvider: github,
+        pr: {
+          number: 9,
+          title: "Open PR",
+          url: "https://example.com/pr/9",
+          baseRef: "main",
+          headRef: "feature/test",
+          state: "open",
+        },
+      }),
+      false,
+    );
+    assert.deepInclude(quick, { kind: "run_action", action: "commit_push" });
+    assert.notEqual(quick.kind, "open_gerrit_delivery");
+  });
+
+  it("offers Gerrit delivery in the menu when the worktree is clean", () => {
+    const quick = resolveQuickAction(
+      status({ sourceControlProvider: provider, aheadOfDefaultCount: 3 }),
+      false,
+    );
+    assert.deepInclude(quick, { kind: "open_gerrit_delivery", disabled: false });
+    const items = buildMenuItems(status({ sourceControlProvider: provider }), false);
+    assert.deepInclude(
+      items.find((item) => item.id === "deliver"),
+      { disabled: false },
+    );
+  });
+
+  it("routes a dirty GitHub checkout to its own PR flow when no review is attached", () => {
+    const github = { ...provider, kind: SourceControlProviderKind.make("github"), name: "GitHub" };
+    assert.deepInclude(
+      resolveQuickAction(
+        status({ hasWorkingTreeChanges: true, sourceControlProvider: github }),
+        false,
+      ),
+      { kind: "run_action", action: "commit_push_pr" },
+    );
+  });
+});
 
 describe("when: ref is clean, ahead, and has an open PR", () => {
   it("resolveQuickAction prefers push", () => {

@@ -271,6 +271,19 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
+  [WS_METHODS.gerritConnections]: "gerrit",
+  [WS_METHODS.gerritSearchProjects]: "gerrit",
+  [WS_METHODS.gerritConfigure]: "gerrit",
+  [WS_METHODS.gerritTest]: "gerrit",
+  [WS_METHODS.gerritRemove]: "gerrit",
+  [WS_METHODS.gerritRemoveCredentials]: "gerrit",
+  [WS_METHODS.gerritSigningPassphrase]: "gerrit",
+  [WS_METHODS.gerritSetSigningPassphrase]: "gerrit",
+  [WS_METHODS.gerritDeliveryCheckout]: "gerrit",
+  [WS_METHODS.gerritHook]: "gerrit",
+  [WS_METHODS.gerritInstallHook]: "gerrit",
+  [WS_METHODS.gerritUploadCommit]: "gerrit",
+  [WS_METHODS.pullRequestsGerritCommand]: "pull-requests",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

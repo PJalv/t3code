@@ -268,7 +268,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const openThreadPullRequests = useOpenThreadPullRequests();
   const handleOpenThreadPullRequests = (
     thread: EnvironmentThreadShell,
-    pr: ThreadPrPresentation,
+    pr: ThreadPrPresentation | null,
   ) => {
     openSwipeableRef.current?.close();
     openThreadPullRequests(thread, pr);
