@@ -3,6 +3,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import * as Dialog from "../../components/ui/Dialog";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
+import { ProviderIcon } from "../../components/ProviderIcon";
 import { NavigationRow } from "../../components/ui/NavigationRow";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
@@ -58,6 +59,8 @@ import {
   CommandId,
   type EnvironmentId,
   type EnvironmentMachineKind,
+  type GerritProjectSearchResult,
+  GerritCloneSelection,
   ProjectId,
   resolveEnvironmentMachineKind,
   SourceControlProviderKind,
@@ -76,6 +79,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
 import { cn } from "../../lib/cn";
 import { m } from "../../i18n/messages";
@@ -103,6 +107,7 @@ import {
 } from "../../state/use-remote-environment-registry";
 import {
   chooserDraftKey,
+  gerritCloneDestination,
   isMissingCloneParentBrowseFailure,
   resolveAddProjectEnvironment,
 } from "./AddProjectScreen.logic";
@@ -148,6 +153,8 @@ function errorMessage(error: unknown): string {
     ? (errorDisplayMessage(error, m) ?? error.message)
     : m(msg("An error occurred."));
 }
+
+const isGerritCloneSelection = Schema.is(GerritCloneSelection);
 
 function stringParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -961,6 +968,10 @@ export function AddProjectRepositoryScreen(props: {
   const lookupRepositoryQuery = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
+  const searchGerritProjects = useAtomQueryRunner(sourceControlEnvironment.gerritSearchProjects, {
+    reportFailure: false,
+  });
+  const [gerritMatches, setGerritMatches] = useState<GerritProjectSearchResult | null>(null);
   const navigation = useNavigation();
   const environment = useEnvironmentFromParam(props.environmentId);
   const source = sourceFromParam(props.source);
@@ -999,6 +1010,31 @@ export function AddProjectRepositoryScreen(props: {
       return;
     }
 
+    if (provider === "gerrit") {
+      const result = await searchGerritProjects({
+        environmentId: environment.environmentId,
+        input: { query: repositoryInput.trim() },
+      });
+      if (AsyncResult.isFailure(result)) {
+        setError(errorMessage(Cause.squash(result.cause)));
+      } else {
+        setGerritMatches(result.value);
+        if (result.value.results.length === 1 && result.value.failures.length === 0) {
+          const match = result.value.results[0]!;
+          navigation.dispatch(
+            StackActions.push("AddProjectDestination", {
+              environmentId: environment.environmentId,
+              source,
+              ...gerritCloneDestination(match),
+            }),
+          );
+          setGerritMatches(null);
+        }
+      }
+      setIsSubmitting(false);
+      return;
+    }
+
     const result = await lookupRepositoryQuery({
       environmentId: environment.environmentId,
       input: {
@@ -1033,7 +1069,10 @@ export function AddProjectRepositoryScreen(props: {
           <TextInput
             className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
             value={repositoryInput}
-            onChangeText={setRepositoryInput}
+            onChangeText={(value) => {
+              setRepositoryInput(value);
+              setGerritMatches(null);
+            }}
             autoCapitalize="none"
             autoCorrect={false}
             placeholder={
@@ -1044,6 +1083,48 @@ export function AddProjectRepositoryScreen(props: {
             returnKeyType="next"
             onSubmitEditing={() => void lookupRepository()}
           />
+          {gerritMatches ? (
+            <View className="gap-2">
+              {gerritMatches.results.map((match) => (
+                <Pressable
+                  key={`${match.installation}\0${match.project}`}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    navigation.dispatch(
+                      StackActions.push("AddProjectDestination", {
+                        environmentId: environment.environmentId,
+                        source,
+                        ...gerritCloneDestination(match),
+                      }),
+                    );
+                    setGerritMatches(null);
+                  }}
+                  className="rounded-xl border border-border p-3"
+                >
+                  <View className="flex-row items-center gap-2">
+                    <ProviderIcon provider="gerrit" size={16} />
+                    <View className="flex-1">
+                      <Text className="text-sm font-t3-bold">{match.project}</Text>
+                      <Text className="text-xs text-foreground-muted">{match.installation}</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+              {gerritMatches.configuredInstallations === 0 ? (
+                <Text>No Gerrit installations are configured.</Text>
+              ) : gerritMatches.results.length === 0 && gerritMatches.failures.length === 0 ? (
+                <Text>No matching Gerrit projects.</Text>
+              ) : null}
+              {gerritMatches.failures.map((failure) => (
+                <Text key={failure.installation} className="text-xs text-destructive">
+                  {failure.installation}: unavailable: {failure.detail}
+                </Text>
+              ))}
+              {gerritMatches.results.length === 0 && gerritMatches.failures.length > 0 ? (
+                <Text>No successful installation returned a match.</Text>
+              ) : null}
+            </View>
+          ) : null}
           <PrimaryActionButton
             label={source === "url" ? gt("Continue") : gt("Lookup repository")}
             disabled={isSubmitting || repositoryInput.trim().length === 0}
@@ -1546,6 +1627,8 @@ export function AddProjectDestinationScreen(props: {
   readonly remoteUrl?: string | string[];
   readonly repositoryTitle?: string | string[];
   readonly repositoryName?: string | string[];
+  readonly gerritInstallation?: string | string[];
+  readonly gerritProject?: string | string[];
   readonly prompt?: string | string[];
 }) {
   const openNewTaskDraft = useOpenNewTaskDraft();
@@ -1568,6 +1651,12 @@ export function AddProjectDestinationScreen(props: {
   );
   const canCloneProject = canWriteSourceControl && canCreateProject;
   const remoteUrl = stringParam(props.remoteUrl);
+  const installation = stringParam(props.gerritInstallation);
+  const project = stringParam(props.gerritProject);
+  const selection = { installation, project };
+  const hasSelection = installation !== null || project !== null;
+  const gerrit = isGerritCloneSelection(selection) ? selection : null;
+  const invalidSelection = hasSelection && gerrit === null;
   const repositoryTitle = stringParam(props.repositoryTitle);
   const prompt = stringParam(props.prompt);
   const repositoryName = stringParam(props.repositoryName)?.trim() ?? "";
@@ -1589,6 +1678,7 @@ export function AddProjectDestinationScreen(props: {
       !readEnvironmentScope(environment.environmentId, AuthSourceControlWriteScope) ||
       !readEnvironmentScope(environment.environmentId, AuthOrchestrationOperateScope) ||
       !remoteUrl ||
+      invalidSelection ||
       isBrowseNavigating ||
       isSubmitting
     ) {
@@ -1627,6 +1717,7 @@ export function AddProjectDestinationScreen(props: {
         title,
         createdAt: new Date().toISOString(),
         remoteUrl,
+        ...(gerrit ? { gerrit } : {}),
         destinationPath: resolved.path,
       },
     });
@@ -1672,6 +1763,7 @@ export function AddProjectDestinationScreen(props: {
   return (
     <AddProjectShell title={gt("Clone destination")}>
       {error ? <ErrorBanner message={error} /> : null}
+      {invalidSelection ? <ErrorBanner message="The selected Gerrit project is invalid." /> : null}
       {repositoryTitle ? (
         <View className="rounded-[24px] bg-grouped-card px-4 py-3">
           <Text className="text-base font-t3-bold">{repositoryTitle}</Text>
@@ -1685,7 +1777,13 @@ export function AddProjectDestinationScreen(props: {
           <ProjectPathInput value={pathInput} onChangeText={setPathInput} onSubmit={submitPath} />
           <PrimaryActionButton
             label={gt("Clone project")}
-            disabled={!canCloneProject || isBrowseNavigating || isSubmitting || !remoteUrl}
+            disabled={
+              !canCloneProject ||
+              isBrowseNavigating ||
+              isSubmitting ||
+              !remoteUrl ||
+              invalidSelection
+            }
             onPress={submitPath}
             loading={isSubmitting}
           />

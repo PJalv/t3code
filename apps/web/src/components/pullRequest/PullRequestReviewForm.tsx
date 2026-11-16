@@ -1,4 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentQuery } from "~/state/query";
+import { GerritVotePicker } from "./PullRequestGerritSummary";
+import { capitalizeTerm } from "@t3tools/client-runtime/source-control-clients";
 import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@t3tools/contracts";
 import { CheckIcon, MessageSquareIcon, XCircleIcon } from "lucide-react";
 import { msg, useGT, useMessages } from "gt-react";
@@ -93,6 +97,17 @@ export function PullRequestReviewForm({
   const gt = useGT();
   const resolve = useMessages();
   const [requestedVerdict, setRequestedVerdict] = useState<PullRequestReviewVerdict>("comment");
+  const [voteState, setVoteState] = useState<{ key: string; votes: Record<string, string> }>({
+    key: "",
+    votes: {},
+  });
+  const referenceKey = `${environmentId}:${reference.projectId}:${reference.host ?? ""}:${reference.repository}:${reference.number}`;
+  const votes = voteState.key === referenceKey ? voteState.votes : {};
+  const detail = useEnvironmentQuery(
+    pullRequestEnvironment.detail({ environmentId, input: reference }),
+  ).data;
+  const canVote = useAtomValue(pullRequestEnvironment.gerritCommand.permissionAtom(environmentId));
+  const setVotes = useAtomCommand(pullRequestEnvironment.gerritCommand, { reportFailure: false });
   const comments = usePendingReviewComments(reference);
   const reviewKey = pullRequestReviewKey(reference);
   const body = usePullRequestReviewStore((store) => store.summaries[reviewKey] ?? "");
@@ -126,18 +141,22 @@ export function PullRequestReviewForm({
     if (pending || !canSubmit(verdict.value, text, submittedComments.length)) return;
     const submittedBody = text;
     onPendingChange(true);
-    const result = await submitReview({
-      environmentId,
-      input: {
-        ...reference,
-        ...(headSha === undefined ? {} : { expectedHeadSha: headSha }),
-        verdict: verdict.value,
-        body: submittedBody,
-        comments: submittedComments,
-      },
-    });
-    onPendingChange(false);
-    if (result._tag === "Failure") {
+    const voteOnly =
+      verdict.value === "comment" && !submittedBody.trim() && submittedComments.length === 0;
+    const result = voteOnly
+      ? null
+      : await submitReview({
+          environmentId,
+          input: {
+            ...reference,
+            ...(headSha === undefined ? {} : { expectedHeadSha: headSha }),
+            verdict: verdict.value,
+            body: submittedBody,
+            comments: submittedComments,
+          },
+        });
+    if (result?._tag === "Failure") {
+      onPendingChange(false);
       toastManager.add({
         type: "error",
         title: m(msg("The review could not be submitted")),
@@ -155,6 +174,36 @@ export function PullRequestReviewForm({
       submittedComments.map((comment) => comment.id),
     );
     clearSummary(reviewKey, submittedBody);
+    const selectedVotes = Object.fromEntries(
+      (detail?.gerrit?.labels ?? []).flatMap((label) => {
+        const selected = votes[label.name];
+        return canVote &&
+          selected !== undefined &&
+          label.permittedValues.includes(Number(selected)) &&
+          !(label.name === "Code-Review" && verdict.value !== "comment")
+          ? [[label.name, Number(selected)]]
+          : [];
+      }),
+    );
+    if (Object.keys(selectedVotes).length > 0) {
+      const voteResult = await setVotes({
+        environmentId,
+        input: { ...reference, command: "setVotes", payload: { votes: selectedVotes } },
+      });
+      if (voteResult._tag === "Failure") {
+        onPendingChange(false);
+        toastManager.add({
+          type: "error",
+          title: voteOnly
+            ? "Votes could not be set"
+            : "Review submitted, but votes could not be set",
+        });
+        if (!voteOnly) onSubmitted();
+        return;
+      }
+    }
+    setVoteState({ key: referenceKey, votes: {} });
+    onPendingChange(false);
     toastManager.add({ type: "success", title: verdict.sent(term) });
     onSubmitted();
   };
@@ -163,7 +212,16 @@ export function PullRequestReviewForm({
   const canSubmit = (verdict: PullRequestReviewVerdict, summary: string, commentCount: number) =>
     verdict === "request-changes" && requestChangesSummaryRequired
       ? summary.trim().length > 0
-      : verdict === "approve" || summary.trim().length > 0 || commentCount > 0;
+      : verdict === "approve" ||
+        summary.trim().length > 0 ||
+        commentCount > 0 ||
+        (canVote &&
+          (detail?.gerrit?.labels ?? []).some(
+            (label) =>
+              votes[label.name] !== undefined &&
+              label.permittedValues.includes(Number(votes[label.name])) &&
+              !(label.name === "Code-Review" && verdict !== "comment"),
+          ));
   const placeholder =
     selectedVerdict === undefined || canSubmit(selectedVerdict.value, "", comments.length)
       ? gt("Summarize your review (optional)")
@@ -194,6 +252,25 @@ export function PullRequestReviewForm({
           }
         }}
       />
+      {detail?.gerrit && canVote ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {detail.gerrit.labels.map((label) => (
+            <div key={label.name} className="flex items-center gap-1 text-xs">
+              <span>{label.name}</span>
+              <GerritVotePicker
+                label={label}
+                value={votes[label.name] ?? null}
+                disabled={
+                  pending || (label.name === "Code-Review" && selectedVerdict?.value !== "comment")
+                }
+                onChange={(value) =>
+                  setVoteState({ key: referenceKey, votes: { ...votes, [label.name]: value } })
+                }
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
         <TextFieldSpeechControls speech={speech} disabled={pending} />
         {offered.length > 1 ? (

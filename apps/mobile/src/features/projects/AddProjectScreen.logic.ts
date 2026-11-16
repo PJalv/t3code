@@ -1,6 +1,21 @@
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import { type EnvironmentId, FilesystemBrowseError } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type GerritProjectSearchResult,
+  FilesystemBrowseError,
+} from "@t3tools/contracts";
+import { getCloneDirectoryName } from "@t3tools/client-runtime/operations/projects";
+
+export function gerritCloneDestination(match: GerritProjectSearchResult["results"][number]) {
+  return {
+    remoteUrl: match.preferredTransport === "ssh" ? match.sshUrl : match.httpUrl,
+    repositoryTitle: match.project,
+    repositoryName: getCloneDirectoryName(match.project),
+    gerritInstallation: match.installation,
+    gerritProject: match.project,
+  };
+}
 import * as Schema from "effect/Schema";
 
 import { newTaskFlowKey } from "../threads/new-task-flow-state";

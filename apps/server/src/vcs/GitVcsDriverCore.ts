@@ -48,7 +48,13 @@ import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observabil
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { removeEmptyDirectory, type RemoveEmptyDirectoryError } from "./removeEmptyDirectory.ts";
 import { VcsAutomaticFetchInterval } from "./VcsAutomaticFetchInterval.ts";
-import { gitConfigEnv, serverGitConfigEnv, unsetInheritedRepositoryEnv } from "./VcsProcess.ts";
+import {
+  gitConfigEnv,
+  gitHttpAuthEnv,
+  serverGitConfigEnv,
+  unsetInheritedRepositoryEnv,
+} from "./VcsProcess.ts";
+import * as GitHttpAuth from "./GitHttpAuth.ts";
 import { makeWorktreeCheckoutCache } from "./worktreeCheckoutCache.ts";
 import { removeLinkedWorktree } from "./worktreeRemoval.ts";
 import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
@@ -1091,6 +1097,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const hostPlatform = yield* HostProcess.Platform;
   const serviceScope = yield* Effect.scope;
   const automaticFetchInterval = yield* VcsAutomaticFetchInterval;
+  const httpAuth = yield* Effect.serviceOption(GitHttpAuth.GitHttpAuth);
   type StatusFetchState = {
     phase: "queued" | "running" | "claimed";
     claimed: Deferred.Deferred<void>;
@@ -1412,8 +1419,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         };
         const serverEnv = { ...baseEnv, ...serverGitConfigEnv(baseEnv, hostPlatform) };
         const limits = yield* hookLimits(input);
+        const configuredEnv = {
+          ...serverEnv,
+          ...(yield* gitHttpAuthEnv(serverEnv, hostPlatform, httpAuth)),
+        };
         // Git reads these from the environment since 2.31, well before it had configured hooks.
-        const env = { ...serverEnv };
+        const env = { ...configuredEnv };
         for (const name of limits?.off ?? []) {
           Object.assign(env, gitConfigEnv(env, `hook.${name}.enabled`, "false", hostPlatform));
         }

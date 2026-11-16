@@ -54,6 +54,7 @@ import {
   useLinkedPullRequestLines,
 } from "../LinkedPullRequestList";
 import { useLinkedPullRequestActions } from "../useLinkedPullRequestActions";
+import { GerritDelivery } from "./GerritDelivery";
 
 type GitOverviewSheetProps = StaticScreenProps<
   {
@@ -471,6 +472,20 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         </ListSection>
       ) : null}
 
+      {selectedThread?.id === threadId &&
+      selectedThread.environmentId === environmentId &&
+      selectedThreadCwd !== null &&
+      selectedEnvironmentRuntime?.serverConfig?.environment.capabilities.gerrit === true ? (
+        <ListSection>
+          <GerritDelivery
+            key={`${environmentId}:${threadId}:${selectedThreadCwd}`}
+            environmentId={environmentId}
+            cwd={selectedThreadCwd}
+            threadId={threadId}
+          />
+        </ListSection>
+      ) : null}
+
       {repository === undefined && linkedPrLines.length > 0 ? (
         <ListSection title={gt("Linked {terms}", { terms: linkedPrActions.terminology.plural })}>
           {linkedPrLines.map((line, index) => (
@@ -502,6 +517,8 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     onPress: () => void handleRefresh(),
   };
 
+  // Android's sheet picks the first nested-scrolling descendant for gesture handoff.
+  // Keep the content first in the native tree, ahead of the Compose header hosts.
   return (
     <SheetPane surface={isInspector ? "screen" : "sheet"}>
       <AppBar

@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
@@ -37,9 +39,16 @@ import * as SourceControlProvider from "@t3tools/source-control-core/server/Sour
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { cloneUrlForProtocol, cloneUrlProtocol } from "@t3tools/shared/cloneUrl";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- rmdir removes only an empty stage wrapper.
+import * as NodeFSP from "node:fs/promises";
+import * as GerritService from "./GerritService.ts";
+import * as GerritClonePublication from "./GerritClonePublication.ts";
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
-const isSourceControlProviderError = Schema.is(SourceControlProviderError);
+// An isolated Gerrit clone copies only these host variables.
+const hostVariables = (names: ReadonlyArray<string>): NodeJS.ProcessEnv =>
+  Object.fromEntries(names.map((name) => [name, process.env[name]]));
 const isGitCommandError = Schema.is(GitCommandError);
+const isSourceControlProviderError = Schema.is(SourceControlProviderError);
 
 export class SourceControlRepositoryService extends Context.Service<
   SourceControlRepositoryService,
@@ -72,6 +81,10 @@ export interface SourceControlPreparedClone {
 
 export interface SourceControlCloneOptions {
   readonly onProgress?: (line: GitCloneProgressLine) => Effect.Effect<void>;
+  readonly onRecoveryPath?: (path: string, remoteUrl: string) => Effect.Effect<void>;
+  readonly onPublished?: (remoteUrl: string) => Effect.Effect<void>;
+  readonly onPublicationFailure?: (error: SourceControlRepositoryError) => Effect.Effect<void>;
+  readonly allowExistingGerritDestination?: boolean;
   /** Overrides the default clone budget; `null` disables the deadline. */
   readonly timeoutMs?: number | null;
 }
@@ -113,6 +126,9 @@ function toRepositoryInfo(
     nameWithOwner: urls.nameWithOwner,
     url: urls.url,
     sshUrl: urls.sshUrl,
+    ...(urls.preferredTransport === undefined
+      ? {}
+      : { preferredTransport: urls.preferredTransport }),
   };
 }
 
@@ -204,8 +220,10 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const hostPlatform = yield* HostProcess.Platform;
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  const gerrit = yield* Effect.serviceOption(GerritService.GerritService);
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -361,6 +379,69 @@ export const make = Effect.gen(function* () {
       }
     });
   };
+  const installGerritCloneHook = Effect.fn("SourceControlRepositoryService.installGerritCloneHook")(
+    function* (
+      installation: NonNullable<SourceControlCloneRepositoryInput["gerrit"]>["installation"],
+      destinationPath: string,
+    ) {
+      const fail = () =>
+        new SourceControlRepositoryError({
+          operation: "installGerritCloneHook",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail:
+            "The checkout was preserved, but its Gerrit commit-msg hook could not be installed. Check the hook and repository before retrying.",
+        });
+      if (Option.isNone(gerrit)) return yield* fail();
+      const hook = yield* gerrit.value.downloadCloneHook(installation).pipe(Effect.mapError(fail));
+      const hookPath = Effect.gen(function* () {
+        const gitDirResult = yield* git.execute({
+          operation: "SourceControlRepositoryService.hookGitDir",
+          cwd: destinationPath,
+          args: ["rev-parse", "--absolute-git-dir"],
+        });
+        const hookResult = yield* git.execute({
+          operation: "SourceControlRepositoryService.hookPath",
+          cwd: destinationPath,
+          args: ["rev-parse", "--path-format=absolute", "--git-path", "hooks/commit-msg"],
+        });
+        const gitDir = gitDirResult.stdout.replace(/\r?\n$/, "");
+        const effective = hookResult.stdout.replace(/\r?\n$/, "");
+        if (
+          !path.isAbsolute(gitDir) ||
+          !path.isAbsolute(effective) ||
+          /[\0\r\n]/.test(gitDir + effective)
+        )
+          return yield* fail();
+        const root = yield* fileSystem.realPath(destinationPath);
+        const actualGit = yield* fileSystem.realPath(gitDir);
+        const directory = path.join(actualGit, "hooks");
+        const realDirectory = yield* fileSystem.realPath(directory);
+        if (
+          actualGit !== path.join(root, ".git") ||
+          realDirectory !== directory ||
+          path.resolve(effective) !==
+            path.join(path.resolve(destinationPath), ".git", "hooks", "commit-msg")
+        )
+          return yield* fail();
+        return { directory, effective };
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const target = yield* hookPath;
+          const temp = yield* fileSystem.makeTempDirectoryScoped({
+            directory: target.directory,
+            prefix: ".t3-commit-msg-",
+          });
+          const file = path.join(temp, "hook");
+          yield* fileSystem.writeFile(file, hook, { flag: "wx", mode: 0o755 });
+          yield* fileSystem.chmod(file, 0o755);
+          const checked = yield* hookPath;
+          if (checked.effective !== target.effective) return yield* fail();
+          yield* fileSystem.link(file, target.effective);
+        }),
+      ).pipe(Effect.mapError(fail));
+    },
+  );
 
   const runClone = Effect.fn("SourceControlRepositoryService.runClone")(function* (
     input: SourceControlCloneRepositoryInput,
@@ -369,13 +450,147 @@ export const make = Effect.gen(function* () {
     options?: SourceControlCloneOptions,
   ) {
     const onProgress = options?.onProgress;
-    // Git mixes progress and diagnostics on stderr; retain non-progress tail lines for failure details.
+    const selected = input.gerrit;
+    const remote = URL.parse(cloneUrl);
+    if (selected && remote?.protocol !== "https:" && remote?.protocol !== "http:") {
+      if (Option.isNone(gerrit))
+        return yield* new SourceControlRepositoryError({
+          operation: "cloneRepository",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail: "Gerrit connection is unavailable.",
+        });
+      const connection = yield* gerrit.value.readCloneConfig(selected.installation).pipe(
+        Effect.mapError(
+          () =>
+            new SourceControlRepositoryError({
+              operation: "cloneRepository",
+              provider: SourceControlProviderKind.make("gerrit"),
+              detail: "Gerrit connection is unavailable.",
+            }),
+        ),
+      );
+      const ssh = connection?.sshHost;
+      const safeProject = selected.project
+        .split("/")
+        .every((part) => part !== "" && part !== "." && part !== ".." && !part.includes("\\"));
+      const expected =
+        ssh?.username &&
+        /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(ssh.host) &&
+        Number.isInteger(ssh.port ?? 29418) &&
+        (ssh.port ?? 29418) >= 1 &&
+        (ssh.port ?? 29418) <= 65535
+          ? `ssh://${ssh.username}@${ssh.host}:${ssh.port ?? 29418}/${selected.project.split("/").map(encodeURIComponent).join("/")}`
+          : null;
+      if (
+        !safeProject ||
+        expected === null ||
+        cloneUrl !== expected ||
+        URL.parse(expected)?.href !== expected
+      )
+        return yield* new SourceControlRepositoryError({
+          operation: "cloneRepository",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail: "The selected Gerrit project does not match a configured SSH identity.",
+        });
+    }
+    const authenticated =
+      selected !== undefined && (remote?.protocol === "https:" || remote?.protocol === "http:");
+    let cloneEnv: NodeJS.ProcessEnv = CLONE_ENV;
+    if (selected && remote?.protocol === "ssh:") {
+      // SSH aliases and proxy commands can change the endpoint just like Git rewrites.
+      // Retain the SSH agent, but require the configured host and default SSH identities.
+      cloneEnv = {
+        ...CLONE_ENV,
+        ...hostVariables(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SSH_AUTH_SOCK"]),
+        GIT_SSH_COMMAND: hostPlatform === "win32" ? "ssh -F NUL" : "ssh -F /dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: hostPlatform === "win32" ? "NUL" : "/dev/null",
+        GIT_CEILING_DIRECTORIES: path.dirname(destinationPath),
+        GIT_CONFIG_PARAMETERS: "",
+        GIT_CONFIG_COUNT: "2",
+        GIT_CONFIG_KEY_0: "protocol.allow",
+        GIT_CONFIG_VALUE_0: "never",
+        GIT_CONFIG_KEY_1: "protocol.ssh.allow",
+        GIT_CONFIG_VALUE_1: "always",
+      };
+    }
+    if (authenticated) {
+      const encoded = selected.project.split("/").map(encodeURIComponent).join("/");
+      const expected = `${selected.installation}a/${encoded}`;
+      if (
+        selected.project
+          .split("/")
+          .some((part) => part === "" || part === "." || part === ".." || part.includes("\\")) ||
+        cloneUrl !== expected ||
+        URL.parse(expected)?.href !== expected
+      ) {
+        return yield* new SourceControlRepositoryError({
+          operation: "cloneRepository",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail: "The selected Gerrit project does not match the clone URL.",
+        });
+      }
+      if (Option.isNone(gerrit)) {
+        return yield* new SourceControlRepositoryError({
+          operation: "cloneRepository",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail: "Gerrit credentials are unavailable.",
+        });
+      }
+      const auth = yield* gerrit.value.resolveCloneAuth(selected.installation).pipe(
+        Effect.mapError(
+          () =>
+            new SourceControlRepositoryError({
+              operation: "cloneRepository",
+              provider: SourceControlProviderKind.make("gerrit"),
+              detail: "Gerrit credentials are unavailable. Check Source Control settings.",
+            }),
+        ),
+      );
+      const credentials = Redacted.value(auth.credentials);
+      const header = Buffer.from(`${credentials.username}:${credentials.token}`).toString("base64");
+      // A clone must not inherit rewrites, helpers, proxies, trace settings, or redirects.
+      // The URL-scoped header and disabled redirects also protect HTTP alternates.
+      cloneEnv = {
+        ...CLONE_ENV,
+        ...hostVariables(["PATH", "SYSTEMROOT", "TEMP", "TMP"]),
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: hostPlatform === "win32" ? "NUL" : "/dev/null",
+        GIT_CEILING_DIRECTORIES: path.dirname(destinationPath),
+        GIT_CONFIG_PARAMETERS: "",
+        GIT_CONFIG_COUNT: "8",
+        GIT_CONFIG_KEY_0: "http.extraHeader",
+        GIT_CONFIG_VALUE_0: "",
+        GIT_CONFIG_KEY_1: `http.${expected}.extraHeader`,
+        GIT_CONFIG_VALUE_1: `Authorization: Basic ${header}`,
+        GIT_CONFIG_KEY_2: "credential.helper",
+        GIT_CONFIG_VALUE_2: "",
+        GIT_CONFIG_KEY_3: "http.followRedirects",
+        GIT_CONFIG_VALUE_3: "false",
+        GIT_CONFIG_KEY_4: "http.proxy",
+        GIT_CONFIG_VALUE_4: "",
+        GIT_CONFIG_KEY_5: "http.cookieFile",
+        GIT_CONFIG_VALUE_5: "",
+        GIT_CONFIG_KEY_6: "protocol.allow",
+        GIT_CONFIG_VALUE_6: "never",
+        GIT_CONFIG_KEY_7: `protocol.${remote.protocol.slice(0, -1)}.allow`,
+        GIT_CONFIG_VALUE_7: "always",
+      };
+    }
+    // Git interleaves progress redraws with its real messages on stderr. The
+    // last non-progress lines are what explain a failure ("Repository not
+    // found", "Permission denied"), so keep them for the error detail.
     const stderrTail: Array<string> = [];
     let filterPercent: number | null = null;
     const onStderrLine = (line: string) => {
       const parsed = parseGitCloneProgressLine(line);
       if (parsed && isGitFilterProgressLine(line)) filterPercent = parsed.percent;
-      if (parsed) return onProgress ? onProgress(parsed) : Effect.void;
+      // Remote messages are untrusted and may echo the credential.
+      if (parsed)
+        return onProgress
+          ? onProgress(authenticated ? { ...parsed, detail: null } : parsed)
+          : Effect.void;
+      if (authenticated) return Effect.void;
       return Effect.sync(() => {
         const trimmed = line.trim();
         if (trimmed.length === 0 || trimmed.startsWith("Cloning into")) return;
@@ -399,7 +614,8 @@ export const make = Effect.gen(function* () {
         maxOutputBytes: 256 * 1024,
         appendTruncationMarker: true,
         keepLineCallbacksAfterTruncation: true,
-        env: CLONE_ENV,
+        env: cloneEnv,
+        isolatedEnv: selected !== undefined,
         progress: { onStderrLine },
       })
       .pipe(
@@ -409,10 +625,10 @@ export const make = Effect.gen(function* () {
               operation: "cloneRepository",
               provider,
               detail:
-                stderrTail.length > 0
+                !authenticated && stderrTail.length > 0
                   ? stderrTail.join(" ")
                   : "The repository could not be cloned.",
-              cause,
+              ...(authenticated ? {} : { cause }),
             }),
         ),
       );
@@ -442,7 +658,7 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const cloneRepository = Effect.fn("SourceControlRepositoryService.cloneRepository")(function* (
+  const cloneOnce = Effect.fn("SourceControlRepositoryService.cloneOnce")(function* (
     input: SourceControlCloneRepositoryInput,
     options?: SourceControlCloneOptions,
   ) {
@@ -476,11 +692,143 @@ export const make = Effect.gen(function* () {
 
     // A ref list read while the clone ran saw an unborn HEAD and no refs.
     yield* git.invalidateRefs(prepared.destinationPath);
+    if (input.gerrit)
+      yield* installGerritCloneHook(input.gerrit.installation, prepared.destinationPath);
+
     return {
       cwd: prepared.destinationPath,
       remoteUrl,
       repository: prepared.repository,
     };
+  });
+
+  const cloneRepository = Effect.fn("SourceControlRepositoryService.cloneRepository")(function* (
+    input: SourceControlCloneRepositoryInput,
+    options?: SourceControlCloneOptions,
+  ) {
+    if (!input.gerrit) return yield* cloneOnce(input, options);
+    const selected = input.gerrit;
+    const prepared = yield* prepareClone(input);
+    const encoded = selected.project.split("/").map(encodeURIComponent).join("/");
+    const safeProject = selected.project
+      .split("/")
+      .every((part) => part !== "" && part !== "." && part !== ".." && !part.includes("\\"));
+    const httpUrl = `${selected.installation}a/${encoded}`;
+    if (Option.isNone(gerrit))
+      return yield* new SourceControlRepositoryError({
+        operation: "cloneRepository",
+        provider: SourceControlProviderKind.make("gerrit"),
+        detail: "Gerrit connection is unavailable.",
+      });
+    const connection = yield* gerrit.value.readCloneConfig(selected.installation).pipe(
+      Effect.mapError(
+        () =>
+          new SourceControlRepositoryError({
+            operation: "cloneRepository",
+            provider: SourceControlProviderKind.make("gerrit"),
+            detail: "Gerrit connection is unavailable.",
+          }),
+      ),
+    );
+    const ssh = connection?.sshHost;
+    const sshUrl =
+      ssh?.username &&
+      /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(ssh.host) &&
+      Number.isInteger(ssh.port ?? 29418) &&
+      (ssh.port ?? 29418) >= 1 &&
+      (ssh.port ?? 29418) <= 65535
+        ? `ssh://${ssh.username}@${ssh.host}:${ssh.port ?? 29418}/${encoded}`
+        : null;
+    if (
+      !connection ||
+      !safeProject ||
+      URL.parse(httpUrl)?.href !== httpUrl ||
+      (prepared.cloneUrl !== httpUrl && prepared.cloneUrl !== sshUrl)
+    )
+      return yield* new SourceControlRepositoryError({
+        operation: "cloneRepository",
+        provider: SourceControlProviderKind.make("gerrit"),
+        detail: "The selected Gerrit project does not match the configured installation.",
+      });
+    const attempt = Effect.fn("SourceControlRepositoryService.stagedAttempt")(function* (
+      remoteUrl: string,
+    ) {
+      const stage = yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const created = yield* fileSystem.makeTempDirectory({
+            directory: path.dirname(prepared.destinationPath),
+            prefix: ".t3-gerrit-clone-",
+          });
+          if (options?.onRecoveryPath)
+            yield* options.onRecoveryPath(created, redactRemoteUrl(remoteUrl));
+          return created;
+        }),
+      );
+      const checkout = path.join(stage, "checkout");
+      const result = yield* cloneOnce(
+        { remoteUrl, destinationPath: checkout, gerrit: selected },
+        options,
+      ).pipe(Effect.result);
+      return { stage, checkout, result };
+    });
+    const first = yield* attempt(sshUrl ?? httpUrl);
+    let final = first;
+    if (sshUrl && first.result._tag === "Failure") {
+      const error = first.result.failure;
+      if (
+        isSourceControlRepositoryError(error) &&
+        error.operation === "cloneRepository" &&
+        isGitCommandError(error.cause) &&
+        error.cause.exitCode !== undefined &&
+        error.cause.exitCode !== 0
+      )
+        final = yield* attempt(httpUrl);
+    }
+    const earlierAttempt =
+      final.stage === first.stage ? "" : ` Earlier SSH attempt: ${first.stage}.`;
+    if (final.result._tag === "Failure") {
+      const error = final.result.failure;
+      return yield* new SourceControlRepositoryError({
+        operation: isSourceControlRepositoryError(error) ? error.operation : "cloneRepository",
+        provider: SourceControlProviderKind.make("gerrit"),
+        detail: `${isSourceControlRepositoryError(error) && error.detail === "Gerrit credentials are unavailable. Check Source Control settings." ? error.detail : "Clone or hook setup failed."} The private attempt was preserved at ${final.stage}. Inspect it before retrying.${earlierAttempt}`,
+      });
+    }
+    const result = final.result.success;
+    const cloneUrl = final === first ? (sshUrl ?? httpUrl) : httpUrl;
+    yield* gerrit.value.bindVerifiedClone({ ...selected, url: cloneUrl }).pipe(
+      Effect.mapError(
+        () =>
+          new SourceControlRepositoryError({
+            operation: "cloneRepository",
+            provider: SourceControlProviderKind.make("gerrit"),
+            detail: `The Gerrit clone binding could not be saved. The private checkout is preserved at ${final.checkout}. Inspect its settings before retrying.${earlierAttempt}`,
+          }),
+      ),
+    );
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const outcome = yield* GerritClonePublication.publish({
+          stage: final.stage,
+          checkout: final.checkout,
+          destination: prepared.destinationPath,
+        });
+        if (outcome.status === "published") {
+          if (options?.onPublished) yield* options.onPublished(result.remoteUrl);
+          // Remove only an empty wrapper; never recursively remove recovery data.
+          yield* Effect.promise(() => NodeFSP.rmdir(final.stage).catch(() => {}));
+          return { ...result, cwd: prepared.destinationPath };
+        }
+        const detail = `Publication was rejected. The private checkout is preserved at ${final.checkout}; the destination ${prepared.destinationPath} was not replaced. Inspect the paths before taking action.`;
+        const error = new SourceControlRepositoryError({
+          operation: "publishGerritClone",
+          provider: SourceControlProviderKind.make("gerrit"),
+          detail: `${detail}${earlierAttempt}`,
+        });
+        if (options?.onPublicationFailure) yield* options.onPublicationFailure(error);
+        return yield* error;
+      }),
+    );
   });
 
   const discardClone = Effect.fn("SourceControlRepositoryService.discardClone")(function* (

@@ -12,8 +12,18 @@ import { T, Var, useGT, useMessages } from "gt-react";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { Button } from "../ui/button";
-import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  NumberField,
+  NumberFieldGroup,
+  NumberFieldInput,
+} from "../ui/number-field";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Switch } from "../ui/switch";
 import { commitNumberFieldOnEnter } from "./commitNumberFieldOnEnter";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -29,8 +39,14 @@ import {
   useScopedSettingsMixed,
   useUpdateScopedSettings,
 } from "./useScopedSettings";
-import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
-import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPolicy";
+import {
+  useOptionalSettingsScope,
+  useSettingsScope,
+} from "./SettingsScopeContext";
+import {
+  firstManagedDenial,
+  usePrimaryManagedPolicy,
+} from "~/state/managedPolicy";
 
 /** Features still settling in. */
 export function LabsSettingsPanel() {
@@ -40,7 +56,11 @@ export function LabsSettingsPanel() {
       <SettingsSection id="beta" title={gt("Beta")}>
         <BoringSidebarRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
-        {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
+        {hasCloudPublicConfig() ? (
+          <GuestLinksRowWithSignIn />
+        ) : (
+          <GuestLinksRow />
+        )}
         <LinkedEnvironmentsRow />
         <WorkflowsRow />
         <WorkflowSkippedRunsRow />
@@ -68,7 +88,9 @@ function BoringSidebarRow() {
       control={
         <Switch
           checked={settings.boringSidebarEnabled}
-          onCheckedChange={(checked) => updateSettings({ boringSidebarEnabled: Boolean(checked) })}
+          onCheckedChange={(checked) =>
+            updateSettings({ boringSidebarEnabled: Boolean(checked) })
+          }
           aria-label={gt("Boring sidebar (group by project)")}
         />
       }
@@ -116,7 +138,8 @@ function GuestLinksRowWithSignIn() {
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
   const settings = useScopedSettings();
   // `isSignedIn` is undefined until Clerk loads.
-  if (settings.guestLinkBaseUrl !== null || isSignedIn !== false) return <GuestLinksRow />;
+  if (settings.guestLinkBaseUrl !== null || isSignedIn !== false)
+    return <GuestLinksRow />;
   return (
     <SettingsRow
       {...searchableSetting("guest-links")}
@@ -143,7 +166,9 @@ function GuestLinksRow() {
   // Guests arrive through T3 Connect, so a policy that turns Connect off turns this off too.
   const connectDenial = firstManagedDenial(
     scope
-      ? scope.connectedEnvironments.map((environment) => environment.serverConfig?.managedPolicy)
+      ? scope.connectedEnvironments.map(
+          (environment) => environment.serverConfig?.managedPolicy,
+        )
       : [primaryPolicy],
     (policy) => managedCapabilityDenial(policy, "connect", messages),
   );
@@ -157,17 +182,21 @@ function GuestLinksRow() {
       description={
         <>
           <T>
-            Share a thread with a guest who watches it live in a browser and sends messages you
-            approve.{" "}
+            Share a thread with a guest who watches it live in a browser and
+            sends messages you approve.{" "}
           </T>
           {settings.guestLinkBaseUrl !== null ? (
             <T>
-              Uses this machine's configured guest endpoint: <Var>{settings.guestLinkBaseUrl}</Var>.
+              Uses this machine's configured guest endpoint:{" "}
+              <Var>{settings.guestLinkBaseUrl}</Var>.
             </T>
           ) : (
             <T>
               Needs T3 Connect: sign in and link this machine in{" "}
-              <Link to="/settings/access" className="underline underline-offset-2">
+              <Link
+                to="/settings/access"
+                className="underline underline-offset-2"
+              >
                 Sharing & access
               </Link>
               .
@@ -180,7 +209,9 @@ function GuestLinksRow() {
         <ScopedSwitch
           settingKeys={["guestSharingEnabled"]}
           checked={settings.guestSharingEnabled}
-          onCheckedChange={(checked) => updateSettings({ guestSharingEnabled: Boolean(checked) })}
+          onCheckedChange={(checked) =>
+            updateSettings({ guestSharingEnabled: Boolean(checked) })
+          }
           aria-label={gt("Guest links")}
         />
       }
@@ -200,9 +231,12 @@ function LinkedEnvironmentsRow() {
       settingKeys={["linkedEnvironmentsEnabled"]}
       description={
         <T>
-          Let agents here work on your other machines, and theirs here. Turn it on for each machine,
-          then link them in{" "}
-          <Link to="/settings/connections" className="underline underline-offset-2">
+          Let agents here work on your other machines, and theirs here. Turn it
+          on for each machine, then link them in{" "}
+          <Link
+            to="/settings/connections"
+            className="underline underline-offset-2"
+          >
             Connections
           </Link>
           . While off, nothing new starts over a link; running tasks finish.
@@ -239,7 +273,9 @@ function WorkflowsRow() {
         <ScopedSwitch
           settingKeys={["workflowsEnabled"]}
           checked={settings.workflowsEnabled}
-          onCheckedChange={(checked) => updateSettings({ workflowsEnabled: Boolean(checked) })}
+          onCheckedChange={(checked) =>
+            updateSettings({ workflowsEnabled: Boolean(checked) })
+          }
           aria-label={gt("Workflows")}
         />
       }
@@ -270,7 +306,9 @@ export function WorkflowSkippedRunsRow() {
           <SettingResetButton
             ariaLabel={gt("Reset skipped runs kept to default")}
             onClick={() =>
-              updateSettings({ workflowSkippedRunsKept: DEFAULT_WORKFLOW_SKIPPED_RUNS_KEPT })
+              updateSettings({
+                workflowSkippedRunsKept: DEFAULT_WORKFLOW_SKIPPED_RUNS_KEPT,
+              })
             }
           />
         ) : null
@@ -284,7 +322,12 @@ export function WorkflowSkippedRunsRow() {
             format={NO_GROUPING}
             size="sm"
             onValueCommitted={(value) => {
-              if (value === null || !Number.isInteger(value) || (!mixed && value === kept)) return;
+              if (
+                value === null ||
+                !Number.isInteger(value) ||
+                (!mixed && value === kept)
+              )
+                return;
               updateSettings({ workflowSkippedRunsKept: value });
             }}
           >
@@ -384,7 +427,8 @@ function FastWorktreeCheckoutRow() {
     connectedEnvironments.length === 0 ||
     connectedEnvironments.some(
       (environment) =>
-        environment.serverConfig?.environment.capabilities.fastWorktreeCheckout !== true,
+        environment.serverConfig?.environment.capabilities
+          .fastWorktreeCheckout !== true,
     )
   )
     return null;
@@ -400,7 +444,9 @@ function FastWorktreeCheckoutRow() {
         <ScopedSwitch
           settingKeys={["fastWorktreeCheckout"]}
           checked={settings.fastWorktreeCheckout}
-          onCheckedChange={(checked) => updateSettings({ fastWorktreeCheckout: Boolean(checked) })}
+          onCheckedChange={(checked) =>
+            updateSettings({ fastWorktreeCheckout: Boolean(checked) })
+          }
           aria-label={gt("Fast worktree checkout")}
         />
       }
@@ -438,7 +484,9 @@ function AgentFeedbackRow() {
     scope.kind === "checkout" ||
     connectedEnvironments.length === 0 ||
     connectedEnvironments.some(
-      (environment) => environment.serverConfig?.environment.capabilities.agentFeedback !== true,
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.agentFeedback !==
+        true,
     )
   )
     return null;
@@ -459,10 +507,16 @@ function AgentFeedbackRow() {
             if (mode !== null) updateSettings({ agentFeedback: { mode } });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={gt("Agent feedback")}>
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-40"
+            aria-label={gt("Agent feedback")}
+          >
             <SelectValue>
               {(mode: AgentFeedbackMode | null) =>
-                mode === null ? gt("Mixed") : m(AGENT_FEEDBACK_MODE_LABELS[mode])
+                mode === null
+                  ? gt("Mixed")
+                  : m(AGENT_FEEDBACK_MODE_LABELS[mode])
               }
             </SelectValue>
           </SelectTrigger>

@@ -1365,6 +1365,19 @@ export function createPullRequestEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.projectId, input.repository, input.number]),
       },
     }),
+    gerritCommand: createEnvironmentRpcCommand(runtime, {
+      tag: WS_METHODS.pullRequestsGerritCommand,
+      label: "environment-data:pull-requests:gerrit-command",
+      execute: (input) => routedRequest(WS_METHODS.pullRequestsGerritCommand, input),
+      scheduler: commandScheduler,
+      concurrency: serialPerEnvironment,
+    }),
+    gerritUploadCommit: createEnvironmentRpcCommand(runtime, {
+      tag: WS_METHODS.gerritUploadCommit,
+      label: "environment-data:gerrit:upload-commit",
+      scheduler: commandScheduler,
+      concurrency: serialPerEnvironment,
+    }),
     runAction: showWhileInFlight(
       createEnvironmentRpcCommand(runtime, {
         tag: WS_METHODS.pullRequestsRunAction,

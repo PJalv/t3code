@@ -17,6 +17,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
@@ -107,10 +108,15 @@ const layerTestFor = (
     | ProjectFaviconResolver.ProjectFaviconResolver
     | RepositoryIdentityResolver.RepositoryIdentityResolver
   >,
+  paths: Layer.Layer<
+    WorkspacePaths.WorkspacePaths,
+    never,
+    FileSystem.FileSystem | Path.Path
+  > = layerWorkspacePaths,
 ) =>
   RuntimeLayer.layerProjectService.pipe(
     Layer.provideMerge(ProjectEnrichmentService.layer),
-    Layer.provideMerge(layerWorkspacePaths),
+    Layer.provideMerge(paths),
     Layer.provideMerge(projectMetadataLayer),
     Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provideMerge(ServerSettings.layerTest()),
@@ -1232,4 +1238,49 @@ it.effect("rejects an update that waited on the lock while its project was delet
       "Update race",
     );
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
+);
+
+it.effect("registers a pending Gerrit clone without making its destination", () =>
+  Effect.gen(function* () {
+    const service = yield* ProjectService.ProjectService;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const parent = yield* fs.makeTempDirectoryScoped({ prefix: "pending-gerrit-project-" });
+    const destination = path.join(parent, "checkout");
+    const input = {
+      commandId: CommandId.make("pending-gerrit-create"),
+      projectId: ProjectId.make("pending-gerrit-project"),
+      title: "Pending",
+      workspaceRoot: destination,
+    };
+    assert.equal((yield* service.create(input).pipe(Effect.result))._tag, "Failure");
+    assert.isFalse(yield* fs.exists(destination));
+    const created = yield* service.createPendingGerritClone(input);
+    assert.equal(created.workspaceRoot, destination);
+    assert.isFalse(yield* fs.exists(destination));
+    assert.isTrue(Option.isSome(yield* service.getById(input.projectId)));
+    assert.equal(
+      (yield* service.validatePendingGerritClone(input.projectId).pipe(Effect.result))._tag,
+      "Failure",
+    );
+
+    yield* fs.makeDirectory(destination);
+    yield* service.validatePendingGerritClone(input.projectId);
+    const rejected = yield* service
+      .createPendingGerritClone({
+        ...input,
+        projectId: ProjectId.make("pending-gerrit-existing"),
+        commandId: CommandId.make("pending-gerrit-existing"),
+      })
+      .pipe(Effect.result);
+    assert.equal(rejected._tag, "Failure");
+    assert.isTrue(yield* fs.exists(destination));
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      layerTestFor(layerMetadata, WorkspacePaths.layer).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
 );

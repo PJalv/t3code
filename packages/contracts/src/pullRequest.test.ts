@@ -11,6 +11,11 @@ import {
   PullRequestListResult,
   PullRequestOperationError,
   resolvePullRequestAuthorFilter,
+  GERRIT_CHANGE_LEVEL_PATH,
+  PullRequestDiffInput,
+  PullRequestGerritDetail,
+  PullRequestReviewThread,
+  PullRequestSummary,
 } from "./pullRequest.ts";
 import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 
@@ -73,6 +78,94 @@ const LIST_RESULT: PullRequestListResult = {
   nextCursors: { "github.com pingdotgg/t3code": "2026-07-02T00:00:00Z|1|1" },
 };
 
+describe("Gerrit pull request extensions", () => {
+  it("round-trips detail and summary data without changing other providers", () => {
+    const gerrit = {
+      changeId: "I123",
+      topic: null,
+      isPrivate: true,
+      isWip: false,
+      currentPatchSet: 2,
+      patchSets: [
+        {
+          number: 2,
+          commit: "abc",
+          createdAt: "2026-07-01T00:00:00Z",
+          uploader: { _account_id: 1 },
+        },
+      ],
+      labels: [
+        {
+          name: "Code-Review",
+          votes: [{ account: { username: "alice" }, value: -1 }],
+          permittedValues: [-2, 0, 2],
+          required: true,
+        },
+      ],
+      submitRequirements: [
+        { name: "Review", status: "override" as const, description: "overridden" },
+      ],
+      submittable: null,
+    };
+    const codec = Schema.toCodecJson(PullRequestGerritDetail);
+    expect(Schema.decodeSync(codec)(Schema.encodeUnknownSync(codec)(gerrit))).toStrictEqual(gerrit);
+    const entry = { ...LIST_RESULT.entries[0]!, gerrit };
+    const list = { ...LIST_RESULT, entries: [entry] };
+    const listCodec = Schema.toCodecJson(PullRequestListResult);
+    expect(Schema.decodeSync(listCodec)(Schema.encodeUnknownSync(listCodec)(list))).toStrictEqual(
+      list,
+    );
+    const summary = { ...entry, updatedAt: entry.updatedAt };
+    const summaryCodec = Schema.toCodecJson(PullRequestSummary);
+    expect(
+      Schema.decodeSync(summaryCodec)(Schema.encodeUnknownSync(summaryCodec)(summary)).gerrit,
+    ).toStrictEqual(gerrit);
+  });
+
+  it("round-trips native anchors, drafts, and each comparison base", () => {
+    const anchor = {
+      patchSet: 2,
+      revision: null,
+      parent: 1,
+      range: { start_line: 1, start_character: 0, end_line: 2, end_character: 3 },
+    };
+    const thread = {
+      id: "gerrit:1",
+      path: GERRIT_CHANGE_LEVEL_PATH,
+      line: null,
+      side: "right" as const,
+      isResolved: false,
+      isOutdated: false,
+      gerrit: anchor,
+      comments: [
+        {
+          id: "1",
+          author: null,
+          body: "draft",
+          createdAt: "2026-07-01T00:00:00Z",
+          url: null,
+          gerrit: anchor,
+          isDraft: true,
+        },
+      ],
+    };
+    const threadCodec = Schema.toCodecJson(PullRequestReviewThread);
+    expect(
+      Schema.decodeSync(threadCodec)(Schema.encodeUnknownSync(threadCodec)(thread)),
+    ).toStrictEqual(thread);
+    const codec = Schema.toCodecJson(PullRequestDiffInput);
+    for (const base of ["base", { parent: 1 }, { patchSet: 1 }] as const) {
+      const input = {
+        projectId: "project-1",
+        repository: "repo",
+        number: 1,
+        gerritComparison: { patchSet: 2, base },
+      };
+      expect(Schema.decodeSync(codec)(Schema.encodeUnknownSync(codec)(input))).toStrictEqual(input);
+    }
+  });
+});
+
 describe("PullRequestListResult", () => {
   /**
    * The RPC builds this codec at call time, so a shape it cannot lower — an open-keyed record
@@ -125,6 +218,24 @@ describe("PullRequestCapabilities", () => {
       viewerPermissions: { ...options, comment: true, resolve: true, requestReviewers: true },
     };
     const decoded = decodeDetail(detail);
+    const detailCodec = Schema.toCodecJson(PullRequestDetail);
+    const withGerrit = {
+      ...decoded,
+      gerrit: {
+        changeId: "I123",
+        topic: "topic",
+        isPrivate: false,
+        isWip: true,
+        currentPatchSet: 1,
+        patchSets: [],
+        labels: [],
+        submitRequirements: [],
+        submittable: true,
+      },
+    };
+    expect(
+      Schema.decodeSync(detailCodec)(Schema.encodeUnknownSync(detailCodec)(withGerrit)),
+    ).toStrictEqual(withGerrit);
 
     expect(decoded.capabilities).toEqual({
       ...base,

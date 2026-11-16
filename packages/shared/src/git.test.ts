@@ -17,6 +17,19 @@ import {
 } from "./git.ts";
 
 describe("normalizeGitRemoteUrl", () => {
+  it.each([
+    ["ssh://user@Host.Example:29418/Project.git", "host.example/project"],
+    ["https://Host.Example:8443/Project.git", "host.example/project"],
+    ["user@Host.Example:Project.git", "host.example/project"],
+    ["host.example:/Project.git", "host.example/project"],
+    ["ssh://user@[2001:db8::1]:29418/Project.git", "[2001:db8::1]/project"],
+    ["user@[2001:db8::1]:Project.git", "[2001:db8::1]/project"],
+    ["C:/Project", "c:/project"],
+    ["ssh://host.example", "ssh://host.example"],
+  ])("normalizes single-segment remote %s", (remote, expected) => {
+    expect(normalizeGitRemoteUrl(remote)).toBe(expected);
+  });
+
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {
     expect(normalizeGitRemoteUrl("git@github.com:T3Tools/T3Code.git")).toBe(
       "github.com/t3tools/t3code",

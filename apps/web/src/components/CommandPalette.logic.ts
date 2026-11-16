@@ -889,6 +889,8 @@ export type AddProjectCloneFlow =
       readonly repositoryInput: string;
       readonly repository: SourceControlRepositoryInfo | null;
       readonly remoteUrl: string;
+      readonly projectUrl?: string;
+      readonly gerrit?: import("@t3tools/contracts").GerritCloneSelection;
     };
 
 export function remoteProjectInputPlaceholder(

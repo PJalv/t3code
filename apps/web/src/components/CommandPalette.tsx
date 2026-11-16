@@ -3,7 +3,7 @@ import { decodeMsg, msg, T, useGT, useMessages, Var } from "gt-react";
 import { m, type MessageResolver } from "../i18n/messages";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
-import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+import { projectScriptCwd } from "@t3tools/shared/projectScripts";
 
 import {
   scopedThreadKey,
@@ -49,11 +49,13 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
+  type GerritProjectSearchResult,
   SourceControlProviderKind,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
@@ -130,6 +132,10 @@ import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
+import { pullRequestEnvironment } from "~/state/pullRequests";
+import { useSourceControlActionRunning } from "../state/sourceControlActions";
+import { vcsEnvironment } from "../state/vcs";
+
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
@@ -276,6 +282,8 @@ import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { canShareWithGuestAtom } from "./chat/guestShareAvailability";
 import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import { openUseInAnotherApp } from "./mcp/UseInAnotherAppDialog";
+import { openGerritDeliveryDialog } from "./pullRequest/GerritDeliveryDialogHost";
+import { isGerritUploadAvailable } from "./GitActionsControl.logic";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { settingsForThisPlatform, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -293,6 +301,7 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { GerritIcon } from "~/components/Icons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { readIssueListPreferences } from "~/components/issue/issueListPreferences";
 import { IssueGlyph } from "~/components/issue/issuePresentation";
@@ -494,6 +503,11 @@ function OpenCommandPaletteDialog(props: {
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
+  const searchGerritProjects = useAtomQueryRunner(sourceControlEnvironment.gerritSearchProjects, {
+    reportFailure: false,
+  });
+  const [gerritProjectMatches, setGerritProjectMatches] =
+    useState<GerritProjectSearchResult | null>(null);
   const loadBrowsePath = useAtomQueryRunner(filesystemEnvironment.browse, {
     reportFailure: false,
     reportDefect: false,
@@ -530,6 +544,10 @@ function OpenCommandPaletteDialog(props: {
   );
   const canShareActiveThreadWithGuest = useAtomValue(
     canShareWithGuestAtom(activeThread?.environmentId ?? ("" as EnvironmentId)),
+  );
+  const canReadReviews = useEnvironmentScope(
+    activeThread?.environmentId ?? null,
+    AuthOrchestrationReadScope,
   );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
@@ -745,6 +763,33 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const { projectByKey } = useProjectLookups();
+  const activeThreadProject = activeThread
+    ? projectByKey.get(`${activeThread.environmentId}:${activeThread.projectId}`)
+    : undefined;
+  const uploadCwd =
+    activeThread && activeThreadProject
+      ? projectScriptCwd({
+          project: { cwd: activeThreadProject.workspaceRoot },
+          worktreePath: activeThread.worktreePath ?? null,
+        })
+      : null;
+  const uploadEnvironmentId = activeThread?.environmentId ?? null;
+  const canPrepareGerrit = useAtomValue(
+    pullRequestEnvironment.gerritUploadCommit.permissionAtom(uploadEnvironmentId),
+  );
+  const canWriteUploadSourceControl = useEnvironmentScope(
+    uploadEnvironmentId,
+    AuthSourceControlWriteScope,
+  );
+  const uploadBusy = useSourceControlActionRunning(
+    { environmentId: uploadEnvironmentId, cwd: uploadCwd },
+    ["runStackedAction", "pull", "publishRepository"],
+  );
+  const uploadStatus = useEnvironmentQuery(
+    uploadEnvironmentId !== null && uploadCwd !== null
+      ? vcsEnvironment.status({ environmentId: uploadEnvironmentId, input: { cwd: uploadCwd } })
+      : null,
+  );
 
   const activeThreadKey = activeThread
     ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
@@ -1033,6 +1078,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   function handleQueryChange(nextQuery: string, source: EventTarget | null): void {
+    setGerritProjectMatches(null);
     browseNavigation.invalidate();
     clearTypedHighlight();
     const resolvedQuery = canBrowsePaths ? resolvePastedPath(query, nextQuery) : nextQuery;
@@ -1539,6 +1585,26 @@ function OpenCommandPaletteDialog(props: {
 
   if (
     activeThread !== null &&
+    uploadCwd !== null &&
+    isGerritUploadAvailable(uploadStatus.data, canPrepareGerrit)
+  ) {
+    const thread = activeThread;
+    const cwd = uploadCwd;
+    actionItems.push({
+      kind: "action",
+      value: "action:upload-commit-for-review",
+      searchTerms: ["gerrit", "upload", "commit", "review"],
+      title: "Upload commit for review",
+      disabled: !canWriteUploadSourceControl || uploadBusy || uploadStatus.data?.refName === null,
+      icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openGerritDeliveryDialog({ environmentId: thread.environmentId, threadId: thread.id, cwd });
+      },
+    });
+  }
+
+  if (
+    activeThread !== null &&
     threadPullRequestLinkMode(activeThreadServerConfig?.environment.capabilities) !== "unsupported"
   ) {
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -1552,14 +1618,18 @@ function OpenCommandPaletteDialog(props: {
         openLinkPullRequestDialog(threadRef);
       },
     });
+  }
+  if (
+    activeThread !== null &&
+    activeThreadServerConfig?.environment.capabilities.threadPullRequests === true
+  ) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
     actionItems.push({
       kind: "action",
       value: "action:open-thread-pull-requests",
-      searchTerms: ["pull requests", "issues", "linked", "stack", "prs"],
+      searchTerms: ["pull requests", "issues", "linked", "stack", "prs", "gerrit", "changes", "reviews"],
       title: gt("Show linked items"),
-      disabled:
-        visibleThreadPullRequests(activeThread.pullRequests).length === 0 &&
-        !activeThread.issues?.length,
+      disabled: !canReadReviews && !activeThread.issues?.length,
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(threadRef, "pull-requests");
@@ -2263,6 +2333,57 @@ function OpenCommandPaletteDialog(props: {
       }
 
       const provider = addProjectRemoteSourceProvider(addProjectCloneFlow.source);
+      if (provider === "gerrit") {
+        setIsRemoteProjectLookingUp(true);
+        const searched = await searchGerritProjects({
+          environmentId: addProjectCloneFlow.environmentId,
+          input: { query: rawRepository },
+        });
+        setIsRemoteProjectLookingUp(false);
+        if (searched._tag === "Failure") {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Gerrit project search failed",
+              description: errorMessage(squashAtomCommandFailure(searched)),
+            }),
+          );
+          return;
+        }
+        setGerritProjectMatches(searched.value);
+        if (searched.value.results.length === 1 && searched.value.failures.length === 0) {
+          const match = searched.value.results[0]!;
+          const repository = {
+            provider,
+            nameWithOwner: match.project,
+            url: match.httpUrl,
+            sshUrl: match.sshUrl,
+            ...(match.preferredTransport === undefined
+              ? {}
+              : { preferredTransport: match.preferredTransport }),
+          };
+          setAddProjectCloneFlow({
+            step: "confirm",
+            environmentId: addProjectCloneFlow.environmentId,
+            source: addProjectCloneFlow.source,
+            repositoryInput: rawRepository,
+            repository,
+            remoteUrl: getDefaultCloneUrl(repository),
+            gerrit: { installation: match.installation, project: match.project },
+            ...(match.projectUrl === undefined ? {} : { projectUrl: match.projectUrl }),
+          });
+          setHighlightedItemValue(null);
+          setQuery(
+            getDefaultCloneDestination(
+              addProjectCloneFlow.environmentId,
+              getDefaultCloneUrl(repository),
+              repository.nameWithOwner,
+            ),
+          );
+          setBrowseGeneration((generation) => generation + 1);
+        }
+        return;
+      }
       if (!provider) {
         const remoteUrl = normalizePastedCloneUrl(rawRepository);
         const destinationPath = getDefaultCloneDestination(
@@ -2383,6 +2504,7 @@ function OpenCommandPaletteDialog(props: {
         title: inferProjectTitleFromPath(destinationPath),
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
+        ...(addProjectCloneFlow.gerrit ? { gerrit: addProjectCloneFlow.gerrit } : {}),
         destinationPath,
       },
     });
@@ -3198,13 +3320,96 @@ function OpenCommandPaletteDialog(props: {
           environmentLabel={newProjectEnvironmentLabel}
         />
       ) : null}
+      {addProjectCloneFlow?.step === "repository" && gerritProjectMatches !== null ? (
+        <section
+          aria-label="Gerrit project search results"
+          className="mx-3 mb-2 max-h-48 overflow-y-auto rounded border p-2"
+        >
+          <p className="px-2 pb-1 text-xs text-muted-foreground">Gerrit projects</p>
+          {gerritProjectMatches.results.map((match) => (
+            <button
+              key={`${match.installation}\0${match.project}`}
+              type="button"
+              className="flex w-full items-center gap-3 rounded-md border border-transparent px-3 py-2 text-start transition-colors hover:border-border hover:bg-accent focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              aria-label={`Clone ${match.project} from ${match.installation}`}
+              onClick={() => {
+                const repository = {
+                  provider: SourceControlProviderKind.make("gerrit"),
+                  nameWithOwner: match.project,
+                  url: match.httpUrl,
+                  sshUrl: match.sshUrl,
+                  ...(match.preferredTransport === undefined
+                    ? {}
+                    : { preferredTransport: match.preferredTransport }),
+                };
+                const environmentId = addProjectCloneFlow.environmentId;
+                setAddProjectCloneFlow({
+                  step: "confirm",
+                  environmentId,
+                  source: addProjectCloneFlow.source,
+                  repositoryInput: query.trim(),
+                  repository,
+                  remoteUrl: getDefaultCloneUrl(repository),
+                  gerrit: { installation: match.installation, project: match.project },
+                  ...(match.projectUrl === undefined ? {} : { projectUrl: match.projectUrl }),
+                });
+                setGerritProjectMatches(null);
+                setQuery(
+                  getDefaultCloneDestination(
+                    environmentId,
+                    getDefaultCloneUrl(repository),
+                    match.project,
+                  ),
+                );
+                setBrowseGeneration((generation) => generation + 1);
+              }}
+            >
+              <GerritIcon className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{match.project}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {match.installation}
+                </span>
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">Clone</span>
+            </button>
+          ))}
+          {gerritProjectMatches.configuredInstallations === 0 ? (
+            <p className="px-2 py-1 text-xs text-destructive">
+              No Gerrit installations are configured.
+            </p>
+          ) : gerritProjectMatches.results.length === 0 &&
+            gerritProjectMatches.failures.length === 0 ? (
+            <p className="px-2 py-1 text-xs text-muted-foreground">No matching projects found.</p>
+          ) : null}
+          {gerritProjectMatches.failures.map((failure) => (
+            <p
+              key={failure.installation}
+              role="status"
+              className="px-2 py-1 text-xs text-destructive"
+            >
+              {failure.installation}: unavailable: {failure.detail}
+            </p>
+          ))}
+          {gerritProjectMatches.results.length === 0 && gerritProjectMatches.failures.length > 0 ? (
+            <p className="px-2 py-1 text-xs">No successful installation returned a match.</p>
+          ) : null}
+        </section>
+      ) : null}
       {addProjectCloneFlow?.step === "confirm" ? (
         <RemoteRepositorySummary
           source={addProjectCloneFlow.source}
           title={
             addProjectCloneFlow.repository?.nameWithOwner ?? addProjectCloneFlow.repositoryInput
           }
-          description={addProjectCloneFlow.repository?.url ?? addProjectCloneFlow.remoteUrl}
+          description={
+            addProjectCloneFlow.projectUrl ??
+            addProjectCloneFlow.repository?.url ??
+            addProjectCloneFlow.remoteUrl
+          }
+          {...(addProjectCloneFlow.projectUrl === undefined
+            ? {}
+            : { href: addProjectCloneFlow.projectUrl })}
         />
       ) : null}
       {browseAccessError ? (

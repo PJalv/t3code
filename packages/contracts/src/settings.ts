@@ -8,6 +8,7 @@ import {
 } from "./auth.ts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import { GerritConnectionConfig, GerritInstallationId } from "./gerrit.ts";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
@@ -1652,6 +1653,14 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  gerritCredentialGeneration: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  gerritConnections: Schema.Record(GerritInstallationId, GerritConnectionConfig)
+    .check(
+      Schema.makeFilter((connections) =>
+        Object.entries(connections).every(([key, config]) => config.installation === key),
+      ),
+    )
+    .pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sourceControlHosts: Schema.Record(Schema.String, SourceControlHostSettings).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -2049,6 +2058,15 @@ export const ServerSettingsPatch = Schema.Struct({
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
       otlpLogsUrl: Schema.optionalKey(TrimmedString),
     }),
+  ),
+  gerritConnections: Schema.optionalKey(
+    Schema.Record(GerritInstallationId, Schema.NullOr(GerritConnectionConfig)).check(
+      Schema.makeFilter((connections) =>
+        Object.entries(connections).every(
+          ([key, config]) => config === null || config.installation === key,
+        ),
+      ),
+    ),
   ),
   /** Merges per host, replacing patched fields whole; redaction markers retain secrets, empty secrets remove them. A non-empty token map keeps the saved tokens of hosts it omits; an empty map clears them all. */
   sourceControlHosts: Schema.optionalKey(Schema.Record(Schema.String, SourceControlHostSettings)),

@@ -6,6 +6,7 @@ import {
 import { holdLinkedNodeInView } from "./holdLinkedNodeInView";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { GERRIT_CHANGE_LEVEL_PATH } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   PullRequestActor,
@@ -325,7 +326,7 @@ function ConversationCard({
               <span>
                 <RelativeTime timestamp={event.at} />
               </span>
-              {showPath && event.path ? (
+              {showPath && event.path && event.path !== GERRIT_CHANGE_LEVEL_PATH ? (
                 <span className="inline-flex min-w-0 items-center gap-1">
                   <FileCode2Icon aria-hidden className="size-3 shrink-0" />
                   <span className="truncate">{event.path}</span>
@@ -512,6 +513,7 @@ function ReviewThreadEvent({
       (!thread.isResolved && !dismissed),
   );
   const replyCount = thread.replies.length + thread.moreReplies;
+  const changeLevel = thread.path === GERRIT_CHANGE_LEVEL_PATH;
 
   return (
     <div className="group relative mb-5 pl-12 [contain-intrinsic-block-size:48px] [content-visibility:auto]">
@@ -533,9 +535,9 @@ function ReviewThreadEvent({
           </span>
         ) : (
           <>
-            <FileCode2Icon aria-hidden className="size-3 shrink-0" />
-            <span className="min-w-0 truncate font-mono">
-              {thread.line === null ? thread.path : `${thread.path}:${thread.line}`}
+            {changeLevel ? <MessageSquareIcon aria-hidden className="size-3 shrink-0" /> : <FileCode2Icon aria-hidden className="size-3 shrink-0" />}
+            <span className={cn("min-w-0 truncate", !changeLevel && "font-mono")}>
+              {changeLevel ? gt("Change-level discussion") : thread.line === null ? thread.path : `${thread.path}:${thread.line}`}
             </span>
           </>
         )}
@@ -786,7 +788,7 @@ function ReviewVerdictEvent({
               <span>
                 <RelativeTime timestamp={event.at} />
               </span>
-              {event.path ? (
+              {event.path && event.path !== GERRIT_CHANGE_LEVEL_PATH ? (
                 <span className="inline-flex min-w-0 items-center gap-1">
                   <FileCode2Icon aria-hidden className="size-3 shrink-0" />
                   <span className="truncate">{event.path}</span>
