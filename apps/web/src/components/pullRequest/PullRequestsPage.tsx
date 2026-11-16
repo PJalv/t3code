@@ -1358,6 +1358,7 @@ export function PullRequestsPage() {
       };
     }),
   ];
+  const selectHost = (host: string | undefined) => updateListScope({ host });
   const serverMenuOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
     { value: "", label: gt("All servers"), Icon: LayersIcon },
     ...capableEnvironments.map((environment) => ({
@@ -1411,7 +1412,7 @@ export function PullRequestsPage() {
       optionScope={filterOptionScope}
       host={search.host}
       hostOptions={hostMenuOptions}
-      onHost={(host) => updateListScope({ host })}
+      onHost={selectHost}
       server={scopedEnvironmentId ?? undefined}
       serverOptions={serverMenuOptions}
       onServer={(server) => updateListScope({ environmentId: server, projectId: undefined })}
@@ -1434,7 +1435,7 @@ export function PullRequestsPage() {
     hostMenuOptions,
     onInvolvement: (involvement: PullRequestInvolvement) => updateListScope({ involvement }),
     onState: (state: PullRequestListState) => updateListScope({ state }),
-    onHost: (host: string | undefined) => updateListScope({ host }),
+    onHost: selectHost,
     searchInput,
     sortMenu,
     filtersMenu,

@@ -104,3 +104,44 @@ describe("git action copy", () => {
     ).toBe("Commit, push & create MR");
   });
 });
+
+describe("Gerrit checkout actions", () => {
+  const gerritStatus = (overrides: Partial<VcsStatusResult> = {}) =>
+    status({
+      aheadCount: 2,
+      sourceControlProvider: {
+        kind: SourceControlProviderKind.make("gerrit"),
+        name: "Gerrit",
+        baseUrl: "https://review.example/",
+      },
+      ...overrides,
+    });
+  it("offers a local commit but no ordinary push or PR", () => {
+    expect(
+      buildMenuItems(gerritStatus({ hasWorkingTreeChanges: true }), false).map((item) => item.id),
+    ).toEqual(["commit"]);
+    expect(resolveQuickAction(gerritStatus({ hasWorkingTreeChanges: true }), false)).toMatchObject({
+      kind: "run_action",
+      action: "commit",
+    });
+    expect(resolveQuickAction(gerritStatus(), false)).toMatchObject({
+      kind: "show_hint",
+      disabled: true,
+    });
+  });
+
+  it("keeps GitHub checkout behavior independent of any linked review", () => {
+    const github = gerritStatus({
+      hasWorkingTreeChanges: true,
+      sourceControlProvider: {
+        kind: SourceControlProviderKind.make("github"),
+        name: "GitHub",
+        baseUrl: "https://github.com/",
+      },
+    });
+    expect(resolveQuickAction(github, false)).toMatchObject({
+      kind: "run_action",
+      action: "commit_push_pr",
+    });
+  });
+});

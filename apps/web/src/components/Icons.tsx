@@ -69,6 +69,15 @@ export const LinuxIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const GerritIcon: Icon = (props) => (
+  <svg viewBox="0 0 52 52" fill="none" aria-hidden="true" {...props}>
+    <rect x="0" y="0" width="40" height="40" rx="4" fill="#D88989" />
+    <rect x="12" y="12" width="40" height="40" rx="4" fill="#83C88A" />
+    <path d="M18 22h12v4H18zM34 22h12v4H34z" fill="#9A4F4F" />
+    <path d="M18 36h4v-4h4v4h4v4h-4v4h-4v-4h-4zM34 36h4v-4h4v4h4v4h-4v4h-4v-4h-4z" fill="#397A43" />
+  </svg>
+);
+
 export const GitIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 256 256">
     <path

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  GerritConnectionConfig,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -31,6 +32,7 @@ import {
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
+const decodeGerritConfig = Schema.decodeUnknownSync(GerritConnectionConfig);
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("fallbackTextGenerationModelSelection", () => {
@@ -1094,4 +1096,29 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
         .speechPostProcessingModelSelection,
     ).toBeNull();
   });
+});
+
+it("replaces and removes only the selected Gerrit connection without retaining cleared bindings", () => {
+  const first = decodeGerritConfig({
+    installation: "https://review.example/Review/",
+    authMode: "http-basic",
+    bindings: [{ url: "ssh://user@review-alias:29418/Team/Repo", project: "Team/Repo" }],
+  });
+  const other = decodeGerritConfig({
+    installation: "https://review.example/review/",
+    authMode: "http-basic",
+    bindings: [],
+  });
+  const current = applyServerSettingsPatch(FOLDED_SERVER_SETTINGS, {
+    gerritConnections: { [first.installation]: first, [other.installation]: other },
+  });
+  const cleared = applyServerSettingsPatch(current, {
+    gerritConnections: { [first.installation]: { ...first, bindings: [] } },
+  });
+  expect(cleared.gerritConnections[first.installation]?.bindings).toEqual([]);
+  expect(cleared.gerritConnections[other.installation]).toEqual(other);
+  const removed = applyServerSettingsPatch(cleared, {
+    gerritConnections: { [first.installation]: null },
+  });
+  expect(removed.gerritConnections).toEqual({ [other.installation]: other });
 });

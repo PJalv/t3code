@@ -451,6 +451,9 @@ export class SessionStore extends Context.Service<
     readonly verifyWebSocketToken: (
       token: string,
     ) => Effect.Effect<VerifiedWebSocketTicket, SessionCredentialError>;
+    readonly readActive: (
+      sessionId: AuthSessionId,
+    ) => Effect.Effect<Option.Option<AuthClientSession>, SessionCredentialInternalError>;
     readonly listActive: () => Effect.Effect<
       ReadonlyArray<AuthClientSession>,
       SessionCredentialInternalError
@@ -1103,6 +1106,29 @@ const make = Effect.gen(function* () {
     } satisfies VerifiedWebSocketTicket;
   });
 
+  const readActive = Effect.fn("SessionStore.readActive")(function* (sessionId: AuthSessionId) {
+    const now = yield* DateTime.now;
+    const row = yield* authSessions
+      .getById({ sessionId })
+      .pipe(
+        Effect.mapError((cause) => new SessionCredentialVerificationError({ sessionId, cause })),
+      );
+    if (
+      Option.isNone(row) ||
+      row.value.revokedAt !== null ||
+      row.value.expiresAt.epochMilliseconds <= now.epochMilliseconds
+    )
+      return Option.none();
+    const connected = yield* Ref.get(connectedSessionsRef);
+    return Option.some(
+      toAuthClientSession({
+        ...row.value,
+        client: toClientMetadata(row.value.client),
+        connected: connected.has(sessionId),
+      }),
+    );
+  });
+
   const listActive: SessionStore["Service"]["listActive"] = Effect.fn("SessionStore.listActive")(
     function* () {
       const now = yield* DateTime.now;
@@ -1294,6 +1320,7 @@ const make = Effect.gen(function* () {
     verify,
     issueWebSocketToken,
     verifyWebSocketToken,
+    readActive,
     listActive,
     awaitInvalidation,
     get streamChanges() {

@@ -3,8 +3,11 @@ import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 
 import { AssetCreateUrlResult, AttachmentCreateUploadUrlResult } from "./assets.ts";
+import { GerritConnection } from "./gerrit.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
+
+const decodeGerritConnection = Schema.decodeUnknownSync(GerritConnection);
 
 describe("WebSocket RPC contracts", () => {
   it("only accepts asset and upload URLs on their own server routes", () => {
@@ -39,6 +42,75 @@ describe("WebSocket RPC contracts", () => {
         Exit.isFailure(decodeUpload({ relativeUrl, expiresAt, attachmentId: "attachment" })),
       ).toBe(true);
     }
+  });
+
+  const scope = {
+    installation: "https://review.example/Review/",
+    project: "Team/Repo",
+    branch: "Release/Next",
+  };
+
+  it.each([
+    WS_METHODS.gerritConnections,
+    WS_METHODS.gerritConfigure,
+    WS_METHODS.gerritTest,
+    WS_METHODS.gerritRemove,
+    WS_METHODS.gerritRemoveCredentials,
+  ])("registers native method %s", (method) => {
+    expect(WsRpcGroup.requests.has(method)).toBe(true);
+  });
+
+  it.each([
+    "gerrit.review",
+    "gerrit.files",
+    "gerrit.diff",
+    "gerrit.chain",
+    "gerrit.list",
+    "gerrit.detail",
+    "gerrit.searchChanges",
+    "gerrit.resolveUrl",
+    "gerrit.checkout",
+    "gerrit.workspace",
+    "gerrit.discoverThreadCheckout",
+    "gerrit.linkedThreads",
+    "gerrit.repositoryThreads",
+    "gerrit.suggestReviewers",
+    "gerrit.connection",
+    "gerrit.related",
+    "gerrit.subscribeMaintenance",
+    "gerrit.createBatch",
+    "gerrit.controlBatch",
+    "gerrit.prepareMaintenance",
+    "gerrit.controlMaintenance",
+    "gerrit.listMaintenance",
+    "gerrit.configureVerification",
+    "gerrit.verificationHistory",
+    "gerrit.prepareUpload",
+    "gerrit.controlUpload",
+    "gerrit.writeScopeBlocked",
+    "gerrit.prepareWrite",
+    "gerrit.confirmWrite",
+    "gerrit.readWrite",
+    "gerrit.listWrites",
+    "gerrit.cancelWrite",
+    "gerrit.discoverRecovery",
+    "gerrit.observeRecovery",
+    "gerrit.acknowledgeRecovery",
+  ])("does not register removed staged method %s", (method) => {
+    expect(new Set<string>(WsRpcGroup.requests.keys()).has(method)).toBe(false);
+  });
+
+  it("strips credentials from safe connection responses", () => {
+    const rpc = WsRpcGroup.requests.get(WS_METHODS.gerritConfigure);
+    if (rpc === undefined) throw new Error("Missing native configure RPC");
+    const response = decodeGerritConnection({
+      config: { installation: scope.installation, authMode: "http-basic", bindings: [] },
+      credentialPresent: true,
+      verification: "not-tested",
+      credentials: { username: "fixture", token: "fixture-secret" },
+    });
+    expect(JSON.stringify(response)).not.toContain("fixture-secret");
+    expect(response).not.toHaveProperty("credentials");
   });
 
   it("rejects server-internal commands sent to dispatchCommand", () => {

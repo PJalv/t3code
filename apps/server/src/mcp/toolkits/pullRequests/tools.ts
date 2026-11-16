@@ -67,12 +67,12 @@ export const PullRequestTargetInput = Schema.Struct({
   url: Schema.optional(TrimmedNonEmptyString),
   repository: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "With `number`, when no `url`.",
+      description: "Defaults to the checkout's.",
     }),
   ),
   number: Schema.optional(
     PositiveInt.annotate({
-      description: "With `repository`, when no `url`.",
+      description: "When no `url`.",
     }),
   ),
   host: Schema.optional(

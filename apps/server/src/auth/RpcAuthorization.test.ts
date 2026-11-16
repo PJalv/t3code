@@ -1,4 +1,8 @@
 import {
+  GerritInstallationId,
+  GerritConnectionConfig,
+  GerritWsRpcGroup,
+  RpcScopeAuthorization,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -28,6 +32,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as RpcTest from "effect/rpc/RpcTest";
 
 import {
@@ -36,6 +41,9 @@ import {
   requiredScopeForDeviceList,
 } from "./RpcAuthorization.ts";
 import * as RpcAuthorization from "./RpcAuthorization.ts";
+
+const decodeGerritInstallationId = Schema.decodeUnknownSync(GerritInstallationId);
+const decodeGerritConnectionConfig = Schema.decodeUnknownSync(GerritConnectionConfig);
 
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
@@ -684,3 +692,86 @@ it.effect("requires provider management to send /logout through chat", () =>
     ]);
   }).pipe(Effect.scoped),
 );
+describe("Gerrit RPC authorization", () => {
+  const group = GerritWsRpcGroup.middleware(RpcScopeAuthorization).omit(
+    WS_METHODS.gerritConnections,
+    WS_METHODS.gerritSearchProjects,
+    WS_METHODS.gerritDeliveryCheckout,
+    WS_METHODS.gerritHook,
+    WS_METHODS.gerritInstallHook,
+    WS_METHODS.gerritSigningPassphrase,
+  );
+  const installation = decodeGerritInstallationId("https://review.example/Review/");
+  const config = decodeGerritConnectionConfig({
+    installation,
+    authMode: "http-basic",
+    bindings: [],
+  });
+  it.effect("rejects all credential operations for read-only sessions before handlers run", () =>
+    Effect.gen(function* () {
+      const handled: string[] = [];
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.gerritConfigure, () =>
+              Effect.sync(() => {
+                handled.push("configure");
+                return { config, credentialPresent: true, verification: "not-tested" as const };
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.gerritTest, () =>
+              Effect.sync(() => handled.push("test")).pipe(Effect.andThen(Effect.never)),
+            ),
+            group.toLayerHandler(WS_METHODS.gerritRemove, () =>
+              Effect.sync(() => {
+                handled.push("remove");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.gerritRemoveCredentials, () =>
+              Effect.sync(() => {
+                handled.push("credentials");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.gerritSetSigningPassphrase, () =>
+              Effect.sync(() => {
+                handled.push("signing-passphrase");
+                return { present: true };
+              }),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationReadScope]),
+          ),
+        ),
+      );
+      const errors = [
+        yield* client[WS_METHODS.gerritConfigure]({
+          config,
+          credentials: { username: "user", token: "private-fixture-token" },
+        }).pipe(Effect.flip),
+        yield* client[WS_METHODS.gerritTest]({ installation }).pipe(Effect.flip),
+        yield* client[WS_METHODS.gerritRemove]({ installation }).pipe(Effect.flip),
+        yield* client[WS_METHODS.gerritRemoveCredentials]({ installation }).pipe(Effect.flip),
+        yield* client[WS_METHODS.gerritSetSigningPassphrase]({
+          passphrase: "private-fixture-passphrase",
+        }).pipe(Effect.flip),
+      ];
+      for (const error of errors)
+        expect(error).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthSettingsWriteScope,
+        });
+      expect(handled).toEqual([]);
+      expect(JSON.stringify(errors)).not.toContain("private-fixture-token");
+      expect(JSON.stringify(errors)).not.toContain("private-fixture-passphrase");
+    }).pipe(Effect.scoped),
+  );
+  it("keeps native reads separate from credential operations", () => {
+    for (const method of [
+      WS_METHODS.gerritConnections,
+      WS_METHODS.gerritSearchProjects,
+      WS_METHODS.gerritDeliveryCheckout,
+      WS_METHODS.gerritHook,
+      WS_METHODS.gerritSigningPassphrase,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+  });
+});

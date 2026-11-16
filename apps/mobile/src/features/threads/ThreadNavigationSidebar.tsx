@@ -104,7 +104,7 @@ interface ThreadNavigationSidebarProps {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onOpenThreadPullRequests: (
     thread: EnvironmentThreadShell,
-    pr: ThreadPrPresentation,
+    pr: ThreadPrPresentation | null,
   ) => void;
   readonly onRequestVisibility: () => void;
   readonly searchQuery: string;
@@ -343,7 +343,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   };
   const handleOpenThreadPullRequests = (
     thread: EnvironmentThreadShell,
-    pr: ThreadPrPresentation,
+    pr: ThreadPrPresentation | null,
   ) => {
     onOpenThreadPullRequests(thread, pr);
     openSwipeableRef.current?.close();

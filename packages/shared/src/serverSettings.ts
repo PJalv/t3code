@@ -405,6 +405,7 @@ export function applyServerSettingsPatch(
     textGenerators: textGeneratorsPatch,
     secretProviders: secretProvidersPatch,
     sourceControlHosts: sourceControlHostsPatch,
+    gerritConnections: gerritConnectionsPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
@@ -556,6 +557,14 @@ export function applyServerSettingsPatch(
               ? [current.worktreesDirectory]
               : []),
           ],
+        }
+      : {}),
+    ...(gerritConnectionsPatch !== undefined
+      ? {
+          gerritConnections: mergeSettingsEntries(
+            current.gerritConnections,
+            gerritConnectionsPatch,
+          ),
         }
       : {}),
     // Per host, a patched field replaces the saved one: deepMerge would keep a cleared account pin.

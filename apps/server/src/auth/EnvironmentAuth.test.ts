@@ -8,6 +8,9 @@ import {
 import { expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
+import * as TestClock from "effect/testing/TestClock";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as TestClock from "effect/testing/TestClock";
@@ -81,6 +84,482 @@ const requestMetadata = {
 it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
   "EnvironmentAuth.layer",
   (it) => {
+    it.effect("authorizes only the authenticated app object and rechecks revocation", () =>
+      Effect.gen(function* () {
+        const auth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const issued = yield* auth.issueSession({ scopes: ["source-control:write"] });
+        const session = yield* auth.authenticateHttpRequest(makeBearerRequest(issued.token));
+        expect((yield* auth.authorizeAppSession(session, ["source-control:write"])).sessionId).toBe(
+          issued.sessionId,
+        );
+        expect(Object.isFrozen(session)).toBe(true);
+        expect(Object.isFrozen(session.scopes)).toBe(true);
+        expect(
+          (yield* auth
+            .authorizeAppSession({ ...session }, ["source-control:write"])
+            .pipe(Effect.flip))._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+        expect(
+          (yield* auth.authorizeAppSession(session, ["settings:write"]).pipe(Effect.flip))._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+        yield* sessions.revoke(issued.sessionId);
+        expect(
+          (yield* auth.authorizeAppSession(session, ["source-control:write"]).pipe(Effect.flip))
+            ._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect("expires authority already handed to a connected app", () =>
+      Effect.gen(function* () {
+        const auth = yield* EnvironmentAuth.EnvironmentAuth;
+        const issued = yield* auth.issueSession({
+          ttl: Duration.seconds(1),
+          scopes: ["source-control:write"],
+        });
+        const session = yield* auth.authenticateHttpRequest(makeBearerRequest(issued.token));
+        yield* auth.authorizeAppSession(session, ["source-control:write"]);
+        yield* TestClock.adjust("2 seconds");
+        expect(
+          (yield* auth.authorizeAppSession(session, ["source-control:write"]).pipe(Effect.flip))
+            ._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect("preserves trusted authority through a real WebSocket ticket handoff", () =>
+      Effect.gen(function* () {
+        const auth = yield* EnvironmentAuth.EnvironmentAuth;
+        const issued = yield* auth.issueSession({ scopes: ["source-control:write"] });
+        const session = yield* auth.authenticateHttpRequest(makeBearerRequest(issued.token));
+        const ticket = yield* auth.issueWebSocketTicket(session);
+        const request = HttpServerRequest.fromWeb(
+          new Request(
+            `http://localhost/ws?wsTicket=${encodeURIComponent(Redacted.value(ticket.ticket))}`,
+          ),
+        );
+        const socket = yield* auth.authenticateWebSocketUpgrade(request, "rpc");
+        expect((yield* auth.authorizeAppSession(socket, ["source-control:write"])).sessionId).toBe(
+          issued.sessionId,
+        );
+        expect(
+          (yield* auth
+            .authorizeAppSession({ ...socket }, ["source-control:write"])
+            .pipe(Effect.flip))._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect("refuses MCP audience even when its token has every application scope", () =>
+      Effect.gen(function* () {
+        const auth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const issued = yield* sessions.issue({
+          subject: "mcp-client",
+          method: "bearer-access-token",
+          scopes: AuthStandardClientScopes,
+        });
+        expect(
+          (yield* auth.authenticateHttpRequest(makeBearerRequest(issued.token)).pipe(Effect.flip))
+            ._tag,
+        ).toBe("ServerAuthInvalidCredentialError");
+        const mcp = yield* auth.authenticateMcpClient(makeBearerRequest(issued.token));
+        const forged: EnvironmentAuth.AuthenticatedSession = {
+          sessionId: mcp.sessionId,
+          subject: "mcp-client",
+          method: "bearer-access-token",
+          scopes: AuthStandardClientScopes,
+        };
+        expect(
+          (yield* auth.authorizeAppSession(forged, ["source-control:write"]).pipe(Effect.flip))
+            ._tag,
+        ).toBe("ServerAuthForbiddenOperationError");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const token = "reusable-dev-auth-token-that-is-long-enough";
+        const devExchange = yield* serverAuth.createBrowserSession(token, requestMetadata);
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+        const scopedExchange = yield* serverAuth.createBrowserSession(
+          pairing.credential,
+          requestMetadata,
+        );
+        const request = {
+          cookies: {
+            [sessions.cookieName]: scopedExchange.sessionToken,
+            [devExchange.cookieName ?? "missing"]: devExchange.sessionToken,
+          },
+          headers: {},
+        } as unknown as Parameters<
+          EnvironmentAuth.EnvironmentAuth["Service"]["authenticateHttpRequest"]
+        >[0];
+
+        const authenticated = yield* serverAuth.authenticateHttpRequest(request);
+        expect(devExchange.cookieName).toMatch(/^t3_dev_session_/);
+        expect(devExchange.expireNormalCookie).toBe(true);
+        expect(devExchange.response).toMatchObject(authScopeResponse(AuthStandardClientScopes));
+        expect(authenticated.scopes).toEqual(["orchestration:read"]);
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            mode: "web",
+            devUrl: new URL("http://127.0.0.1:5173"),
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("does not fall back to the dev cookie after a normal cookie is rejected", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const token = "reusable-dev-auth-token-that-is-long-enough";
+        const devExchange = yield* serverAuth.createBrowserSession(token, requestMetadata);
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+        const scopedExchange = yield* serverAuth.createBrowserSession(
+          pairing.credential,
+          requestMetadata,
+        );
+        const scoped = yield* sessions.verify(scopedExchange.sessionToken);
+        yield* sessions.revoke(scoped.sessionId);
+        const request = {
+          cookies: {
+            [sessions.cookieName]: scopedExchange.sessionToken,
+            [devExchange.cookieName ?? "missing"]: devExchange.sessionToken,
+          },
+          headers: {},
+        } as unknown as Parameters<
+          EnvironmentAuth.EnvironmentAuth["Service"]["authenticateHttpRequest"]
+        >[0];
+
+        const error = yield* Effect.flip(serverAuth.authenticateHttpRequest(request));
+        expect(error._tag).toBe("ServerAuthInvalidCredentialError");
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            mode: "web",
+            devUrl: new URL("http://127.0.0.1:5173"),
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("does not use the dev cookie when Authorization is invalid or empty", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const token = "reusable-dev-auth-token-that-is-long-enough";
+        const devExchange = yield* serverAuth.createBrowserSession(token, requestMetadata);
+        for (const authorization of ["Bearer invalid", ""] as const) {
+          const request = {
+            cookies: { [devExchange.cookieName ?? "missing"]: devExchange.sessionToken },
+            headers: { authorization },
+          } as unknown as Parameters<
+            EnvironmentAuth.EnvironmentAuth["Service"]["authenticateHttpRequest"]
+          >[0];
+          const error = yield* Effect.flip(serverAuth.authenticateHttpRequest(request));
+          expect(EnvironmentAuth.isServerAuthCredentialError(error)).toBe(true);
+        }
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            mode: "web",
+            devUrl: new URL("http://127.0.0.1:5173"),
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("exchanges the reusable dev token for a local scoped OAuth session", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const token = "reusable-dev-auth-token-that-is-long-enough";
+        const exchanged = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          token,
+          ["orchestration:read"],
+          requestMetadata,
+        );
+
+        expect(exchanged.access_token).not.toBe(token);
+        expect(exchanged.scope).toBe("orchestration:read");
+        const dpop = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          token,
+          ["orchestration:read"],
+          requestMetadata,
+          { proofKeyThumbprint: "test-proof-key" },
+        );
+        expect(dpop.access_token).not.toBe(token);
+        expect(dpop.access_token).not.toBe(exchanged.access_token);
+        expect(dpop.token_type).toBe("DPoP");
+        expect(dpop.scope).toBe("orchestration:read");
+
+        const secondBearer = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          token,
+          ["orchestration:read"],
+          requestMetadata,
+        );
+        const firstSession = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(exchanged.access_token),
+        );
+        const secondSession = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(secondBearer.access_token),
+        );
+        expect(firstSession.subject).toBe("reusable-dev-token-child");
+        expect(secondSession.subject).toBe("reusable-dev-token-child");
+        expect((yield* sessions.verify(token)).subject).toBe("reusable-dev-token");
+        const before = yield* serverAuth.listClientSessions(firstSession.sessionId);
+        const denied = yield* serverAuth
+          .exchangeBootstrapCredentialForAccessToken(token, ["review:write"], requestMetadata)
+          .pipe(Effect.flip);
+        expect(denied._tag).toBe("ServerAuthScopeNotGrantedError");
+        const empty = yield* serverAuth
+          .exchangeBootstrapCredentialForAccessToken(token, [], requestMetadata)
+          .pipe(Effect.flip);
+        expect(empty._tag).toBe("ServerAuthScopeNotGrantedError");
+        expect(yield* serverAuth.listClientSessions(firstSession.sessionId)).toEqual(before);
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            mode: "web",
+            devUrl: new URL("http://127.0.0.1:5173"),
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("uses a one-time startup credential after local dev token revocation", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const token = "reusable-dev-auth-token-that-is-long-enough";
+        const initial = yield* serverAuth.issueStartupPairingCredential();
+        const seeded = yield* sessions.verify(token);
+
+        yield* sessions.revoke(seeded.sessionId);
+        const recovery = yield* serverAuth.issueStartupPairingCredential();
+
+        expect(initial.credential).toBe(token);
+        expect(recovery.credential).not.toBe(token);
+        expect((yield* Effect.flip(sessions.verify(token)))._tag).toBe("SessionTokenRevokedError");
+        expect(
+          (yield* serverAuth.createBrowserSession(recovery.credential, requestMetadata)).response,
+        ).toMatchObject({ authenticated: true, ...authScopeResponse(AuthStandardClientScopes) });
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            mode: "web",
+            devUrl: new URL("http://127.0.0.1:5173"),
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("prefers a bearer token over a stale legacy cookie", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const bearer = yield* serverAuth.issueSession();
+        const verified = yield* serverAuth.authenticateHttpRequest({
+          cookies: { [sessions.legacyCookieName ?? "t3_session"]: "stale" },
+          headers: { authorization: `Bearer ${bearer.token}` },
+        } as never);
+
+        expect(verified.sessionId).toBe(bearer.sessionId);
+      }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
+    );
+
+    it.effect("preserves pairing grants after rejecting scopes they do not grant", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const pairingCredential = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read", "orchestration:operate"],
+        });
+
+        const error = yield* serverAuth
+          .exchangeBootstrapCredentialForAccessToken(
+            pairingCredential.credential,
+            ["access:write"],
+            requestMetadata,
+          )
+          .pipe(Effect.flip);
+
+        expect(error._tag).toBe("ServerAuthScopeNotGrantedError");
+        expect((yield* serverAuth.listPairingLinks()).map((link) => link.id)).toContain(
+          pairingCredential.id,
+        );
+        expect(yield* serverAuth.listSessions()).toEqual([]);
+
+        const token = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          pairingCredential.credential,
+          ["orchestration:read"],
+          requestMetadata,
+        );
+        const session = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(token.access_token),
+        );
+
+        expect(token.scope).toBe("orchestration:read");
+        expect(session.scopes).toEqual(["orchestration:read"]);
+        expect((yield* serverAuth.listPairingLinks()).map((link) => link.id)).not.toContain(
+          pairingCredential.id,
+        );
+        const reused = yield* serverAuth
+          .exchangeBootstrapCredentialForAccessToken(
+            pairingCredential.credential,
+            ["orchestration:read"],
+            requestMetadata,
+          )
+          .pipe(Effect.flip);
+        expect(reused._tag).toBe("ServerAuthInvalidCredentialError");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect.each([
+      { label: "omits scope", requestedScopes: undefined },
+      {
+        label: "requests unsupported permissions alongside a granted one",
+        requestedScopes: ["orchestration:read", "access:write"] as const,
+      },
+    ])("inherits a constrained pairing grant when token exchange $label", ({ requestedScopes }) =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const pairingCredential = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+
+        const token = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          pairingCredential.credential,
+          requestedScopes,
+          requestMetadata,
+        );
+
+        expect(token.scope).toBe("orchestration:read");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
+    it.effect("narrows seeded desktop grants to the requested scopes", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const token = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          "desktop-bootstrap-token",
+          ["orchestration:read"],
+          requestMetadata,
+        );
+        const session = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(token.access_token),
+        );
+
+        expect(token.scope).toBe("orchestration:read");
+        expect(session.scopes).toEqual(["orchestration:read"]);
+      }).pipe(
+        Effect.provide(layerEnvironmentAuth({ desktopBootstrapToken: "desktop-bootstrap-token" })),
+      ),
+    );
+
+    it.effect("rotates desktop bearer sessions without accumulating authorized clients", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const browser = yield* serverAuth.createBrowserSession(
+          "desktop-bootstrap-token",
+          requestMetadata,
+        );
+        const browserSession = yield* serverAuth.authenticateHttpRequest(
+          makeCookieRequest(sessions.cookieName, browser.sessionToken),
+        );
+        const staleSessions = yield* Effect.forEach([1, 2, 3], () =>
+          sessions.issue({ subject: "desktop-bootstrap", method: "bearer-access-token" }),
+        );
+        const pairing = yield* serverAuth.issuePairingCredential();
+        const paired = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          pairing.credential,
+          undefined,
+          { ...requestMetadata, label: "T3 Code Desktop" },
+        );
+        const first = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          "desktop-bootstrap-token",
+          undefined,
+          requestMetadata,
+        );
+        const firstSession = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(first.access_token),
+        );
+        const second = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+          "desktop-bootstrap-token",
+          undefined,
+          requestMetadata,
+        );
+
+        const active = yield* serverAuth.listSessions();
+        const firstError = yield* serverAuth
+          .authenticateHttpRequest(makeBearerRequest(first.access_token))
+          .pipe(Effect.flip);
+        const secondSession = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(second.access_token),
+        );
+
+        expect(active).toHaveLength(3);
+        expect(active.map((entry) => entry.sessionId)).toContain(browserSession.sessionId);
+        expect(active.map((entry) => entry.sessionId)).toContain(secondSession.sessionId);
+        expect(active.map((entry) => entry.sessionId)).not.toContain(firstSession.sessionId);
+        expect(firstError._tag).toBe("ServerAuthInvalidCredentialError");
+        for (const stale of staleSessions) {
+          const error = yield* sessions.verify(stale.token).pipe(Effect.flip);
+          expect(error._tag).toBe("SessionTokenRevokedError");
+        }
+        const pairedSession = yield* serverAuth.authenticateHttpRequest(
+          makeBearerRequest(paired.access_token),
+        );
+        expect(pairedSession.subject).toBe("one-time-token");
+        expect(active.map((entry) => entry.sessionId)).toContain(pairedSession.sessionId);
+      }).pipe(
+        Effect.provide(
+          layerEnvironmentAuth({
+            desktopBootstrapToken: "desktop-bootstrap-token",
+          }),
+        ),
+      ),
+    );
+
+    it.effect("issues startup pairing URLs that bootstrap administrative sessions", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+
+        const pairingUrl = yield* serverAuth.issueStartupPairingUrl("http://127.0.0.1:3773");
+        const token = new URLSearchParams(new URL(pairingUrl).hash.slice(1)).get("token");
+        const listedPairingLinks = yield* serverAuth.listPairingLinks();
+        expect(token).toBeTruthy();
+        expect(
+          listedPairingLinks.some(
+            (pairingLink) => pairingLink.subject === "administrative-bootstrap",
+          ),
+        ).toBe(false);
+
+        const exchanged = yield* serverAuth.createBrowserSession(token ?? "", requestMetadata);
+        const verified = yield* serverAuth.authenticateHttpRequest(
+          makeCookieRequest(sessions.cookieName, exchanged.sessionToken),
+        );
+
+        expect(verified.scopes).toEqual(AuthStandardClientScopes);
+        expect(verified.subject).toBe("administrative-bootstrap");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
+
     it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
       Effect.gen(function* () {
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;

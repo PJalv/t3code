@@ -1,4 +1,8 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  GerritReadError,
+  SourceControlCloneRepositoryInput,
+  SourceControlProviderKind,
+} from "@t3tools/contracts";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,17 +17,14 @@ import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
 
-import {
-  GitCommandError,
-  SourceControlProviderError,
-  type SourceControlCloneRepositoryInput,
-} from "@t3tools/contracts";
+import { GitCommandError, SourceControlProviderError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
+import * as GerritService from "./GerritService.ts";
 
 const CLONE_URLS = {
   nameWithOwner: "octocat/t3code",
@@ -34,21 +35,15 @@ const CLONE_URLS = {
 function makeProvider(
   overrides: Partial<SourceControlProvider.SourceControlProvider["Service"]> = {},
 ): SourceControlProvider.SourceControlProvider["Service"] {
-  const unsupported = (operation: string) =>
-    Effect.die(`unexpected provider operation ${operation}`) as Effect.Effect<
-      never,
-      SourceControlProviderError
-    >;
-
   return {
     kind: SourceControlProviderKind.make("github"),
-    listChangeRequests: () => unsupported("listChangeRequests"),
-    getChangeRequest: () => unsupported("getChangeRequest"),
-    createChangeRequest: () => unsupported("createChangeRequest"),
+    listChangeRequests: () => Effect.succeed([]),
+    getChangeRequest: () => Effect.die("Unexpected getChangeRequest"),
+    createChangeRequest: () => Effect.die("Unexpected createChangeRequest"),
+    checkoutChangeRequest: () => Effect.die("Unexpected checkoutChangeRequest"),
     getRepositoryCloneUrls: () => Effect.succeed(CLONE_URLS),
     createRepository: () => Effect.succeed(CLONE_URLS),
     getDefaultBranch: () => Effect.succeed(null),
-    checkoutChangeRequest: () => unsupported("checkoutChangeRequest"),
     ...overrides,
   };
 }
@@ -67,6 +62,7 @@ function layer(input: {
   readonly provider?: SourceControlProvider.SourceControlProvider["Service"];
   readonly git?: Partial<GitVcsDriver.GitVcsDriver["Service"]>;
   readonly fileSystem?: FileSystem.FileSystem;
+  readonly gerrit?: Partial<GerritService.GerritService["Service"]>;
 }) {
   const layerService = SourceControlRepositoryService.layer.pipe(
     Layer.provide(
@@ -98,12 +94,25 @@ function layer(input: {
     ),
   );
 
-  return input.fileSystem
+  const withGerrit = input.gerrit
     ? layerService.pipe(
+        Layer.provide(
+          Layer.mock(GerritService.GerritService)({
+            downloadCloneHook: () => Effect.fail(new GerritReadError({ reason: "offline" })),
+            bindVerifiedClone: () => Effect.void,
+            readCloneConfig: (installation) =>
+              Effect.succeed({ installation, authMode: "http-basic", bindings: [] }),
+            ...input.gerrit,
+          }),
+        ),
+      )
+    : layerService;
+  return input.fileSystem
+    ? withGerrit.pipe(
         Layer.provide(Layer.succeed(FileSystem.FileSystem, input.fileSystem)),
         Layer.provideMerge(NodePath.layer),
       )
-    : layerService.pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+    : withGerrit.pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 }
 
 const lookupFailingWith = (cause: unknown, detail: string) =>

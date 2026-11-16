@@ -18,6 +18,13 @@ import { WS_METHODS } from "./rpc.ts";
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
+  [WS_METHODS.gerritConfigure]: AuthSettingsWriteScope,
+  [WS_METHODS.gerritRemove]: AuthSettingsWriteScope,
+  [WS_METHODS.gerritRemoveCredentials]: AuthSettingsWriteScope,
+  [WS_METHODS.gerritSetSigningPassphrase]: AuthSettingsWriteScope,
+  [WS_METHODS.gerritTest]: AuthSettingsWriteScope,
+  [WS_METHODS.gerritInstallHook]: AuthSourceControlWriteScope,
+
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,
@@ -30,6 +37,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.serverListTextGeneratorModels]: AuthSettingsWriteScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsRunAction]: AuthSourceControlWriteScope,
+  [WS_METHODS.pullRequestsGerritCommand]: AuthSourceControlWriteScope,
+  [WS_METHODS.gerritUploadCommit]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsUpdate]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsComment]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsUpdateComment]: AuthSourceControlWriteScope,
