@@ -496,6 +496,13 @@ export class EnvironmentAuth extends Context.Service<
   EnvironmentAuth,
   {
     readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
+    readonly authorizeAppSession: (
+      session: AuthenticatedSession,
+      scopes: ReadonlyArray<AuthEnvironmentScope>,
+    ) => Effect.Effect<
+      AuthClientSession,
+      ServerAuthForbiddenOperationError | ServerAuthInternalError
+    >;
     readonly getSessionState: (
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthSessionState, ServerAuthInternalError>;
@@ -816,6 +823,40 @@ export const make = Effect.gen(function* () {
   const managedPolicy = yield* ManagedPolicy.ManagedPolicy;
   const devAuth = resolveReusableDevAuth(config);
 
+  const authenticatedAppSessions = new WeakSet<AuthenticatedSession>();
+  const rememberAppSession = (session: AuthenticatedSession): AuthenticatedSession => {
+    Object.freeze(session.scopes);
+    Object.freeze(session);
+    authenticatedAppSessions.add(session);
+    return session;
+  };
+  const authorizeAppSession = Effect.fn("EnvironmentAuth.authorizeAppSession")(function* (
+    session: AuthenticatedSession,
+    scopes: ReadonlyArray<AuthEnvironmentScope>,
+  ) {
+    if (!authenticatedAppSessions.has(session))
+      return yield* new ServerAuthForbiddenOperationError({});
+    const active = yield* sessions
+      .readActive(session.sessionId)
+      .pipe(Effect.mapError((cause) => new ServerAuthSessionsListError({ cause })));
+    if (
+      Option.isNone(active) ||
+      active.value.subject === MCP_CLIENT_SUBJECT ||
+      active.value.subject !== session.subject ||
+      active.value.method !== session.method ||
+      !scopes.every(
+        (scope) => session.scopes.includes(scope) && active.value.scopes.includes(scope),
+      )
+    )
+      return yield* new ServerAuthForbiddenOperationError({});
+    if (
+      session.expiresAt !== undefined &&
+      DateTime.toEpochMillis(session.expiresAt) <= (yield* DateTime.now).epochMilliseconds
+    )
+      return yield* new ServerAuthForbiddenOperationError({});
+    return active.value;
+  });
+
   const authenticateToken = (
     token: string,
   ): Effect.Effect<
@@ -842,6 +883,7 @@ export const make = Effect.gen(function* () {
         ...(session.proofKeyThumbprint ? { proofKeyThumbprint: session.proofKeyThumbprint } : {}),
         ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
       })),
+      Effect.map(rememberAppSession),
     );
 
   const resolveRequestCredential = (request: HttpServerRequest.HttpServerRequest) => {
@@ -1570,7 +1612,7 @@ export const make = Effect.gen(function* () {
               Effect.provideService(Digest.Digest, digest),
             );
           }
-          return {
+          return rememberAppSession({
             sessionId: session.sessionId,
             subject: session.subject,
             method: session.method,
@@ -1579,7 +1621,7 @@ export const make = Effect.gen(function* () {
               ? { proofKeyThumbprint: session.proofKeyThumbprint }
               : {}),
             ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
-          };
+          });
         }
       }
 
@@ -1711,6 +1753,7 @@ export const make = Effect.gen(function* () {
   });
 
   return EnvironmentAuth.of({
+    authorizeAppSession,
     getDescriptor: Effect.fn("EnvironmentAuth.getDescriptor")(function () {
       return Effect.succeed(descriptor);
     }),

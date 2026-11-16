@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { GerritInstallationId } from "./gerrit.ts";
 import { type CommandId, ProjectId } from "./baseSchemas.ts";
 import {
   ProviderDriverKind,
@@ -601,4 +602,71 @@ describe("server model preferences", () => {
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
+});
+
+describe("native Gerrit connection settings", () => {
+  it("defaults existing settings to no connections", () => {
+    expect(decodeServerSettings({}).gerritConnections).toEqual({});
+  });
+
+  it("round-trips safe native configuration and supports per-installation removal patches", () => {
+    const installation = "https://review.example/Review/";
+    const config = {
+      installation,
+      authMode: "http-basic",
+      bindings: [{ url: "ssh://user@review-alias:29418/Team/Repo", project: "Team/Repo" }],
+    };
+    const settings = decodeServerSettings({ gerritConnections: { [installation]: config } });
+    expect(
+      decodeServerSettings(encodeServerSettings(settings)).gerritConnections[
+        GerritInstallationId.make(installation)
+      ],
+    ).toEqual(config);
+    expect(
+      decodeServerSettingsPatch({ gerritConnections: { [installation]: null } }).gerritConnections,
+    ).toEqual({ [installation]: null });
+  });
+
+  it("rejects unsupported authentication and credential-bearing HTTP bindings", () => {
+    const installation = "https://review.example/Review/";
+    expect(() =>
+      decodeServerSettingsPatch({
+        gerritConnections: { [installation]: { installation, authMode: "ssh", bindings: [] } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeServerSettingsPatch({
+        gerritConnections: {
+          [installation]: {
+            installation,
+            authMode: "http-basic",
+            bindings: [
+              { url: "https://user:private@review.example/Team/Repo", project: "Team/Repo" },
+            ],
+          },
+        },
+      }),
+    ).toThrow();
+  });
+});
+
+it("rejects mismatched installation keys and passwords on SSH bindings", () => {
+  const installation = "https://review.example/Review/";
+  const config = { installation, authMode: "http-basic", bindings: [] };
+  expect(() =>
+    decodeServerSettings({ gerritConnections: { "https://review.example/review/": config } }),
+  ).toThrow();
+  expect(() =>
+    decodeServerSettingsPatch({ gerritConnections: { "https://review.example/review/": config } }),
+  ).toThrow();
+  expect(() =>
+    decodeServerSettingsPatch({
+      gerritConnections: {
+        [installation]: {
+          ...config,
+          bindings: [{ url: "ssh://user:private@review-alias/Team/Repo", project: "Team/Repo" }],
+        },
+      },
+    }),
+  ).toThrow();
 });

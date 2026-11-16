@@ -3,6 +3,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/process";
@@ -24,6 +25,7 @@ import type { SourceControlProcessInput } from "@t3tools/source-control-core/ser
 
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as GitHttpAuth from "./GitHttpAuth.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -35,6 +37,8 @@ export interface VcsProcessInput {
   readonly onStdoutChunk?: (chunk: Uint8Array) => void;
   readonly onSpawn?: () => void;
   readonly env?: NodeJS.ProcessEnv;
+  /** False runs with only `env`, without the server's own environment or saved Git credentials. */
+  readonly extendEnv?: boolean;
   readonly allowNonZeroExit?: boolean;
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
@@ -137,6 +141,28 @@ export const gitConfigEnv = (
  * A project can contain a fake bare repository whose config runs commands such as `core.fsmonitor`.
  * Require `--git-dir` or `GIT_DIR` to open bare repositories; Git before 2.38 ignores this setting.
  */
+/**
+ * Saved Gerrit HTTP credentials as URL-scoped `http.<url>.extraHeader` config, so fetch and push
+ * reach a Gerrit checkout without a credential helper. A command that already sets its own
+ * Authorization header keeps it.
+ */
+export const gitHttpAuthEnv = Effect.fnUntraced(function* (
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  httpAuth: Option.Option<GitHttpAuth.GitHttpAuth["Service"]>,
+) {
+  if (Option.isNone(httpAuth)) return {};
+  const ownAuth = Object.entries(env).some(
+    ([key, value]) => /^GIT_CONFIG_VALUE_\d+$/i.test(key) && /^Authorization:/i.test(value ?? ""),
+  );
+  if (ownAuth) return {};
+  const added: NodeJS.ProcessEnv = {};
+  for (const [key, value] of yield* httpAuth.value.entries) {
+    Object.assign(added, gitConfigEnv({ ...env, ...added }, key, value, platform));
+  }
+  return added;
+});
+
 export const explicitBareRepositoryEnv = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) =>
   gitConfigEnv(env, "safe.bareRepository", "explicit", platform);
 
@@ -229,6 +255,7 @@ const canRetryFullFsync = (stderr: string) =>
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const hostPlatform = yield* HostProcess.Platform;
+  const httpAuth = yield* Effect.serviceOption(GitHttpAuth.GitHttpAuth);
   const vcsProcesses = yield* Semaphore.make(VCS_PROCESS_CONCURRENCY);
   const nonGitProcesses = yield* Semaphore.make(NON_GIT_PROCESS_CONCURRENCY);
   const backgroundProcesses = yield* Semaphore.make(NON_GIT_PROCESS_CONCURRENCY - 1);
@@ -247,6 +274,12 @@ export const make = Effect.gen(function* () {
     baseError: VcsProcessErrorContext,
   ) {
     let failedExit = false;
+    const baseEnv =
+      input.extendEnv === false ? (input.env ?? {}) : { ...process.env, ...input.env };
+    const authEnv =
+      input.command === "git" && input.extendEnv !== false
+        ? yield* gitHttpAuthEnv(baseEnv, hostPlatform, httpAuth)
+        : {};
     const execution = processRunner
       .run({
         command: input.command,
@@ -264,8 +297,12 @@ export const make = Effect.gen(function* () {
           // LANGUAGE leaves LC_CTYPE, which hooks inherit, alone.
           ...(input.command === "git" ? { LANGUAGE: "C" } : {}),
           ...input.env,
-          ...serverGitConfigEnv({ ...process.env, ...input.env }, hostPlatform),
+          // The count basis must match the env the child sees: with extendEnv false the child
+          // gets only this object, so counting process.env would promise keys it will not have.
+          ...serverGitConfigEnv({ ...baseEnv, ...authEnv }, hostPlatform),
+          ...authEnv,
         },
+        ...(input.extendEnv === undefined ? {} : { extendEnv: input.extendEnv }),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: input.outputMode ?? "truncate",

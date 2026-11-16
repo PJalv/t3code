@@ -164,6 +164,7 @@ export function RemoteRepositorySummary(props: {
   readonly source: AddProjectRemoteSource;
   readonly title: string;
   readonly description: string;
+  readonly href?: string;
 }) {
   return (
     <div className="shrink-0 p-2 pb-0">
@@ -176,7 +177,18 @@ export function RemoteRepositorySummary(props: {
         </CommandPaletteTitleIcon>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-foreground text-sm">{props.title}</span>
-          <span className="truncate text-muted-foreground/85 text-xs">{props.description}</span>
+          {props.href ? (
+            <a
+              href={props.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="truncate text-muted-foreground/85 text-xs hover:underline"
+            >
+              {props.description}
+            </a>
+          ) : (
+            <span className="truncate text-muted-foreground/85 text-xs">{props.description}</span>
+          )}
         </span>
       </div>
     </div>

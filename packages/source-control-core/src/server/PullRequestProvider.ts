@@ -3,6 +3,8 @@ import * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import type {
   PullRequestStackMembership,
+  PullRequestGerritDetail,
+  PullRequestGerritComparison,
   PullRequestAction,
   PullRequestStackHead,
   PullRequestActor,
@@ -87,6 +89,7 @@ export interface PullRequestProviderFailure {
 }
 
 export interface ProviderChangeRequest {
+  readonly gerrit?: PullRequestGerritDetail;
   readonly stack?: PullRequestStackMembership;
   readonly number: number;
   readonly title: string;
@@ -114,6 +117,7 @@ export interface ProviderChangeRequest {
 }
 
 export interface ProviderChangeRequestSummary {
+  readonly gerrit?: PullRequestGerritDetail;
   readonly number: number;
   readonly title: string;
   readonly url: string;
@@ -351,7 +355,22 @@ export interface ProviderRepositoryRef {
   readonly host: string;
 }
 
+type GerritChangeRef = ProviderRepositoryRef & { readonly number: number };
+type GerritCommand<A> = (
+  input: GerritChangeRef & A,
+) => Effect.Effect<void, PullRequestProviderError>;
+
 export interface PullRequestProviderApi {
+  readonly gerrit?: {
+    readonly setVotes: GerritCommand<{ readonly votes: Readonly<Record<string, number>> }>;
+    readonly setTopic: GerritCommand<{ readonly topic: string | null }>;
+    readonly setPrivate: GerritCommand<{ readonly isPrivate: boolean }>;
+    readonly setCommitMessage: GerritCommand<{ readonly message: string }>;
+    readonly rebaseChain: GerritCommand<{ readonly base?: string }>;
+    readonly cherryPick: (
+      input: GerritChangeRef & { readonly destination: string; readonly message?: string },
+    ) => Effect.Effect<{ readonly number: number; readonly url: string }, PullRequestProviderError>;
+  };
   readonly withVerifiedCredential?: <A, E, R>(
     /** `repository` lets a host pick the credential that can reach it. */
     input: { readonly cwd: string; readonly host: string; readonly repository?: string },
@@ -508,6 +527,7 @@ export interface PullRequestProviderApi {
       readonly cursor?: string | undefined;
       readonly commit?: string | undefined;
       readonly path?: string | undefined;
+      readonly gerritComparison?: PullRequestGerritComparison | undefined;
     },
   ) => Effect.Effect<ProviderDiffSlice, PullRequestProviderError>;
 

@@ -81,8 +81,9 @@ export function buildMenuItems(
     !isBehind &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canOpenPr = !isBusy && hasOpenPr;
+  const supportsBranchReviews = gitStatus.sourceControlProvider?.kind !== "gerrit";
 
-  return [
+  const items: GitActionMenuItem[] = [
     {
       id: "commit",
       label: resolve(msg("Commit", { $context: "verb, git action" })),
@@ -116,6 +117,12 @@ export function buildMenuItems(
           dialogAction: "create_pr",
         },
   ];
+  if (gitStatus.sourceControlProvider?.kind === "gerrit") {
+    // Mobile clients keep only the local commit action; amend-and-upload lives in the web and
+    // desktop Git actions dialog. Neither surface may offer an ordinary branch push here.
+    return items.filter((item) => item.id === "commit");
+  }
+  return supportsBranchReviews ? items : items.filter((item) => item.id !== "pr");
 }
 
 export function resolveQuickAction(
@@ -151,6 +158,18 @@ export function resolveQuickAction(
   const isBehind = gitStatus.behindCount > 0;
   const isDiverged = isAhead && isBehind;
   const terminology = changeRequestTerminologyFor(gitStatus);
+  const supportsBranchReviews = gitStatus.sourceControlProvider?.kind !== "gerrit";
+
+  if (gitStatus.sourceControlProvider?.kind === "gerrit") {
+    return hasChanges
+      ? { label: "Commit", disabled: false, kind: "run_action", action: "commit" }
+      : {
+          label: "Commit",
+          disabled: true,
+          kind: "show_hint",
+          hint: "Gerrit patch sets require a review upload; ordinary push is not offered here.",
+        };
+  }
 
   if (!hasBranch) {
     return {
@@ -178,7 +197,7 @@ export function resolveQuickAction(
         action: "commit",
       };
     }
-    if (hasOpenPr || isDefaultBranch) {
+    if (hasOpenPr || isDefaultBranch || !supportsBranchReviews) {
       return {
         label: resolve(msg("Commit & push")),
         disabled: false,
@@ -233,7 +252,7 @@ export function resolveQuickAction(
         hint: resolve(msg("No local commits to push.")),
       };
     }
-    if (hasOpenPr || isDefaultBranch) {
+    if (hasOpenPr || isDefaultBranch || !supportsBranchReviews) {
       return {
         label: resolve(msg("Push", { $context: "verb, git action" })),
         disabled: false,
@@ -267,7 +286,7 @@ export function resolveQuickAction(
   }
 
   if (isAhead) {
-    if (hasOpenPr || isDefaultBranch) {
+    if (hasOpenPr || isDefaultBranch || !supportsBranchReviews) {
       return {
         label: resolve(msg("Push", { $context: "verb, git action" })),
         disabled: false,

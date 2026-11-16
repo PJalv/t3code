@@ -3,6 +3,7 @@ import * as Bitbucket from "@t3tools/source-control-bitbucket/shared/definition"
 import { makeSourceControlDefinitionRegistry } from "@t3tools/source-control-core/shared/definition";
 import * as CursorOrigin from "@t3tools/source-control-cursor-origin/shared/definition";
 import * as Forgejo from "@t3tools/source-control-forgejo/shared/definition";
+import * as Gerrit from "@t3tools/source-control-gerrit/shared/definition";
 import * as GitCafe from "@t3tools/source-control-gitcafe/shared/definition";
 import * as GitHub from "@t3tools/source-control-github/shared/definition";
 import * as GitLab from "@t3tools/source-control-gitlab/shared/definition";
@@ -23,6 +24,7 @@ export const builtInSourceControlDefinitions = makeSourceControlDefinitionRegist
     GitCafe.definition,
     TanStackSource.definition,
     Forgejo.definition,
+    Gerrit.definition,
     Bitbucket.definition,
     AzureDevOps.definition,
   ],
@@ -32,6 +34,7 @@ export const builtInSourceControlDefinitions = makeSourceControlDefinitionRegist
       TanStackSource.definition.kind,
       CursorOrigin.definition.kind,
       AzureDevOps.definition.kind,
+      Gerrit.definition.kind,
     ],
     recognizeRemotesIn: [
       GitCafe.definition.kind,

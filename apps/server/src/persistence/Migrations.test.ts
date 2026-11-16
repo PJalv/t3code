@@ -29,6 +29,23 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
+  it.effect("adds pending clone recovery tables", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 96 });
+      assert.deepStrictEqual(yield* runMigrations(), [[97, "GerritPendingClones"]]);
+      const tables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_schema WHERE name IN ('gerrit_pending_clones', 'gerrit_pending_clone_attempts') ORDER BY name
+      `;
+      assert.deepStrictEqual(
+        tables.map((row) => row.name),
+        ["gerrit_pending_clone_attempts", "gerrit_pending_clones"],
+      );
+      yield* sql`INSERT INTO gerrit_pending_clones (project_id, destination_path, installation, gerrit_project, snapshot, gate_operation_id) VALUES ('p', '/p', 'i', 'g', '{}', 'gate')`;
+      yield* sql`INSERT INTO gerrit_pending_clone_attempts (project_id, recovery_path) VALUES ('p', '/recovery')`;
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

@@ -23,6 +23,7 @@ import {
   type ProjectId,
   type PullRequestAction,
   type PullRequestActionInput,
+  type PullRequestGerritCommandInput,
   type PullRequestActivity,
   type PullRequestCommentInput,
   type PullRequestCommentUpdateInput,
@@ -287,6 +288,9 @@ export class PullRequestService extends Context.Service<
     readonly rerunChecks: (
       input: PullRequestRef & { readonly check?: string },
     ) => Effect.Effect<ReadonlyArray<ProviderCheckRerun>, PullRequestError>;
+    readonly gerritCommand: (
+      input: PullRequestGerritCommandInput,
+    ) => Effect.Effect<{ readonly number: number; readonly url: string } | null, PullRequestError>;
     readonly update: (input: PullRequestUpdateInput) => Effect.Effect<void, PullRequestError>;
     readonly comment: (input: PullRequestCommentInput) => Effect.Effect<void, PullRequestError>;
     readonly updateComment: (
@@ -682,6 +686,18 @@ function withRateLimitBackoff(
     replyToThread: interactive("replyToThread", api.replyToThread),
     setReaction: interactive("setReaction", api.setReaction),
     setThreadResolution: interactive("setThreadResolution", api.setThreadResolution),
+    ...(api.gerrit === undefined
+      ? {}
+      : {
+          gerrit: {
+            setVotes: interactive("gerrit.setVotes", api.gerrit.setVotes),
+            setTopic: interactive("gerrit.setTopic", api.gerrit.setTopic),
+            setPrivate: interactive("gerrit.setPrivate", api.gerrit.setPrivate),
+            setCommitMessage: interactive("gerrit.setCommitMessage", api.gerrit.setCommitMessage),
+            rebaseChain: interactive("gerrit.rebaseChain", api.gerrit.rebaseChain),
+            cherryPick: interactive("gerrit.cherryPick", api.gerrit.cherryPick),
+          },
+        }),
   };
   // Optional provider methods must be forwarded too; returning the interface alone permits omissions.
   return wrapped satisfies PullRequestProviderApi &
@@ -958,11 +974,15 @@ export const make = Effect.gen(function* () {
         Effect.forEach(
           projects,
           (project) =>
-            project.repositoryIdentity != null
-              ? Effect.succeed(project)
-              : repositoryIdentities
-                  .resolve(project.workspaceRoot)
-                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
+            repositoryIdentities.resolve(project.workspaceRoot).pipe(
+              Effect.map((resolved) => ({
+                ...project,
+                repositoryIdentity:
+                  resolved?.provider === "gerrit"
+                    ? resolved
+                    : (project.repositoryIdentity ?? resolved),
+              })),
+            ),
           { concurrency: REPOSITORY_CONCURRENCY },
         ),
       ),
@@ -1997,6 +2017,7 @@ export const make = Effect.gen(function* () {
             ...(changeRequest.visibility === undefined
               ? {}
               : { visibility: changeRequest.visibility }),
+            ...(changeRequest.gerrit === undefined ? {} : { gerrit: changeRequest.gerrit }),
           })),
         ),
       ),
@@ -2511,6 +2532,42 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.mapError(toPullRequestError("updateComment")));
       }),
     );
+
+  const gerritCommand = Effect.fn("PullRequestService.gerritCommand")(function* (
+    input: PullRequestGerritCommandInput,
+  ) {
+    const project = yield* requireProject(input);
+    const api = project.api.gerrit;
+    if (api === undefined)
+      return yield* new PullRequestOperationError({
+        operation: "gerritCommand",
+        detail: "This host does not support Gerrit commands.",
+      });
+    const ref = {
+      cwd: project.project.workspaceRoot,
+      repository: project.repository,
+      host: project.host,
+      number: input.number,
+    };
+    const action = (() => {
+      switch (input.command) {
+        case "setVotes":
+          return api.setVotes({ ...ref, ...input.payload });
+        case "setTopic":
+          return api.setTopic({ ...ref, ...input.payload });
+        case "setPrivate":
+          return api.setPrivate({ ...ref, ...input.payload });
+        case "setCommitMessage":
+          return api.setCommitMessage({ ...ref, ...input.payload });
+        case "rebaseChain":
+          return api.rebaseChain({ ...ref, ...input.payload });
+        case "cherryPick":
+          return api.cherryPick({ ...ref, ...input.payload });
+      }
+    })();
+    const result = yield* action.pipe(Effect.mapError(toPullRequestError("gerritCommand")));
+    return result ?? null;
+  });
 
   const submitReview: PullRequestService["Service"]["submitReview"] = (input) =>
     requireProject(input).pipe(
@@ -4168,6 +4225,17 @@ export const make = Effect.gen(function* () {
     runAction: runActionAndInvalidate,
     checkLogs,
     rerunChecks,
+    gerritCommand: Effect.fn("PullRequestService.gerritCommandAndInvalidate")(function* (input) {
+      const ref = yield* canonicalRef(input);
+      yield* readCache.invalidate(refScope(ref));
+      const result = yield* gerritCommand(input).pipe(
+        Effect.ensuring(readCache.invalidate(refScope(ref))),
+      );
+      bumpRefEpoch(ref);
+      listingsEpoch = ++epochCounter;
+      yield* SubscriptionRef.set(pullRequestRefreshes, listingsEpoch);
+      return result;
+    }),
     update: invalidatedByMutation(update),
     comment: invalidatedByMutation(comment),
     updateComment: invalidatedByMutation(updateComment),

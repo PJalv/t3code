@@ -22,6 +22,7 @@ export interface SourceControlProcessInput {
   readonly stdin?: string;
   readonly onStdoutChunk?: (chunk: Uint8Array) => void;
   readonly env?: NodeJS.ProcessEnv;
+  readonly extendEnv?: boolean;
   readonly allowNonZeroExit?: boolean;
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;

@@ -1,7 +1,8 @@
-import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { GerritHookError, GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
+import * as Fiber from "effect/Fiber";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
@@ -16,7 +17,6 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -101,12 +101,14 @@ import {
   ChatAttachmentId,
   PersistChatAttachmentsError,
   RpcClientId,
+  RpcScopeAuthorization,
   EnvironmentAuthorizationError,
   ThreadId,
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  GerritWsRpcGroup,
 } from "@t3tools/contracts";
 import {
   HttpRouter,
@@ -239,6 +241,7 @@ import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
 import * as ScratchThreadPromotion from "./project/ScratchThreadPromotion.ts";
 import { mutateProjectWithClone } from "./project/ProjectMutation.ts";
+
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
@@ -266,6 +269,9 @@ import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as IssueService from "./issue/IssueService.ts";
 import * as ThreadIssueService from "./orchestration-v2/ThreadIssueService.ts";
 import * as IssueTrackerConnections from "./issue/IssueTrackerConnections.ts";
+import * as GerritDirectService from "./sourceControl/GerritDirectService.ts";
+import { GerritUploadCommitError } from "@t3tools/contracts";
+import * as GerritService from "./sourceControl/GerritService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
@@ -727,12 +733,59 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
 const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
+const CoreServerWsRpcGroup = ServerWsRpcGroup.omit(
+  WS_METHODS.gerritConnections,
+  WS_METHODS.gerritSearchProjects,
+  WS_METHODS.gerritConfigure,
+  WS_METHODS.gerritTest,
+  WS_METHODS.gerritRemove,
+  WS_METHODS.gerritRemoveCredentials,
+  WS_METHODS.gerritSigningPassphrase,
+  WS_METHODS.gerritSetSigningPassphrase,
+  WS_METHODS.gerritDeliveryCheckout,
+  WS_METHODS.gerritHook,
+  WS_METHODS.gerritInstallHook,
+);
+const layerGerritWsRpc = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
+  GerritWsRpcGroup.middleware(RpcScopeAuthorization)
+    .middleware(RpcInstrumentation)
+    .toLayer(
+      Effect.gen(function* () {
+        const gerrit = yield* GerritService.GerritService;
+        return {
+          [WS_METHODS.gerritConnections]: () => gerrit.listConnections,
+          [WS_METHODS.gerritSearchProjects]: (input) => gerrit.searchProjects(input),
+          [WS_METHODS.gerritConfigure]: (input) => gerrit.configureFromClient(input),
+          [WS_METHODS.gerritTest]: ({ installation }) => gerrit.testConnection(installation),
+          [WS_METHODS.gerritRemove]: ({ installation }) => gerrit.removeConnection(installation),
+          [WS_METHODS.gerritRemoveCredentials]: ({ installation }) =>
+            gerrit.removeCredentials(installation),
+          [WS_METHODS.gerritSigningPassphrase]: () => gerrit.signingPassphraseStatus,
+          [WS_METHODS.gerritSetSigningPassphrase]: (input) => gerrit.setSigningPassphrase(input),
+          [WS_METHODS.gerritDeliveryCheckout]: (input) => gerrit.deliveryCheckout(input),
+          [WS_METHODS.gerritHook]: (input) =>
+            gerrit
+              .readHook(input)
+              .pipe(Effect.mapError((error) => new GerritHookError({ reason: error.reason }))),
+          [WS_METHODS.gerritInstallHook]: (input) =>
+            gerrit
+              .installHook(currentSession, input)
+              .pipe(
+                Effect.mapError((error) =>
+                  error._tag === "GerritHookError"
+                    ? new GerritHookError({ reason: error.reason })
+                    : error,
+                ),
+              ),
+        };
+      }),
+    );
 
 // RpcGroup.toLayer derives each handler's requirements by scanning every RPC in
 // the group, so its type cost grows with handlers × RPCs. Near 200 methods that
 // crosses TypeScript's instantiation limit and the layer's requirements degrade to
 // `any`, so the handlers are registered as two disjoint, smaller groups.
-type ServerWsRpc = RpcGroup.Rpcs<typeof ServerWsRpcGroup>;
+type ServerWsRpc = RpcGroup.Rpcs<typeof CoreServerWsRpcGroup>;
 const SPLIT_WS_RPC_PREFIXES = [
   "server",
   "pullRequests",
@@ -749,7 +802,7 @@ const isSplitWsRpc = (rpc: ServerWsRpc): rpc is SplitWsRpc =>
   SPLIT_WS_RPC_PREFIXES.some((prefix) => rpc._tag.startsWith(`${prefix}.`));
 const isOtherWsRpc = (rpc: ServerWsRpc): rpc is Exclude<ServerWsRpc, SplitWsRpc> =>
   !isSplitWsRpc(rpc);
-const serverWsRpcs = Array.from(ServerWsRpcGroup.requests.values());
+const serverWsRpcs = Array.from(CoreServerWsRpcGroup.requests.values());
 const SplitWsRpcGroup = RpcGroup.make(...serverWsRpcs.filter(isSplitWsRpc));
 const OtherWsRpcGroup = RpcGroup.make(...serverWsRpcs.filter(isOtherWsRpc));
 function toAuthAccessStreamEvent(
@@ -1442,7 +1495,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   },
 );
 
-export const layerWsRpc = (
+const layerCoreWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
@@ -1509,6 +1562,7 @@ export const layerWsRpc = (
       const issues = yield* IssueService.IssueService;
       const threadIssues = yield* ThreadIssueService.ThreadIssueService;
       const issueTrackers = yield* IssueTrackerConnections.IssueTrackerConnections;
+      const gerritDirect = yield* GerritDirectService.GerritDirectService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
@@ -2005,7 +2059,7 @@ export const layerWsRpc = (
         return yield* mutateProjectWithClone(projectService, projectCloneTracker, mutation);
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = CoreServerWsRpcGroup.of({
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
         [WS_METHODS.issuesComments]: (input) => issues.comments(input),
@@ -2902,6 +2956,47 @@ export const layerWsRpc = (
           withPullRequestViewer(input, pullRequests.changeBreakdown(input)),
         [WS_METHODS.pullRequestsSetFilesViewed]: (input) =>
           withPullRequestViewer(input, pullRequests.setFilesViewed(input)),
+        [WS_METHODS.pullRequestsGerritCommand]: (input) =>
+          withPullRequestViewer(input, pullRequests.gerritCommand(input)),
+        [WS_METHODS.gerritUploadCommit]: (input) =>
+          gerritDirect.upload(input).pipe(
+            Effect.mapError(
+              () => new GerritUploadCommitError({ message: "Gerrit upload failed." }),
+            ),
+            Effect.flatMap((uploaded) =>
+              Effect.gen(function* () {
+                if (input.threadId !== undefined) {
+                  const linked = yield* Effect.gen(function* () {
+                    const change = uploaded.change;
+                    if (change === null) return false;
+                    const server = yield* Effect.try({
+                      try: () => new URL(change.key.installation),
+                      catch: () => new GerritUploadCommitError({ message: "Invalid Gerrit URL" }),
+                    });
+                    yield* orchestrationEngine.dispatch({
+                      type: "thread.pull-request.link",
+                      commandId: CommandId.make(`server:gerrit-upload:${NodeCrypto.randomUUID()}`),
+                      threadId: input.threadId!,
+                      host: server.host,
+                      repository: change.key.project,
+                      number: change.number,
+                      url: `${change.key.installation.replace(/\/$/u, "")}/c/${change.key.project}/+/${change.number}`,
+                      source: "created",
+                    });
+                    return true;
+                  }).pipe(Effect.orElseSucceed(() => false));
+                  if (!linked) {
+                    return {
+                      ...uploaded,
+                      linkError:
+                        "Upload succeeded, but the change could not be linked to the thread.",
+                    };
+                  }
+                }
+                return uploaded;
+              }),
+            ),
+          ),
         [WS_METHODS.pullRequestsRunAction]: (input) =>
           withPullRequestViewer(input, pullRequests.runAction(input)).pipe(
             Effect.tap(() =>
@@ -2965,25 +3060,31 @@ export const layerWsRpc = (
         [WS_METHODS.projectCloneStart]: (input) =>
           projectCloneTracker.start(input, {
             createProject: (project) =>
-              projectService
-                .create({
-                  commandId: CommandId.make(`project-clone-create:${project.projectId}`),
-                  projectId: project.projectId,
-                  title: project.title,
-                  workspaceRoot: project.workspaceRoot,
-                  createWorkspaceRootIfMissing: true,
-                })
-                .pipe(
-                  Effect.asVoid,
-                  Effect.mapError((cause) =>
-                    cause._tag === "ProjectConflictError"
-                      ? cause
-                      : new OrchestrationDispatchCommandError({
-                          message: "Failed to create clone project.",
-                          cause,
-                        }),
-                  ),
+              (project.pendingGerrit
+                ? projectService.createPendingGerritClone({
+                    commandId: CommandId.make(`project-clone-create:${project.projectId}`),
+                    projectId: project.projectId,
+                    title: project.title,
+                    workspaceRoot: project.workspaceRoot,
+                  })
+                : projectService.create({
+                    commandId: CommandId.make(`project-clone-create:${project.projectId}`),
+                    projectId: project.projectId,
+                    title: project.title,
+                    workspaceRoot: project.workspaceRoot,
+                    createWorkspaceRootIfMissing: true,
+                  })
+              ).pipe(
+                Effect.asVoid,
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationDispatchCommandError({
+                      message: "Failed to create clone project.",
+                      cause,
+                    }),
                 ),
+              ),
+            validatePublished: (projectId) => projectService.validatePendingGerritClone(projectId),
             onCloned: (project) =>
               repositoryIdentityResolver.resolve(project.workspaceRoot, { refresh: true }).pipe(
                 Effect.andThen(
@@ -3719,6 +3820,9 @@ export const layerWsRpc = (
     }),
   );
 
+export const layerWsRpc = (...args: Parameters<typeof layerCoreWsRpc>) =>
+  Layer.merge(layerCoreWsRpc(...args), layerGerritWsRpc(args[0]));
+
 // Default socket-level Defect frames end every pending client request.
 export const WS_RPC_SERVER_OPTIONS = {
   disableTracing: true,
@@ -3735,6 +3839,8 @@ export const layer = Layer.unwrap(
     const issues = yield* IssueService.IssueService;
     const threadIssues = yield* ThreadIssueService.ThreadIssueService;
     const issueTrackers = yield* IssueTrackerConnections.IssueTrackerConnections;
+    const gerritDirect = yield* GerritDirectService.GerritDirectService;
+    const gerrit = yield* GerritService.GerritService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
@@ -3837,6 +3943,8 @@ export const layer = Layer.unwrap(
               Layer.provide(
                 Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
               ),
+              Layer.provide(Layer.succeed(GerritDirectService.GerritDirectService, gerritDirect)),
+              Layer.provide(Layer.succeed(GerritService.GerritService, gerrit)),
               Layer.provide(OtlpEndpointCheck.layer),
               Layer.provide(
                 Layer.succeed(
