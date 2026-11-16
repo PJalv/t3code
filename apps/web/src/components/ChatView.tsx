@@ -203,6 +203,7 @@ import {
 import { threadPullRequestPanelTarget } from "./pullRequest/pullRequestDetail.logic";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { GuestPendingMessages } from "./chat/GuestShareControls";
+import { GerritDeliveryDialogHost } from "./pullRequest/GerritDeliveryDialogHost";
 import { useDeviceState } from "~/state/device";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { ComposerContextPermissions } from "./ComposerContextPermissions";
@@ -2054,11 +2055,12 @@ export default function ChatView(props: ChatViewProps) {
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
   });
-  const proactivePullRequestsKey = pullRequestsSurfaceAvailable
-    ? JSON.stringify(
-        visiblePullRequests.map((link) => [link.host, link.repository, link.number]).sort(),
-      )
-    : linkedThreadPullRequestKey;
+  const proactivePullRequestsKey =
+    pullRequestsSurfaceAvailable && visiblePullRequestCount > 0
+      ? JSON.stringify(
+          visiblePullRequests.map((link) => [link.host, link.repository, link.number]).sort(),
+        )
+      : linkedThreadPullRequestKey;
   const activeRunningTurnId = activeRuntime?.activeRunId ?? null;
   useProactivePanels({
     threadRef: isServerThread && !embedded ? activeThreadRef : null,
@@ -4130,6 +4132,7 @@ export default function ChatView(props: ChatViewProps) {
         onConfirm={onConfirmRevertStable}
       />
       {embedded ? null : <LinkPullRequestDialogHost />}
+      {embedded ? null : <GerritDeliveryDialogHost />}
       <ThreadVisitWatermark threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />
     </div>

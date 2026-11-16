@@ -382,6 +382,44 @@ describe("pull request toolkit handlers", () => {
     }),
   );
 
+  it.effect("links a bare number in the checkout's repository, keeping its case", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      expect(yield* harness.call("link_pull_request", { number: 12 })).toMatchObject({
+        host: "github.com",
+        repository: "t3tools/t3code",
+        number: 12,
+        url: "https://github.com/T3Tools/T3Code/pull/12",
+      });
+    }),
+  );
+
+  it.effect("links Gerrit changes by number and by every change URL form", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        project: makeProject({
+          canonicalKey: "review.example/group/repo",
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://review.example/base/a/Group/Repo",
+          },
+          provider: SourceControlProviderKind.make("gerrit"),
+          displayName: "Group/Repo",
+        }),
+      });
+      const canonical = "https://review.example/base/c/Group/Repo/+/42";
+      expect((yield* harness.call("link_pull_request", { number: 42 })).url).toBe(canonical);
+      for (const url of [canonical, "https://review.example/base/c/42"]) {
+        expect(yield* harness.call("link_pull_request", { url })).toMatchObject({
+          host: "review.example",
+          repository: "group/repo",
+          number: 42,
+        });
+      }
+    }),
+  );
+
   it.effect("links a URL but not a bare number when the project's host is unknown", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({

@@ -17,6 +17,7 @@
     "@t3tools/source-control-core": "workspace:*",
     "@t3tools/source-control-cursor-origin": "workspace:*",
     "@t3tools/source-control-forgejo": "workspace:*",
+    "@t3tools/source-control-gerrit": "workspace:*",
     "@t3tools/source-control-gitcafe": "workspace:*",
     "@t3tools/source-control-github": "workspace:*",
     "@t3tools/source-control-gitlab": "workspace:*"

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
 import { m, type MessageResolver } from "~/i18n/messages";
 
@@ -39,6 +39,7 @@ import { formatFullTimestamp } from "~/timestampFormat";
 
 import { Button } from "../ui/button";
 import { PullRequestEditButton } from "./PullRequestEditButton";
+import { gerritCommitMessageParts, PullRequestGerritSummary } from "./PullRequestGerritSummary";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Menu,
@@ -614,6 +615,8 @@ export function PullRequestSummaryTab({
   );
   if (descriptionDraftKept !== descriptionDraft) setDescriptionDraft(descriptionDraftKept);
   const description = descriptionDraftKept?.body ?? detail.body;
+  const gerritMessage = detail.gerrit ? gerritCommitMessageParts(description) : null;
+  const descriptionText = gerritMessage?.body ?? description;
   const descriptionSaving = (descriptionDraftKept?.saves ?? 0) > 0;
   const descriptionSavesRunning = useRef(0);
   // Hosts can reuse comment ids across pull requests.
@@ -876,6 +879,7 @@ export function PullRequestSummaryTab({
     >
       <section className="px-4 pt-2.5 pb-1">
         <div className="space-y-2">
+          {detail.gerrit?.isWip === true && detail.state === "open" ? null : (
           <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label={gt("Reviewers")}>
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {reviewerEntries.length === 0 ? (
@@ -952,6 +956,7 @@ export function PullRequestSummaryTab({
               ) : null}
             </span>
           </PullRequestMetaRow>
+          )}
           {detail.labels.length > 0 || detail.capabilities.labels === true ? (
             <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label={gt("Labels")}>
               <span className="flex min-w-0 flex-wrap items-center gap-1">
@@ -983,6 +988,14 @@ export function PullRequestSummaryTab({
         </div>
       </section>
 
+      {detail.gerrit ? (
+        <PullRequestGerritSummary
+          environmentId={environmentId}
+          reference={reference}
+          detail={detail}
+          onRefresh={onRefresh}
+        />
+      ) : null}
       <PullRequestSection
         key={`description:${detail.url}`}
         title={gt("Description")}
@@ -1015,12 +1028,13 @@ export function PullRequestSummaryTab({
               <PullRequestMarkdown
                 className="min-w-0 flex-1"
                 text={
-                  description.trim().length > 0 ? description : gt("_No description provided._")
+                  descriptionText.trim().length > 0 ? descriptionText : gt("_No descriptionText provided._")
                 }
                 cwd={detail.workspaceRoot}
                 environmentId={environmentId}
                 threadRef={threadRef}
-                onTaskListChange={canEditDescription ? toggleTask : undefined}
+                // The shown Gerrit body omits the subject and trailers, so task indexes would not match.
+                onTaskListChange={canEditDescription && !gerritMessage ? toggleTask : undefined}
               />
               {canEditDescription ? (
                 <PullRequestEditButton
@@ -1030,6 +1044,16 @@ export function PullRequestSummaryTab({
               ) : null}
             </div>
           )}
+          {!editingDescription && gerritMessage && gerritMessage.footers.length > 0 ? (
+            <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-xs">
+              {gerritMessage.footers.map((footer) => (
+                <Fragment key={`${footer.key}:${footer.value}`}>
+                  <dt className="text-muted-foreground">{footer.key}</dt>
+                  <dd className="min-w-0 break-all">{footer.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          ) : null}
         </div>
       </PullRequestSection>
 

@@ -55,15 +55,29 @@ export function ProjectCloneBanner(props: {
           ? gt("Cancelled cloning {name}", { name })
           : gt("Failed to clone {name}", { name })}
       </Text>
+      {clone.recoveryRequired ? (
+        <Text className="mt-0.5 text-xs text-danger-foreground">
+          Publication may have completed. Inspect{" "}
+          {clone.recoveryPaths?.join(", ") || "the private attempt"} and {clone.destinationPath}. Do
+          not retry or delete either path.
+        </Text>
+      ) : null}
+      {cancelled && clone.recoveryPath ? (
+        <Text className="mt-0.5 text-xs text-warning-foreground" numberOfLines={3}>
+          Private attempt: {clone.recoveryPath}
+        </Text>
+      ) : null}
       {clone.error ? (
         <Text className="mt-0.5 text-xs text-danger-foreground" numberOfLines={3}>
           {clone.error}
         </Text>
       ) : null}
-      <View className="mt-2 flex-row justify-end gap-2">
-        <BannerAction label={gt("Remove project")} onPress={props.onRemove} />
-        <BannerAction label={gt("Retry")} onPress={props.onRetry} />
-      </View>
+      {!clone.recoveryRequired && !clone.gerritPending ? (
+        <View className="mt-2 flex-row justify-end gap-2">
+          <BannerAction label={gt("Remove project")} onPress={props.onRemove} />
+          <BannerAction label={gt("Retry")} onPress={props.onRetry} />
+        </View>
+      ) : null}
     </View>
   );
 }

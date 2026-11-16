@@ -4,6 +4,8 @@ import type {
   PullRequestChangeBreakdown,
   ReviewDiffPreviewSource,
   VcsStatusResult,
+  GerritDeliveryCheckout,
+  GerritDirectUploadInput,
 } from "@t3tools/contracts";
 import { summarizeChangedFiles } from "@t3tools/shared/changedFileKind";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
@@ -15,19 +17,47 @@ import {
   changeRequestTerminologyFor,
   type DefaultBranchActionDialogCopy,
   type DefaultBranchConfirmableAction,
-  type GitActionIconName,
-  type GitDialogAction,
+  type GitActionIconName as BaseGitActionIconName,
+  type GitDialogAction as BaseGitDialogAction,
   vcsActionLabelText,
 } from "@t3tools/client-runtime/state/vcs";
 
 export {
   requiresDefaultBranchConfirmation,
   type DefaultBranchConfirmableAction,
-  type GitActionIconName,
 } from "@t3tools/client-runtime/state/vcs";
+export type GitActionIconName = BaseGitActionIconName | "upload";
+type GitDialogAction = BaseGitDialogAction | "gerrit_delivery";
+
+export function buildGerritUploadInput(
+  context: Extract<GerritDeliveryCheckout, { kind: "ready" | "new-change" }>,
+  options: {
+    branch: string;
+    topic: string;
+    reviewers: string;
+    cc: string;
+    wip: boolean;
+    private: boolean;
+  },
+): GerritDirectUploadInput {
+  const accounts = (value: string) => value.split(/[\s,]+/).filter(Boolean);
+  const reviewers = accounts(options.reviewers);
+  const cc = accounts(options.cc);
+  return {
+    ...(context.kind === "ready"
+      ? { kind: "patch-set" as const, number: context.change.number }
+      : { kind: "new" as const, branch: options.branch.trim() || context.key.branch }),
+    commit: context.head,
+    ...(options.topic.trim() ? { topic: options.topic.trim() } : {}),
+    ...(reviewers.length ? { reviewers } : {}),
+    ...(cc.length ? { cc } : {}),
+    ...(options.wip ? { wip: true } : {}),
+    ...(options.private ? { private: true } : {}),
+  };
+}
 
 export interface GitActionMenuItem {
-  id: "commit" | "push" | "pr";
+  id: "commit" | "push" | "pr" | "deliver";
   label: string;
   disabled: boolean;
   icon: GitActionIconName;
@@ -38,7 +68,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_publish" | "show_hint";
+  kind: "run_action" | "run_pull" | "open_publish" | "open_gerrit_delivery" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -121,6 +151,13 @@ export function formatGitActionElapsed(
   return resolve(msg("{minutes}m {seconds}s", { minutes, seconds }));
 }
 
+export function isGerritUploadAvailable(
+  gitStatus: VcsStatusResult | null,
+  canPrepare: boolean,
+): boolean {
+  return canPrepare && gitStatus?.sourceControlProvider?.kind === "gerrit";
+}
+
 export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
@@ -159,6 +196,20 @@ export function buildMenuItems(
     kind: "open_dialog",
     dialogAction: "commit",
   };
+
+  if (isGerritUploadAvailable(gitStatus, true)) {
+    return [
+      commitItem,
+      {
+        id: "deliver",
+        label: "Upload commit for review",
+        disabled: isBusy || !hasBranch,
+        icon: "upload",
+        kind: "open_dialog",
+        dialogAction: "gerrit_delivery",
+      },
+    ];
+  }
 
   if (!hasPrimaryRemote) {
     return [commitItem];
@@ -328,6 +379,21 @@ export function resolveQuickAction(
   const isBehind = gitStatus.behindCount > 0;
   const isDiverged = isAhead && isBehind;
   const terminology = changeRequestTerminologyFor(gitStatus);
+  if (isGerritUploadAvailable(gitStatus, true)) {
+    if (!hasBranch) {
+      return {
+        label: "Upload commit for review",
+        disabled: true,
+        kind: "show_hint",
+        hint: "Detached HEAD: check out the branch that holds the Gerrit commit first.",
+      };
+    }
+    return {
+      label: "Upload commit for review",
+      disabled: false,
+      kind: "open_gerrit_delivery",
+    };
+  }
 
   if (!hasBranch) {
     return {

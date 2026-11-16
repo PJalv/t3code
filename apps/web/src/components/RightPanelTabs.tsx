@@ -185,7 +185,7 @@ const SURFACE_DISABLED_REASONS = {
   files: msg("Files are only available when a project is open."),
   diff: msg("Diff is only available for server threads in Git repositories."),
   pullRequest: msg("This thread's branch has no pull request yet."),
-  pullRequests: msg("This thread has no linked items."),
+  pullRequests: msg("Linked items are unavailable for this thread or connection."),
   device: msg("Devices are only available from a thread."),
   sideChat: msg("Side chats start after the first message."),
 } as const;
@@ -210,7 +210,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   files: msg("Available when a project is open."),
   diff: msg("Available for Git repositories."),
   pullRequest: msg("No pull request on this branch yet."),
-  pullRequests: msg("No linked items available."),
+  pullRequests: msg("Linked items unavailable."),
   device: msg("Available from a thread."),
   sideChat: msg("Available after the first message."),
 } as const;

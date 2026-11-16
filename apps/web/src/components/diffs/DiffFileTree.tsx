@@ -1,4 +1,4 @@
-import type { GitStatusEntry } from "@pierre/trees";
+import type { FileTreeRowDecorationRenderer, GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { T, useGT } from "gt-react";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
@@ -36,6 +36,7 @@ interface DiffFileTreeProps {
   readonly headerAccessory?: ReactNode;
   readonly footer?: ReactNode;
   readonly className?: string;
+  readonly fileLabels?: ReadonlyMap<string, string>;
 }
 
 export function DiffFileTree({
@@ -47,6 +48,7 @@ export function DiffFileTree({
   headerAccessory,
   footer,
   className,
+  fileLabels,
 }: DiffFileTreeProps) {
   const gt = useGT();
   const { resolvedTheme } = useTheme();
@@ -85,12 +87,17 @@ export function DiffFileTree({
     }
   });
 
+  const renderRowDecoration: FileTreeRowDecorationRenderer = useStableCallback(({ item }) => {
+    const label = fileLabels?.get(presented.selectionPath(item.path));
+    return label ? { text: label, title: label } : null;
+  });
   const { model } = useFileTree({
     density: "compact",
     flattenEmptyDirectories: true,
     initialExpansion: "open",
     icons,
     onSelectionChange: handleSelectionChange,
+    renderRowDecoration,
     paths: [],
     search: false,
     sort: ordering.sort,
@@ -101,10 +108,19 @@ export function DiffFileTree({
     () => areAllDirectoriesExpanded(model, directoryPaths),
   );
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes the icon set into the imperative Pierre file tree model
+  const decorationPresentation = useRef<{ icons: typeof icons; labels: typeof fileLabels } | null>(
+    null,
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- syncs decorations to the imperative Pierre tree model
   useEffect(() => {
+    if (
+      decorationPresentation.current?.icons === icons &&
+      decorationPresentation.current.labels === fileLabels
+    )
+      return;
+    decorationPresentation.current = { icons, labels: fileLabels };
     model.setIcons(icons);
-  }, [icons, model]);
+  });
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies path updates, ordering and git status to the imperative Pierre file tree model
   useEffect(() => {

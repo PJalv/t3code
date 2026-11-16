@@ -139,6 +139,7 @@ import {
 } from "./PullRequestStatusRows";
 import { PullRequestMergeControls } from "./PullRequestMergeControls";
 import { PullRequestStackCard } from "./PullRequestStackCard";
+import { PullRequestGerritSection } from "./PullRequestGerritSection";
 import { usePullRequestStack, type PullRequestStackState } from "./usePullRequestStack";
 import { usePullRequestEnvironmentFallback } from "./usePullRequestEnvironmentFallback";
 import { subscribePullRequestFileJump } from "./pullRequestFileJump";
@@ -155,7 +156,14 @@ function usePullRequestActivityRows(params: PullRequestParams, filter: ActivityF
   const rows = (() => {
     if (!filtered) return [];
     const rows = pullRequestTimelineRows(
-      filtered.activity,
+      {
+        ...filtered.activity,
+        reviewThreads: filtered.activity.reviewThreads.map((thread) =>
+          thread.path === "/PATCHSET_LEVEL"
+            ? { ...thread, path: "Change-level discussion" }
+            : thread,
+        ),
+      },
       params,
       navigation,
       { permissions, onChanged: result.refresh },
@@ -351,6 +359,7 @@ function PullRequestOverview(props: {
   return (
     <View className="gap-5">
       <PullRequestStackCard params={props.params} state={props.stack} />
+      {pr.gerrit ? <PullRequestGerritSection params={props.params} pr={pr} /> : null}
       <PullRequestCardGroup>
         <PullRequestChecksRow pr={pr} params={props.params} />
         <PullRequestReviewersRow pr={pr} params={props.params} />

@@ -133,6 +133,15 @@ export class ProjectService extends Context.Service<
   ProjectService,
   {
     readonly create: (input: ProjectCreateInput) => Effect.Effect<Project, ProjectServiceError>;
+    readonly createPendingGerritClone: (input: {
+      readonly commandId: CommandId;
+      readonly projectId: ProjectId;
+      readonly title: string;
+      readonly workspaceRoot: string;
+    }) => Effect.Effect<Project, ProjectServiceError>;
+    readonly validatePendingGerritClone: (
+      projectId: ProjectId,
+    ) => Effect.Effect<void, ProjectServiceError>;
     readonly bootstrap: (
       input: ProjectBootstrapInput,
     ) => Effect.Effect<
@@ -408,6 +417,22 @@ export const make = Effect.gen(function* () {
     return Option.isNone(row) ? Option.none() : Option.some(yield* hydrate(row.value));
   });
 
+  const commitCreation = Effect.fn("ProjectService.commitCreation")(function* (
+    input: ProjectCreateInput,
+    workspaceRoot: string,
+  ) {
+    yield* commit({
+      type: "project.create",
+      commandId: input.commandId,
+      projectId: input.projectId,
+      title: input.title,
+      workspaceRoot,
+      ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+    });
+    yield* projectEnrichment.invalidate([workspaceRoot]);
+    return yield* readCommitted(input.projectId);
+  });
+
   const create: ProjectService["Service"]["create"] = Effect.fn("ProjectService.create")(
     function* (input) {
       yield* rejectWslSharePath(input.projectId, input.workspaceRoot);
@@ -417,18 +442,41 @@ export const make = Effect.gen(function* () {
         createIfMissing: input.createWorkspaceRootIfMissing ?? false,
       });
       yield* rejectWorktreeContainer(input.projectId, workspaceRoot);
-      yield* commit({
-        type: "project.create",
-        commandId: input.commandId,
-        projectId: input.projectId,
-        title: input.title,
-        workspaceRoot,
-        ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
-      });
-      yield* projectEnrichment.invalidate([workspaceRoot]);
-      return yield* readCommitted(input.projectId);
+      return yield* commitCreation(input, workspaceRoot);
     },
   );
+
+  const createPendingGerritClone: ProjectService["Service"]["createPendingGerritClone"] = Effect.fn(
+    "ProjectService.createPendingGerritClone",
+  )(function* (input) {
+    const result = yield* workspacePaths
+      .normalizeWorkspaceRoot(input.workspaceRoot)
+      .pipe(Effect.result);
+    if (Result.isSuccess(result)) {
+      return yield* new ProjectOperationError({
+        operation: "normalize-workspace",
+        projectId: input.projectId,
+        workspaceRoot: input.workspaceRoot,
+        cause: "The pending Gerrit clone destination already exists.",
+      });
+    }
+    if (result.failure._tag !== "WorkspaceRootNotExistsError") {
+      return yield* new ProjectOperationError({
+        operation: "normalize-workspace",
+        projectId: input.projectId,
+        workspaceRoot: input.workspaceRoot,
+        cause: result.failure,
+      });
+    }
+    return yield* commitCreation(input, result.failure.normalizedWorkspaceRoot);
+  });
+
+  const validatePendingGerritClone: ProjectService["Service"]["validatePendingGerritClone"] =
+    Effect.fn("ProjectService.validatePendingGerritClone")(function* (projectId) {
+      const existing = yield* readRow(projectId);
+      if (Option.isNone(existing)) return yield* new ProjectNotFoundError({ projectId });
+      yield* normalizeWorkspaceRoot({ projectId, workspaceRoot: existing.value.workspaceRoot });
+    });
 
   const update: ProjectService["Service"]["update"] = Effect.fn("ProjectService.update")(
     function* (input) {
@@ -681,6 +729,8 @@ export const make = Effect.gen(function* () {
 
   return ProjectService.of({
     create,
+    createPendingGerritClone,
+    validatePendingGerritClone,
     bootstrap,
     update,
     delete: deleteProject,

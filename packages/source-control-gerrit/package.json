@@ -1,0 +1,71 @@
+{
+  "name": "@t3tools/source-control-gerrit",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server/driver": {
+      "types": "./src/server/driver.ts",
+      "import": "./src/server/driver.ts"
+    },
+    "./shared/definition": {
+      "types": "./src/shared/definition.ts",
+      "import": "./src/shared/definition.ts"
+    },
+    "./server/gerritActivity": {
+      "types": "./src/server/gerritActivity.ts",
+      "import": "./src/server/gerritActivity.ts"
+    },
+    "./server/gerritUnifiedDiff": {
+      "types": "./src/server/gerritUnifiedDiff.ts",
+      "import": "./src/server/gerritUnifiedDiff.ts"
+    },
+    "./server/GerritDirectActions": {
+      "types": "./src/server/GerritDirectActions.ts",
+      "import": "./src/server/GerritDirectActions.ts"
+    },
+    "./server/GerritHttp": {
+      "types": "./src/server/GerritHttp.ts",
+      "import": "./src/server/GerritHttp.ts"
+    },
+    "./server/GerritRemotes": {
+      "types": "./src/server/GerritRemotes.ts",
+      "import": "./src/server/GerritRemotes.ts"
+    },
+    "./server/remoteBinding": {
+      "types": "./src/server/remoteBinding.ts",
+      "import": "./src/server/remoteBinding.ts"
+    },
+    "./server/localCommitMapping": {
+      "types": "./src/server/localCommitMapping.ts",
+      "import": "./src/server/localCommitMapping.ts"
+    },
+    "./server/hookSetup": {
+      "types": "./src/server/hookSetup.ts",
+      "import": "./src/server/hookSetup.ts"
+    },
+    "./server/GerritLocalCommits": {
+      "types": "./src/server/GerritLocalCommits.ts",
+      "import": "./src/server/GerritLocalCommits.ts"
+    },
+    "./server/GerritBranchReviews": {
+      "types": "./src/server/GerritBranchReviews.ts",
+      "import": "./src/server/GerritBranchReviews.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/source-control-core": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@t3tools/source-control-testing": "workspace:*",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -43,6 +43,10 @@ import {
 import { resolveLauncherPath } from "./cloud/pinnedRuntime.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
+import * as GerritDirectService from "./sourceControl/GerritDirectService.ts";
+import * as GerritDirectUpload from "./sourceControl/GerritDirectUpload.ts";
+import * as GerritTarget from "./sourceControl/GerritTarget.ts";
+import * as GerritBranchReviews from "./sourceControl/gerritBranchReviews.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as SpawnWorker from "./process/SpawnWorker.ts";
@@ -109,6 +113,10 @@ import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as GerritService from "./sourceControl/GerritService.ts";
+import * as GerritGitHttpAuth from "./sourceControl/GerritGitHttpAuth.ts";
+import * as GerritRemotes from "@t3tools/source-control-gerrit/server/GerritRemotes";
+import * as GerritLocalCommits from "@t3tools/source-control-gerrit/server/GerritLocalCommits";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -422,7 +430,9 @@ const layerRepositoryIdentityResolver = Layer.effect(
     const registry = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
     return yield* RepositoryIdentityResolver.make({
       refine: Effect.fn(function* (identity: RepositoryIdentity) {
-        for (const { kind } of BUILT_IN_SOURCE_CONTROL_DRIVER_LIST) {
+        for (const { kind } of [...BUILT_IN_SOURCE_CONTROL_DRIVER_LIST].sort(
+          (a, b) => Number(b.kind === "gerrit") - Number(a.kind === "gerrit"),
+        )) {
           const provider = yield* registry.get(kind);
           if (provider.refineRepositoryIdentity === undefined) continue;
           const refined = yield* provider.refineRepositoryIdentity({
@@ -437,6 +447,24 @@ const layerRepositoryIdentityResolver = Layer.effect(
     });
   }),
 ).pipe(Layer.provide(layerSourceControlProviderRegistry), Layer.provide(ProcessRunner.layer));
+
+const layerGerritService = GerritService.layer.pipe(
+  Layer.provide(GerritRemotes.layer),
+  Layer.provide(GerritLocalCommits.layer),
+  Layer.provide(SourceControlBuiltInDrivers.layer),
+  Layer.provide(GitVcsDriver.layer),
+  Layer.provide(layerVcsDriverRegistry),
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(GerritBranchReviews.layerGerritHttp),
+);
+
+const layerGerritDirectService = GerritDirectService.layer.pipe(
+  Layer.provide(GerritDirectUpload.layer),
+  Layer.provide(GerritTarget.layer),
+  Layer.provide(GerritRemotes.layer),
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(GerritBranchReviews.layerGerritHttp),
+);
 
 const layerPullRequestService = PullRequestService.layer.pipe(
   Layer.provide(PullRequestProviderRegistry.layer),
@@ -476,6 +504,7 @@ const layerGitWorkflow = GitWorkflowService.layer.pipe(
 );
 
 const layerSourceControlRepositoryService = SourceControlRepositoryService.layer.pipe(
+  Layer.provide(layerGerritService),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(layerSourceControlProviderRegistry),
 );
@@ -889,6 +918,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerPullRequestService),
   Layer.provide(layerThreadIssueService),
   Layer.provide(layerIssueService),
+  Layer.provide(layerGerritService),
+  Layer.provide(layerGerritDirectService),
   // The same activity instance RunExecutionService reports to, by layer memoization.
   Layer.provide(
     ServerBrowser.layer.pipe(
@@ -1381,6 +1412,12 @@ const layerMakeServer = Layer.unwrap(
       Layer.provide(layerApplicationObservability),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(VcsProcess.layer),
+      Layer.provide(
+        GerritGitHttpAuth.layer.pipe(
+          Layer.provide(layerServerSettings),
+          Layer.provide(ServerSecretStore.layer),
+        ),
+      ),
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),
       Layer.provide(Layer.succeed(HostProcess.InvokedAs, invokedAs)),

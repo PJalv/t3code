@@ -49,6 +49,7 @@ import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 import {
   buildMenuItems,
+  isGerritUploadAvailable,
   formatGitActionElapsed,
   GIT_ACTION_SUCCESS_VISIBLE_MS,
   hasUsableGitMenuContent,
@@ -87,6 +88,7 @@ import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "~/compone
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
+import { openGerritDeliveryDialog } from "./pullRequest/GerritDeliveryDialogHost";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useOpenInPreferredEditor } from "~/editorPreferences";
@@ -112,6 +114,7 @@ import {
 import { useClientSettings } from "~/hooks/useSettings";
 import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
+import { pullRequestEnvironment } from "~/state/pullRequests";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment, vcsStatusRevalidation } from "~/state/vcs";
@@ -260,6 +263,7 @@ function GitActionItemIcon({
 }) {
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
+  if (icon === "upload") return <SourceControlIcon />;
   return <SourceControlIcon />;
 }
 
@@ -274,6 +278,8 @@ function GitQuickActionIcon({
 }) {
   const messages = useMessages();
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={className} />;
+  if (quickAction.kind === "open_gerrit_delivery")
+    return <SourceControlIcon className={className} />;
   if (quickAction.kind === "run_pull") return <CloudDownloadIcon className={className} />;
   if (quickAction.kind === "run_action") {
     if (quickAction.action === "commit") return <GitCommitIcon className={className} />;
@@ -289,6 +295,8 @@ function GitQuickActionIcon({
   if (quickAction.label === messages(msg("Push", { $context: "verb, git action" }))) {
     return <CloudUploadIcon className={className} />;
   }
+  if (quickAction.label === "Upload commit for review")
+    return <SourceControlIcon className={className} />;
   return <InfoIcon className={className} />;
 }
 
@@ -1017,6 +1025,9 @@ function CheckoutGitActionsControl({
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const canPrepareGerrit = useAtomValue(
+    pullRequestEnvironment.gerritUploadCommit.permissionAtom(activeEnvironmentId),
+  );
   const [inlineSuccess, setInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
@@ -1202,12 +1213,13 @@ function CheckoutGitActionsControl({
 
   const isDefaultRef = gitStatusForActions?.isDefaultRef ?? false;
 
+  const canUploadGerrit = isGerritUploadAvailable(gitStatusForActions, canPrepareGerrit);
   const gitActionMenuItems = buildMenuItems(
     gitStatusForActions,
     isGitActionRunning,
     hasPrimaryRemote,
     messages,
-  );
+  ).filter((item) => item.id !== "deliver" || canUploadGerrit);
   const quickAction = resolveQuickAction(
     gitStatusForActions,
     isGitActionRunning,
@@ -1215,11 +1227,14 @@ function CheckoutGitActionsControl({
     hasPrimaryRemote,
     messages,
   );
-  const quickActionDisabledReason = !canWriteSourceControl
-    ? gt("This connection cannot change source control.")
-    : quickAction.disabled
-      ? (quickAction.hint ?? gt("This action is currently unavailable."))
-      : null;
+  const quickActionDisabledReason =
+    quickAction.kind === "open_gerrit_delivery" && !canUploadGerrit
+      ? gt("This connection cannot upload a Gerrit commit.")
+      : !canWriteSourceControl
+        ? gt("This connection cannot change source control.")
+        : quickAction.disabled
+          ? (quickAction.hint ?? gt("This action is currently unavailable."))
+          : null;
   const gitActionProgress = resolveGitActionProgressPresentation(vcsActionState, messages);
   // A fresh draft or a thread with no turns hides commit, push, and diff rows until there is work.
   const quietEmptyDraft =
@@ -1398,7 +1413,20 @@ function CheckoutGitActionsControl({
     }).then(restoreDialogCommitMessageOnFailure(commitMessage));
   };
 
+  const openDelivery = () => {
+    if (activeEnvironmentId === null || gitCwd === null || !canUploadGerrit) return;
+    openGerritDeliveryDialog({
+      environmentId: activeEnvironmentId,
+      cwd: gitCwd,
+      ...(activeThreadRef ? { threadId: activeThreadRef.threadId } : {}),
+    });
+  };
+
   const runQuickAction = () => {
+    if (quickAction.kind === "open_gerrit_delivery") {
+      openDelivery();
+      return;
+    }
     if (quickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
       return;
@@ -1466,6 +1494,10 @@ function CheckoutGitActionsControl({
     }
     if (item.dialogAction === "create_pr") {
       void runGitActionWithToast({ action: "create_pr" });
+      return;
+    }
+    if (item.dialogAction === "gerrit_delivery") {
+      openDelivery();
       return;
     }
     setExcludedFiles(new Set());

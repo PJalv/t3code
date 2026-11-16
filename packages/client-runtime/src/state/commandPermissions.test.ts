@@ -101,6 +101,68 @@ describe("command permissions", () => {
     }),
   );
 
+  it.effect.each([
+    WS_METHODS.gerritConfigure,
+    WS_METHODS.gerritTest,
+    WS_METHODS.gerritRemove,
+    WS_METHODS.gerritRemoveCredentials,
+  ])("requires the destination settings grant for %s", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permission = createCommandPermissions(runtime, method);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthSettingsWriteScope],
+            permissions: [AuthSettingsWriteScope],
+          }),
+        );
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(permission.permissionAtom(env))).toBe(true);
+        yield* permission.authorize(registry, env);
+        expect(registry.get(permission.permissionAtom(other))).toBe(false);
+        expect((yield* permission.authorize(registry, other).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(env))).toBe(false);
+        expect((yield* permission.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+      }),
+    ),
+  );
+  it.effect.each([WS_METHODS.gerritInstallHook])(
+    "requires the destination source-control grant for %s",
+    (method) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const permission = createCommandPermissions(runtime, method);
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(false),
+              scopes: [AuthSourceControlWriteScope, AuthOrchestrationReadScope],
+              permissions: [AuthSourceControlWriteScope, AuthOrchestrationReadScope],
+            }),
+          );
+          registry.set(sessions(other), AsyncResult.success(grant(true)));
+          yield* permission.authorize(registry, env);
+          expect(registry.get(permission.permissionAtom(env))).toBe(true);
+          expect((yield* permission.authorize(registry, other).pipe(Effect.flip))._tag).toBe(
+            "EnvironmentAuthorizationError",
+          );
+          registry.set(sessions(env), AsyncResult.success(grant(false)));
+          expect(registry.get(permission.permissionAtom(env))).toBe(false);
+          expect((yield* permission.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+            "EnvironmentAuthorizationError",
+          );
+        }),
+      ),
+  );
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.gen(function* () {
       const registry = yield* setup;
@@ -536,6 +598,31 @@ it.effect("requires access management to answer a link request", () =>
     expect(registry.get(answer.permissionAtom(env))).toBe(true);
     yield* answer.authorize(registry, env);
   }),
+);
+
+it.effect("guards Gerrit commands and uploads with source-control write", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const commands = [WS_METHODS.pullRequestsGerritCommand, WS_METHODS.gerritUploadCommit].map(
+        (tag) => createCommandPermissions(runtime, tag),
+      );
+      registry.set(sessions(env), AsyncResult.success({ ...grant(true), permissions: [] }));
+      for (const command of commands) {
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        const denied = yield* command.authorize(registry, env).pipe(Effect.flip);
+        expect(denied.requiredPermission).toBe(AuthSourceControlWriteScope);
+      }
+      registry.set(
+        sessions(env),
+        AsyncResult.success({ ...grant(true), permissions: [AuthSourceControlWriteScope] }),
+      );
+      for (const command of commands) {
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+      }
+    }),
+  ),
 );
 
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>

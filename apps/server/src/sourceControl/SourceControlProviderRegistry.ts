@@ -12,6 +12,11 @@ import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
 } from "@t3tools/contracts";
+import * as GerritRemotes from "@t3tools/source-control-gerrit/server/GerritRemotes";
+import {
+  gerritRemoteConfiguration,
+  resolveRemoteEndpoint,
+} from "@t3tools/source-control-gerrit/server/remoteBinding";
 
 import * as BuiltInDrivers from "./builtInDrivers.ts";
 import { sourceControlDefinitions } from "./sourceControlDefinitions.ts";
@@ -100,6 +105,7 @@ function unsupportedProvider(
         reference: SourceControlProvider.transportSafeSourceControlErrorValue(input.headSelector),
         detail: `No ${kind} source control provider is registered.`,
       }),
+
     getRepositoryCloneUrls: (input) =>
       new SourceControlProviderError({
         provider: kind,
@@ -245,6 +251,9 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const { process } = yield* SourceControlHost.SourceControlHost;
     const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
+    const nativeRemotes = yield* GerritRemotes.GerritRemotes.pipe(
+      Effect.provide(GerritRemotes.layer),
+    );
     const providers = new Map<
       SourceControlProviderKind,
       SourceControlProvider.SourceControlProvider["Service"]
@@ -262,24 +271,123 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
           Exit.isSuccess(exit) && exit.value.settled ? UNKNOWN_REMOTE_CACHE_TTL : Duration.zero,
       },
     );
-    const settingsChanges = yield* serverSettings.subscribeChanges;
-    yield* Stream.runForEach(settingsChanges, () => Cache.invalidateAll(unknownRemoteCache)).pipe(
-      Effect.forkScoped,
-    );
-
-    const refineContext = (
+    const nativeContext = Effect.fn("SourceControlProviderRegistry.nativeContext")(function* (
+      cwd: string,
+      remotes?: ReadonlyArray<{ readonly name: string; readonly url: string }>,
+      installation?: string,
+    ): Effect.fn.Return<
+      SourceControlProvider.SourceControlProviderContext | null,
+      SourceControlProviderError
+    > {
+      const connections = Object.values(
+        (yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null)))
+          ?.gerritConnections ?? {},
+      );
+      const configuration = gerritRemoteConfiguration(connections);
+      if (connections.length === 0) return null;
+      const endpoints =
+        remotes ??
+        (yield* nativeRemotes.read(cwd).pipe(
+          Effect.map((observed) =>
+            observed.flatMap((remote) =>
+              [...remote.effective.fetch, ...remote.effective.push].map((url) => ({
+                name: remote.name,
+                url,
+              })),
+            ),
+          ),
+          Effect.mapError(
+            (cause) =>
+              new SourceControlProviderError({
+                provider: SourceControlProviderKind.make("gerrit"),
+                operation: "detectProvider",
+                cwd,
+                detail: "Failed to read Gerrit remote endpoints.",
+                cause,
+              }),
+          ),
+        ));
+      const candidates = endpoints.flatMap((remote) => {
+        const endpoint = resolveRemoteEndpoint(remote.url, configuration);
+        return endpoint.kind === "candidate"
+          ? endpoint.repositories
+              .filter(
+                (repository) =>
+                  installation === undefined || repository.installation === installation,
+              )
+              .map((repository) => ({ remote, repository }))
+          : [];
+      });
+      const byEndpoint = endpoints
+        .map(
+          (remote) =>
+            new Set(
+              candidates
+                .filter((candidate) => candidate.remote === remote)
+                .map(({ repository }) =>
+                  JSON.stringify([repository.installation, repository.project]),
+                ),
+            ),
+        )
+        .filter((destinations) => destinations.size > 0);
+      const common = byEndpoint.reduce<Set<string> | undefined>(
+        (previous, destinations) =>
+          previous === undefined ? destinations : previous.intersection(destinations),
+        undefined,
+      );
+      const installations = new Set(candidates.map(({ repository }) => repository.installation));
+      if (installations.size > 1 || common?.size === 0)
+        return yield* new SourceControlProviderError({
+          provider: SourceControlProviderKind.make("gerrit"),
+          operation: "detectProvider",
+          cwd,
+          detail:
+            "Select a Gerrit remote and installation; multiple native repositories are configured.",
+        });
+      const selected = candidates[0];
+      return selected === undefined
+        ? null
+        : {
+            provider: {
+              kind: SourceControlProviderKind.make("gerrit"),
+              name: "Gerrit",
+              baseUrl: selected.repository.installation,
+            },
+            remoteName: selected.remote.name,
+            remoteUrl: selected.remote.url,
+          };
+    });
+    const refineContext = Effect.fn("SourceControlProviderRegistry.refineContext")(function* (
       cwd: string,
       context: SourceControlProvider.SourceControlProviderContext | null,
-    ): Effect.Effect<SourceControlProvider.SourceControlProviderContext | null> =>
-      context === null || context.provider.kind !== "unknown"
-        ? Effect.succeed(context)
-        : Cache.get(
-            unknownRemoteCache,
-            new UnknownRemoteLookup(
-              context,
-              refineUnknownRemoteProvider({ specs: discoverySpecs, process, cwd, context }),
-            ),
-          ).pipe(Effect.map(({ provider }) => (provider ? { ...context, provider } : context)));
+    ): Effect.fn.Return<
+      SourceControlProvider.SourceControlProviderContext | null,
+      SourceControlProviderError
+    > {
+      if (context === null) return null;
+      const native = yield* nativeContext(
+        cwd,
+        [{ name: context.remoteName, url: context.remoteUrl }],
+        context.provider.kind === "gerrit" ? context.provider.baseUrl : undefined,
+      );
+      if (native !== null) return { ...context, provider: native.provider };
+      if (context.provider.kind === "gerrit")
+        return yield* new SourceControlProviderError({
+          provider: context.provider.kind,
+          operation: "detectProvider",
+          cwd,
+          detail: "The selected Gerrit remote is not bound to this installation.",
+        });
+      if (context.provider.kind !== "unknown") return context;
+      const { provider } = yield* Cache.get(
+        unknownRemoteCache,
+        new UnknownRemoteLookup(
+          context,
+          refineUnknownRemoteProvider({ specs: discoverySpecs, process, cwd, context }),
+        ),
+      );
+      return provider ? { ...context, provider } : context;
+    });
 
     const detectProviderContext = Effect.fn("SourceControlProviderRegistry.detectProviderContext")(
       function* (cwd: string) {
@@ -307,7 +415,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
               }),
           ),
         );
-        return yield* refineContext(cwd, selectProviderContext(remotes.remotes));
+        const native = yield* nativeContext(cwd);
+        return native ?? (yield* refineContext(cwd, selectProviderContext(remotes.remotes)));
       },
     );
 
@@ -319,6 +428,14 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       capacity: PROVIDER_DETECTION_CACHE_CAPACITY,
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PROVIDER_DETECTION_CACHE_TTL : Duration.zero),
     });
+
+    const settingsChanges = yield* serverSettings.subscribeChanges;
+    yield* Stream.runForEach(settingsChanges, () =>
+      Effect.all(
+        [Cache.invalidateAll(unknownRemoteCache), Cache.invalidateAll(providerContextCache)],
+        { discard: true },
+      ),
+    ).pipe(Effect.forkScoped);
 
     const resolveHandle: SourceControlProviderRegistry["Service"]["resolveHandle"] = (input) =>
       (input.context === undefined

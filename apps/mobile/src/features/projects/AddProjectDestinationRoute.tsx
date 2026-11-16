@@ -7,6 +7,8 @@ type AddProjectDestinationRouteParams = {
   readonly remoteUrl?: string | string[];
   readonly repositoryTitle?: string | string[];
   readonly repositoryName?: string | string[];
+  readonly gerritInstallation?: string | string[];
+  readonly gerritProject?: string | string[];
   readonly prompt?: string | string[];
 };
 
