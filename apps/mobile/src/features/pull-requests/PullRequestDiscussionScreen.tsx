@@ -70,7 +70,7 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
     pullRequestConversationThreads(activity.data).find(
       (thread) => thread.id === params.discussionId,
     );
-  const filePath = thread?.path ?? null;
+  const filePath = thread?.path === "/PATCHSET_LEVEL" ? null : (thread?.path ?? null);
   const [body, setBody] = useState("");
   const completions = usePullRequestCompletions({
     environmentId: params.environmentId,
@@ -216,8 +216,8 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
               <View className="gap-2 pb-4">
                 {thread.path === null ? null : (
                   <Text selectable className="font-mono text-xs text-foreground-muted">
-                    {thread.path}
-                    {thread.line ? `:${thread.line}` : ""}
+                    {thread.path === "/PATCHSET_LEVEL" ? "Change-level discussion" : thread.path}
+                    {thread.path !== "/PATCHSET_LEVEL" && thread.line ? `:${thread.line}` : ""}
                   </Text>
                 )}
                 <Text className="text-xs text-foreground-muted">

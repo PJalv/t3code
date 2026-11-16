@@ -48,7 +48,7 @@ interface TrackedToast {
 }
 
 function renderKey(clone: ProjectCloneSnapshot): string {
-  return `${clone.phase}:${clone.stage}:${clone.percent ?? ""}:${clone.detail ?? ""}:${clone.stalled === true}:${clone.error ?? ""}`;
+  return `${clone.phase}:${clone.stage}:${clone.percent ?? ""}:${clone.detail ?? ""}:${clone.stalled === true}:${clone.error ?? ""}:${clone.recoveryPath ?? ""}:${clone.recoveryRequired === true}`;
 }
 
 async function runCloneAction(
@@ -174,29 +174,37 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
       const cancelled = clone.phase === "cancelled";
       const options = stackedThreadToast({
         type: cancelled ? "info" : "error",
-        title: cancelled
-          ? m(msg("Cancelled cloning {name}", { name }))
-          : m(msg("Failed to clone {name}", { name })),
-        description: cancelled
-          ? clone.destinationPath
-          : (clone.error ?? m(msg("The clone failed."))),
+        title: cancelled ? m(msg("Cancelled cloning {name}", { name })) : m(msg("Failed to clone {name}", { name })),
+        description: clone.recoveryRequired
+          ? `Publication may have completed. Inspect ${clone.recoveryPaths?.join(", ") || "the private attempt"} and ${clone.destinationPath}. Do not retry or delete either path.`
+          : cancelled
+            ? (clone.recoveryPath ?? clone.destinationPath)
+            : (clone.error ?? m(msg("The clone failed."))),
         timeout: 0,
-        actionProps: {
-          children: m(msg("Retry")),
-          onClick: () => {
-            void runCloneAction(m(msg("Failed to retry clone")), () =>
-              retryClone({ environmentId, input: { projectId: clone.projectId } }),
-            );
-          },
-        },
+        ...(clone.recoveryRequired || clone.gerritPending
+          ? {}
+          : {
+              actionProps: {
+                children: m(msg("Retry")),
+                onClick: () => {
+                  void runCloneAction(m(msg("Failed to retry clone")), () =>
+                    retryClone({ environmentId, input: { projectId: clone.projectId } }),
+                  );
+                },
+              },
+            }),
         data: {
           ...(cancelled ? { hideCopyButton: true } : {}),
-          secondaryActionProps: {
-            children: m(msg("Remove project")),
-            onClick: () => {
-              void removeClonedProject({ environmentId, projectId: clone.projectId });
-            },
-          },
+          ...(clone.recoveryRequired || clone.gerritPending
+            ? {}
+            : {
+                secondaryActionProps: {
+                  children: m(msg("Remove project")),
+                  onClick: () => {
+                    void removeClonedProject({ environmentId, projectId: clone.projectId });
+                  },
+                },
+              }),
         },
       });
       if (tracked) {

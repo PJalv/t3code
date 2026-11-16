@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
+  GerritCloneSelection,
   SourceControlCloneProtocol,
   SourceControlProviderKind,
   SourceControlRepositoryInfo,
@@ -31,6 +32,12 @@ export const ProjectCloneSnapshot = Schema.Struct({
   stage: ProjectCloneStage,
   percent: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }))),
   detail: Schema.NullOr(Schema.String.check(Schema.isMaxLength(PROJECT_CLONE_DETAIL_MAX_LENGTH))),
+  /** Latest private attempt directory, retained for recovery after failure or cancellation. */
+  recoveryPath: Schema.optionalKey(TrimmedNonEmptyString),
+  recoveryPaths: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** The publication outcome must be reconciled before retry or discard. */
+  recoveryRequired: Schema.optionalKey(Schema.Boolean),
+  gerritPending: Schema.optionalKey(Schema.Boolean),
   /** Git has printed nothing for a while; `detail` is no longer current. Older servers omit it. */
   stalled: Schema.optionalKey(Schema.Boolean),
   error: Schema.NullOr(Schema.String.check(Schema.isMaxLength(PROJECT_CLONE_ERROR_MAX_LENGTH))),
@@ -55,6 +62,7 @@ export const ProjectCloneStartInput = Schema.Struct({
   remoteUrl: Schema.optional(TrimmedNonEmptyString),
   destinationPath: TrimmedNonEmptyString,
   protocol: Schema.optional(SourceControlCloneProtocol),
+  gerrit: Schema.optionalKey(GerritCloneSelection),
 });
 export type ProjectCloneStartInput = typeof ProjectCloneStartInput.Type;
 

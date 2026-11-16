@@ -15,8 +15,8 @@ export function useOpenThreadPullRequests() {
   const gt = useGT();
   const navigation = useNavigation();
   const navigateToPullRequest = useNavigateToPullRequest();
-  return (thread: EnvironmentThreadShell, pr: ThreadPrPresentation) => {
-    if (resolveThreadPrBadgeAction(pr).kind === "list") {
+  return (thread: EnvironmentThreadShell, pr: ThreadPrPresentation | null) => {
+    if (!pr || resolveThreadPrBadgeAction(pr)?.kind === "list") {
       navigation.navigate("ThreadPullRequests", {
         environmentId: String(thread.environmentId),
         threadId: String(thread.id),

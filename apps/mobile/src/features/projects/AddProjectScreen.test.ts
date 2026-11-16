@@ -64,6 +64,7 @@ vi.mock("../../native/StackHeader", () => ({
 }));
 vi.mock("../../components/ui/NavigationRow", () => ({ NavigationRow: "NavigationRow" }));
 vi.mock("../../components/ui/Button", () => ({ Button: "Button" }));
+vi.mock("../../components/ProviderIcon", () => ({ ProviderIcon: "ProviderIcon" }));
 vi.mock("../../components/ui/ScreenScrollView", () => ({ ScreenScrollView: "ScrollView" }));
 vi.mock("../settings/components/SettingsScreen", () => ({ SettingsScreen: "SettingsScreen" }));
 vi.mock("../../components/ui/ThemedSwitch", () => ({ ThemedSwitch: "Switch" }));

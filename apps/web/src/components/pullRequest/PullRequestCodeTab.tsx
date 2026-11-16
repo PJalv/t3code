@@ -24,6 +24,7 @@ import type {
   EnvironmentId,
   PullRequestDetailView,
   PullRequestDiffSide,
+  PullRequestGerritComparison,
   PullRequestDiffResult,
   PullRequestOmittedFileStat,
   PullRequestRef,
@@ -145,6 +146,11 @@ import { pullRequestCompletionScope } from "./PullRequestMarkdownTextarea";
 import { getFileViewedRange, isLineInFileDiff } from "./pullRequestDiff.logic";
 import { PullRequestDiffStat, PullRequestMetaLine } from "./pullRequestPresentation";
 import { PullRequestDiffUnavailableState } from "./PullRequestDiffUnavailableState";
+import {
+  buildGerritComparison,
+  isGerritFilePath,
+  PullRequestGerritPatchSets,
+} from "./PullRequestGerritPatchSets";
 import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
 import { hasCutLines } from "@t3tools/shared/diffCutLines";
 import { CUT_LINES_CSS, markCutLineNotes } from "./cutLineNotes";
@@ -498,13 +504,22 @@ function PullRequestCodeTab({
   }>({ key: "", cursor: null, slices: NO_SLICES });
 
   const referenceKey = pullRequestReviewKey(reference);
+  const [gerritSelections, setGerritSelections] = useState<
+    Record<string, PullRequestGerritComparison>
+  >({});
+  const selectionKey = JSON.stringify([environmentId, referenceKey]);
+  const gerritComparison = detail.gerrit
+    ? buildGerritComparison(detail.gerrit, gerritSelections[selectionKey])
+    : undefined;
   // A commit opened from the timeline or left selected across a force-push may no longer be
   // part of the pull request; read it as "All commits" instead of requesting its diff.
   const commit =
-    selectedCommitOid !== null && detail.commits.some((entry) => entry.oid === selectedCommitOid)
+    !detail.gerrit &&
+    selectedCommitOid !== null &&
+    detail.commits.some((entry) => entry.oid === selectedCommitOid)
       ? selectedCommitOid
       : null;
-  const scopeKey = JSON.stringify([environmentId, referenceKey, commit]);
+  const scopeKey = JSON.stringify([environmentId, referenceKey, commit, gerritComparison]);
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
   // survive the switch and attach its comment to whichever one is on screen when it is sent.
   const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
@@ -528,6 +543,7 @@ function PullRequestCodeTab({
         ...reference,
         ...(cursor === null ? {} : { cursor }),
         ...(commit === null ? {} : { commit }),
+        ...(gerritComparison === undefined ? {} : { gerritComparison }),
       },
     }),
     messages,
@@ -586,7 +602,11 @@ function PullRequestCodeTab({
   const refreshFirstDiffPage = useAtomRefresh(
     pullRequestEnvironment.diff({
       environmentId,
-      input: { ...reference, ...(commit === null ? {} : { commit }) },
+      input: {
+        ...reference,
+        ...(commit === null ? {} : { commit }),
+        ...(gerritComparison === undefined ? {} : { gerritComparison }),
+      },
     }),
   );
   const reviewKey = referenceKey;
@@ -627,7 +647,11 @@ function PullRequestCodeTab({
     readonly shownKeys: ReadonlyMap<string, string>;
   }>({ scope: "", paths: NO_PATHS, shownKeys: new Map() });
   const withheldPaths = withheldLoads.scope === scopeKey ? withheldLoads.paths : NO_PATHS;
-  const withheldInput = { ...reference, ...(commit === null ? {} : { commit }) };
+  const withheldInput = {
+    ...reference,
+    ...(commit === null ? {} : { commit }),
+    ...(gerritComparison === undefined ? {} : { gerritComparison }),
+  };
   const atomRegistry = useContext(RegistryContext);
   const withheldFileDiff = (path: string) =>
     pullRequestEnvironment.diff({ environmentId, input: { ...withheldInput, path } });
@@ -675,11 +699,16 @@ function PullRequestCodeTab({
     reply: hostReview.reply && detail.viewerPermissions.comment,
     resolve: hostReview.resolve && detail.viewerPermissions.resolve,
   };
-  const canCommentOnLines = review.inlineComment && commit === null;
+  const canCommentOnLines =
+    review.inlineComment &&
+    commit === null &&
+    (gerritComparison === undefined ||
+      (gerritComparison.patchSet === detail.gerrit?.currentPatchSet &&
+        gerritComparison.base === "base"));
   const rangeComments = hostReview.rangeComment === true;
   // Agent context is local, so it does not require host comment permission.
   const canSelectLines =
-    commit === null && (review.inlineComment || onAddToAgentSelection !== undefined);
+    commit === null && (canCommentOnLines || onAddToAgentSelection !== undefined);
   const {
     parsedSlices,
     loadedFiles: pagedFiles,
@@ -741,13 +770,14 @@ function PullRequestCodeTab({
       });
     }
   }
-  const loadedFiles =
+  const allLoadedFiles =
     withheldFiles.size === 0
       ? pagedFiles
       : // A refreshed page may carry the file's patch itself now.
         pagedFiles.map((file) =>
           file.hunks.length === 0 ? (withheldFiles.get(resolveFileDiffPath(file)) ?? file) : file,
         );
+  const loadedFiles = allLoadedFiles.filter((file) => isGerritFilePath(resolveFileDiffPath(file)));
   const loadWithheldFile = (path: string) => {
     // The read is keyed without the head, so even a first load must not reuse an older one.
     atomRegistry.refresh(withheldFileDiff(path));
@@ -798,7 +828,19 @@ function PullRequestCodeTab({
     if (commit !== null) return placed;
     for (const file of files) {
       for (const thread of threadsByPath.get(resolveFileDiffPath(file)) ?? []) {
-        if (thread.line !== null && isLineInFileDiff(file, thread.side, thread.line)) {
+        if (
+          thread.line !== null &&
+          (gerritComparison === undefined ||
+            (thread.gerrit?.patchSet === gerritComparison.patchSet &&
+              thread.comments.every(
+                (comment) =>
+                  comment.gerrit?.patchSet == null ||
+                  comment.gerrit.patchSet === gerritComparison.patchSet,
+              ) &&
+              (thread.side !== "left" ||
+                (gerritComparison.base === "base" && thread.gerrit.parent === undefined)))) &&
+          isLineInFileDiff(file, thread.side, thread.line)
+        ) {
           placed.add(thread.id);
         }
       }
@@ -855,7 +897,7 @@ function PullRequestCodeTab({
       if (thread.line === null || !placedThreadIds.has(thread.id)) continue;
       groupAt(thread.side, thread.line).threads.push(thread);
     }
-    if (commit === null) {
+    if (canCommentOnLines) {
       for (const comment of pendingComments) {
         if (comment.path !== path) continue;
         const anchor = getReviewPositionAnchor(comment.position);
@@ -1204,12 +1246,16 @@ function PullRequestCodeTab({
     themeType: resolvedTheme,
     stickyHeaders: true,
     // Full contents would not match the cut lines, and would bring back the lines just cut.
-    loadDiffFiles: (fileDiff: FileDiffMetadata) =>
-      cutFiles.has(fileDiff)
-        ? Promise.reject(
-            new Error(m(msg("Unchanged lines are unavailable in a file with cut lines."))),
-          )
-        : loadDiffFiles(fileDiff),
+    ...(gerritComparison === undefined
+      ? {
+          loadDiffFiles: (fileDiff: FileDiffMetadata) =>
+            cutFiles.has(fileDiff)
+              ? Promise.reject(
+                  new Error(m(msg("Unchanged lines are unavailable in a file with cut lines."))),
+                )
+              : loadDiffFiles(fileDiff),
+        }
+      : {}),
     enableGutterUtility: canSelectLines && draft === null && !withheldRefetching,
     enableLineSelection: canSelectLines && draft === null && !withheldRefetching,
     onGutterUtilityClick: beginComment,
@@ -1414,7 +1460,15 @@ function PullRequestCodeTab({
   const toolbar = (
     <div className="@container flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-4 text-xs text-muted-foreground">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        {orderedCommits.length > 0 ? (
+        {detail.gerrit && gerritComparison ? (
+          <PullRequestGerritPatchSets
+            detail={detail.gerrit}
+            comparison={gerritComparison}
+            onChange={(comparison) =>
+              setGerritSelections((previous) => ({ ...previous, [selectionKey]: comparison }))
+            }
+          />
+        ) : orderedCommits.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button size="xs" variant="secondary" />}
@@ -1867,7 +1921,7 @@ function PullRequestCodeTab({
     return withToolbar(rawSlicesView);
   }
 
-  if (items.length === 0 && nextCursor === null) {
+  if (items.length === 0 && nextCursor === null && detail.reviewThreads.length === 0) {
     return withToolbar(
       <p className="px-4 py-5 text-sm text-muted-foreground">
         {commit === null
@@ -1927,7 +1981,9 @@ function PullRequestCodeTab({
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <p className="truncate px-3 text-xs text-muted-foreground">{path}</p>
+                          <p className="truncate px-3 text-xs text-muted-foreground">
+                            {isGerritFilePath(path) ? path : "Change-level conversation"}
+                          </p>
                         }
                       />
                       <TooltipPopup side="top">{path}</TooltipPopup>
@@ -1935,6 +1991,18 @@ function PullRequestCodeTab({
                     <div className="mt-1 space-y-2">
                       {threads.map((thread) => (
                         <div key={thread.id}>
+                          {[
+                            ...new Set(
+                              [
+                                thread.gerrit?.patchSet,
+                                ...thread.comments.map((comment) => comment.gerrit?.patchSet),
+                              ].filter((patchSet) => patchSet != null),
+                            ),
+                          ].map((patchSet) => (
+                            <p key={patchSet} className="px-3 text-xs text-muted-foreground">
+                              From patch set {patchSet}
+                            </p>
+                          ))}
                           {thread.line === null ? null : (
                             <p className="px-3 text-xs text-muted-foreground">
                               <T>

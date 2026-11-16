@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { VcsDriverKind } from "./vcs.ts";
+import { GerritInstallationId, GerritProjectName } from "./gerrit.ts";
 
 /** Accept unknown hosts so clients can fall back to generic presentation. */
 export const SourceControlProviderKind = TrimmedNonEmptyString.check(
@@ -42,6 +43,12 @@ export const SourceControlRepositoryCloneUrls = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,
   sshUrl: TrimmedNonEmptyString,
+  /**
+   * Transport a provider wants used when the caller has no preference. A provider whose
+   * HTTPS endpoint is not anonymously readable but whose SSH endpoint is configured must
+   * say so here, because the client cannot tell the two apart from the URLs alone.
+   */
+  preferredTransport: Schema.optionalKey(Schema.Literals(["auto", "ssh", "https"])),
 });
 export type SourceControlRepositoryCloneUrls = typeof SourceControlRepositoryCloneUrls.Type;
 
@@ -56,6 +63,7 @@ export const SourceControlRepositoryInfo = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,
   sshUrl: TrimmedNonEmptyString,
+  preferredTransport: Schema.optionalKey(Schema.Literals(["auto", "ssh", "https"])),
 });
 export type SourceControlRepositoryInfo = typeof SourceControlRepositoryInfo.Type;
 
@@ -66,12 +74,19 @@ export const SourceControlRepositoryLookupInput = Schema.Struct({
 });
 export type SourceControlRepositoryLookupInput = typeof SourceControlRepositoryLookupInput.Type;
 
+export const GerritCloneSelection = Schema.Struct({
+  installation: GerritInstallationId,
+  project: GerritProjectName,
+});
+export type GerritCloneSelection = typeof GerritCloneSelection.Type;
+
 export const SourceControlCloneRepositoryInput = Schema.Struct({
   provider: Schema.optional(SourceControlProviderKind),
   repository: Schema.optional(TrimmedNonEmptyString),
   remoteUrl: Schema.optional(TrimmedNonEmptyString),
   destinationPath: TrimmedNonEmptyString,
   protocol: Schema.optional(SourceControlCloneProtocol),
+  gerrit: Schema.optionalKey(GerritCloneSelection),
 });
 export type SourceControlCloneRepositoryInput = typeof SourceControlCloneRepositoryInput.Type;
 

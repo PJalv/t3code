@@ -158,6 +158,57 @@ If cloning or pushing asks for a username, run `origin auth setup-git` to point 
 credentials again. Origin repositories use HTTPS and are published privately. Repositories mirrored
 from GitHub keep their pull requests on GitHub; open those from the GitHub remote.
 
+### Gerrit
+
+Open **Settings → Source Control → Gerrit** in the environment that owns your repository.
+Save the Gerrit server URL and an HTTP username and password or token, then test the connection.
+When editing a saved connection, leave both HTTP credential fields blank to keep its saved credentials.
+Use HTTPS when available: HTTP does not encrypt credentials or protect the downloaded commit hook.
+When you select a Gerrit project and clone it over HTTP, T3 Code uses the saved HTTP credentials.
+This clone does not use the server machine's Git proxy or custom CA configuration, or proxy and CA
+environment variables. It uses Git's default certificate trust. If your network requires a proxy or a
+custom CA, use SSH for the clone or configure the default trust and a direct connection. Later Git fetches
+use the server machine's existing Git and SSH configuration separately.
+To select a project for SSH cloning, configure the SSH host, port, and SSH username on the
+connection. The SSH username is separate from the HTTP username. Selected Gerrit clones use a private
+sibling directory before publication. If the destination already exists or publication fails, the clone
+reports the private checkout path. Inspect both paths before moving the checkout manually. The clone
+installs the server's `commit-msg` hook. Git runs that hook when you commit,
+so use a server you trust; HTTP does not protect the hook from changes in transit. An SSH checkout
+needs a configured SSH host associated with the Gerrit server. If the remote is ambiguous, T3 Code
+cannot safely infer its project.
+
+Gerrit changes appear in **Pull requests** like reviews from any other host. A change shows its
+votes, submit requirements, topic, and work-in-progress and private state. You can vote, set the
+topic, mark it ready or work in progress, and make it private or public. The regular review actions
+submit, abandon, restore, and rebase the change, and comments on the whole change post as
+patch-set-level comments. On web and desktop, choose a patch set and a comparison base to read an
+earlier revision; mobile shows the current patch set.
+
+To upload, open **Upload commit for review** from the command palette or the thread's Git actions
+(Git sheet on mobile). It pushes HEAD to `refs/for/<branch>` as a new change or as a new patch set of
+an existing one, with an optional topic, reviewers, CC, work in progress, or private flag. Like
+`git push origin HEAD:refs/for/<branch>`, this also uploads any parent commits Gerrit does not
+have yet. The commit needs a Change-Id footer. The uploaded change is linked to the thread.
+
+The `commit-msg` hook adds the Change-Id when you commit. If a checkout is missing it, choose
+**Install hook** in **Settings → Source Control → Gerrit** (in the upload sheet on mobile). T3 Code
+installs the pinned official hook and never replaces an existing one. Installing it does not fix
+existing commits; amend them to add a Change-Id.
+
+If your server asks for signed pushes, save your GPG key passphrase in **Settings → Source Control →
+Gerrit**. It is stored on the environment's server and is never shown again; use **Clear
+passphrase** to remove it. Uploads sign the push with the checkout's Git signing key. Only OpenPGP
+(`gpg`) signing is supported.
+
+Agents use Gerrit through the `read_gerrit`, `act_gerrit`, and `upload_gerrit` tools. They can do
+everything you can, including votes, reviewers, comments, submit, and abandon, with the saved
+account; the thread's access mode is the only limit. `link_pull_request` and `watch_pull_request`
+accept a Gerrit change number. Watched changes wake the thread like any other pull request.
+
+Unavailable checks from the legacy checks integration (Gerrit 3.10.x only) do not mean that checks
+passed. You can turn the integration off in the server settings.
+
 ## Start, clone, or publish a project
 
 To start from nothing, choose **New project** in the command palette (`Cmd/Ctrl+K`), or

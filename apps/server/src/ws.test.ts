@@ -19,6 +19,8 @@ import {
   GitManagerError,
   VcsProcessSpawnError,
   MessageId,
+  GerritHookError,
+  GerritWsRpcGroup,
   ProjectId,
   ThreadId,
   TurnItemId,
@@ -34,6 +36,9 @@ import {
   type AuthAccessStreamEvent,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
+  WsPullRequestsGerritCommandRpc,
+  WsGerritUploadCommitRpc,
+  PullRequestOperationError,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadShell,
   type OrchestrationProjectShell,
@@ -45,6 +50,7 @@ import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts
 import * as Deferred from "effect/Deferred";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Cause from "effect/Cause";
@@ -62,7 +68,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as ProviderInstallationGate from "./provider/ProviderInstallationGate.ts";
 import * as Ws from "./ws.ts";
-import { RpcGroup, RpcMessage, RpcServer } from "effect/rpc";
+import { RpcClient, RpcGroup, RpcMessage, RpcServer } from "effect/rpc";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
@@ -90,6 +96,8 @@ import * as DocumentText from "./provider/DocumentText.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
+import * as GerritService from "./sourceControl/GerritService.ts";
+import * as GerritDirectService from "./sourceControl/GerritDirectService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
@@ -190,6 +198,8 @@ import {
   WS_RPC_SERVER_OPTIONS,
   withLateConfigDiscovery,
 } from "./ws.ts";
+
+const encodeHookError = Schema.encodeEffect(GerritHookError);
 
 const snapshotConfig = (fields: Partial<ServerConfig>) =>
   ({ availableEditors: [], settings: {}, ...fields }) as unknown as ServerConfig;
@@ -820,6 +830,8 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
 const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(DocumentText.DocumentText)({}),
+  Layer.mock(GerritDirectService.GerritDirectService)({}),
+  Layer.mock(GerritService.GerritService)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),
   Layer.mock(SecretCheck.SecretCheck)({}),
   Layer.mock(WorkspacePaths.WorkspacePaths)({}),
@@ -1103,6 +1115,9 @@ it.effect.each([
           namedProjectsRoot: process.cwd(),
         }),
         Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("config-test")),
+        }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
           getDescriptor: Effect.succeed({
             environmentId: EnvironmentId.make("config-test"),
@@ -2639,5 +2654,173 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
         Layer.mock(ServerBrowser.ServerBrowser)({}),
       ),
     ),
+  ),
+);
+
+it.effect("routes Gerrit commands and direct uploads at the RPC boundary", () =>
+  Effect.gen(function* () {
+    const ref = {
+      projectId: ProjectId.make("project"),
+      repository: "acme/web",
+      number: 7,
+      command: "setTopic" as const,
+      payload: { topic: "hello" },
+    };
+    const upload = { cwd: "/repo", upload: { kind: "new" as const, branch: "main" } };
+    const unsupported = new PullRequestOperationError({
+      operation: "gerritCommand",
+      detail: "This host does not support Gerrit commands.",
+    });
+    let commandInput: unknown;
+    let uploadInput: unknown;
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(PullRequestService.PullRequestService)({
+        withRoutingCredential: (_input, effect) => effect,
+        gerritCommand: (input) => {
+          commandInput = input;
+          return Effect.fail(unsupported);
+        },
+      }),
+      Layer.mock(GerritDirectService.GerritDirectService)({
+        upload: (input) => {
+          uploadInput = input;
+          return Effect.succeed({ result: { pushed: true }, change: null });
+        },
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/fixture" }),
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("config-test")),
+      }),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const group = RpcGroup.make(WsPullRequestsGerritCommandRpc, WsGerritUploadCommitRpc);
+    type Rpcs = RpcGroup.Rpcs<typeof group>;
+    let client!: Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<Rpcs, never>>>;
+    const server = yield* RpcServer.makeNoSerialization(group, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) => client.write(response),
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("gerrit-test"),
+            subject: "test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: false },
+        ).pipe(Layer.provide(services)),
+      ),
+    );
+    client = yield* RpcClient.makeNoSerialization(group, {
+      supportsAck: true,
+      onFromClient: ({ message }) => server.write(0, message),
+    });
+    const error = yield* client.client[WS_METHODS.pullRequestsGerritCommand](ref).pipe(Effect.flip);
+    assert.match(error.message, /does not support Gerrit commands/);
+    assert.deepEqual(commandInput, ref);
+    assert.deepEqual(yield* client.client[WS_METHODS.gerritUploadCommit](upload), {
+      result: { pushed: true },
+      change: null,
+    });
+    assert.deepEqual(uploadInput, upload);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+it.effect("removes internal hook failure causes at both production Gerrit RPC handlers", () =>
+  Effect.gen(function* () {
+    const cause = new Error("private process output and credential sentinel");
+    const internal = new GerritHookError({ reason: "filesystem", cause });
+    const failed = Effect.fail(internal);
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(GerritService.GerritService)({
+        readHook: () => failed,
+        installHook: () => failed,
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/fixture" }),
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("config-test")),
+      }),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const group = GerritWsRpcGroup;
+    type HookRpc = RpcGroup.Rpcs<typeof group>;
+    let client!: Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<HookRpc, never>>>;
+    const server = yield* RpcServer.makeNoSerialization(group, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) => client.write(response),
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("hook-rpc-test"),
+            subject: "hook-rpc-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: false },
+        ).pipe(Layer.provide(services)),
+      ),
+    );
+    client = yield* RpcClient.makeNoSerialization(group, {
+      supportsAck: true,
+      onFromClient: ({ message }) => server.write(0, message),
+    });
+    const failures = [
+      yield* client.client[WS_METHODS.gerritHook]({ cwd: "/fixture" }).pipe(Effect.flip),
+      yield* client.client[WS_METHODS.gerritInstallHook]({ cwd: "/fixture" }).pipe(Effect.flip),
+    ];
+    for (const failure of failures) {
+      assert.instanceOf(failure, GerritHookError);
+      if (failure._tag !== "GerritHookError") return yield* Effect.die("Unexpected hook RPC error");
+      assert.notStrictEqual(failure, internal);
+      assert.isUndefined(failure.cause);
+      assert.equal(failure.message, "Gerrit commit-msg hook setup stopped: filesystem.");
+      assert.deepEqual(yield* encodeHookError(failure), {
+        _tag: "GerritHookError",
+        reason: "filesystem",
+      });
+    }
+    assert.strictEqual(internal.cause, cause);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
   ),
 );
