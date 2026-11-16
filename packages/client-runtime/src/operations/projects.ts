@@ -146,11 +146,18 @@ export function normalizePastedCloneUrl(input: string): string {
 }
 
 export function getDefaultCloneUrl(
-  repository: Pick<SourceControlRepositoryInfo, "provider" | "url" | "sshUrl">,
+  repository: Pick<
+    SourceControlRepositoryInfo,
+    "provider" | "url" | "sshUrl" | "preferredTransport"
+  >,
 ): string {
-  return sourceControlClients.get(repository.provider).defaultCloneTransport === "https"
-    ? repository.url
-    : repository.sshUrl;
+  // A provider that knows its HTTPS endpoint is not anonymously readable reports an
+  // explicit transport. Falling back to the static per-provider default keeps every
+  // provider that does not report one behaving exactly as before.
+  const transport =
+    repository.preferredTransport ??
+    sourceControlClients.get(repository.provider).defaultCloneTransport;
+  return transport === "https" ? repository.url : repository.sshUrl;
 }
 
 export type OfferedSourceControlProviders = ServerSettings["offeredSourceControlProviders"];

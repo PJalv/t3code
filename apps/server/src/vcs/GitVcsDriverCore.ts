@@ -50,8 +50,10 @@ import { VcsAutomaticFetchInterval } from "./VcsAutomaticFetchInterval.ts";
 import {
   explicitBareRepositoryEnv,
   gitConfigEnv,
+  gitHttpAuthEnv,
   unsetInheritedRepositoryEnv,
 } from "./VcsProcess.ts";
+import * as GitHttpAuth from "./GitHttpAuth.ts";
 import { makeWorktreeCheckoutCache } from "./worktreeCheckoutCache.ts";
 import { removeLinkedWorktree } from "./worktreeRemoval.ts";
 import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
@@ -1049,6 +1051,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const hostPlatform = yield* HostProcess.Platform;
   const serviceScope = yield* Effect.scope;
   const automaticFetchInterval = yield* VcsAutomaticFetchInterval;
+  const httpAuth = yield* Effect.serviceOption(GitHttpAuth.GitHttpAuth);
   type StatusFetchState = {
     phase: "queued" | "running" | "claimed";
     claimed: Deferred.Deferred<void>;
@@ -1095,7 +1098,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ...input.env,
           ...trace2Monitor.env,
         };
-        const env = { ...baseEnv, ...explicitBareRepositoryEnv(baseEnv, hostPlatform) };
+        const bareEnv = { ...baseEnv, ...explicitBareRepositoryEnv(baseEnv, hostPlatform) };
+        const env = { ...bareEnv, ...(yield* gitHttpAuthEnv(bareEnv, hostPlatform, httpAuth)) };
         const spawnEnv = { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) };
         const resolved = yield* resolveSpawnCommand("git", [], { env: spawnEnv });
         const spawnError = (cause: unknown) =>

@@ -27,7 +27,7 @@ export class PullRequestTargetIncompleteError extends Schema.TaggedError<PullReq
   {},
 ) {
   override get message(): string {
-    return "Pass either url, or both repository and number.";
+    return "Pass either url or number.";
   }
 }
 
@@ -75,21 +75,34 @@ function projectHostAndProvider(project: OrchestrationProjectShell | undefined):
   };
 }
 
+function projectRepository(project: OrchestrationProjectShell | undefined): string | undefined {
+  const identity = project?.repositoryIdentity;
+  if (!identity) return undefined;
+  return (
+    identity.displayName ||
+    (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : undefined)
+  );
+}
+
 export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(function* (
   input: PullRequestTarget,
   project: OrchestrationProjectShell | undefined,
 ) {
   if (input.url !== undefined) {
     const parsed = sourceControlDefinitions.parseChangeRequestUrl(input.url)?.link;
-    if (parsed === undefined) {
+    // Gerrit's short `/c/<number>` routes omit the project; it is the project's repository.
+    const repository = parsed?.repository || projectRepository(project);
+    if (parsed === undefined || repository === undefined) {
       return yield* new PullRequestUrlInvalidError({});
     }
     return {
-      ...normalizeThreadPullRequestKey(parsed),
+      ...normalizeThreadPullRequestKey({ ...parsed, repository }),
       url: canonicalizeGitCafePullRequestUrl(input.url),
     } satisfies ResolvedTarget;
   }
-  if (input.repository === undefined || input.number === undefined) {
+  // A bare number names a change request in the thread's own repository.
+  const inputRepository = input.repository ?? projectRepository(project);
+  if (inputRepository === undefined || input.number === undefined) {
     return yield* new PullRequestTargetIncompleteError({});
   }
   const projectHost = projectHostAndProvider(project);
@@ -97,7 +110,7 @@ export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(func
   if (host === undefined) {
     return yield* new PullRequestHostRequiredError({});
   }
-  const repository = input.repository.toLowerCase();
+  const repository = inputRepository.toLowerCase();
   // Without a URL, a public forge host says what shape its change request URLs take;
   // any other host is taken to run the project's own forge.
   const recognizedKind = sourceControlDefinitions.recognizeRemote(`https://${host}`)?.kind;
@@ -109,7 +122,8 @@ export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(func
       ? null
       : sourceControlDefinitions.get(kind).changeRequestUrl({
           host,
-          repository,
+          // Some hosts, such as Gerrit, have case-sensitive repository paths.
+          repository: inputRepository,
           number: input.number,
           remoteUrl: project?.repositoryIdentity?.locator.remoteUrl,
         });

@@ -4,7 +4,7 @@ import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import type { PullRequestChangeBreakdown } from "@t3tools/contracts";
 import { msg, T, useGT, useMessages, Var } from "gt-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import Animated from "react-native-reanimated";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
@@ -30,6 +30,7 @@ import {
   type PullRequestParams,
 } from "./usePullRequestDiff";
 import { usePullRequestFileFilter } from "./usePullRequestFileFilter";
+import { filterGerritPatchSetFile } from "./PullRequestGerritSection";
 import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
 import { requestPullRequestFileJump } from "./pullRequestFileJump";
 import { fileDirectory, groupByDirectory } from "./pullRequestFileSections";
@@ -52,7 +53,8 @@ function useChangedFiles(params: PullRequestDiffParams) {
   ).changeRequest;
   const diff = usePullRequestDiff(params, terminology);
   const viewed = usePullRequestFilesViewed(params, pr);
-  const filter = usePullRequestFileFilter(diff.parsed);
+  const withoutPatchSet = useMemo(() => filterGerritPatchSetFile(diff.parsed), [diff.parsed]);
+  const filter = usePullRequestFileFilter(withoutPatchSet);
   const parsed = filter.parsed;
   return {
     diff,

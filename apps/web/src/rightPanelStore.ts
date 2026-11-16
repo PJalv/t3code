@@ -82,6 +82,7 @@ export type RightPanelSurface =
       host?: string;
       repository: string;
       number: number;
+      gerritInstallation?: string;
       url?: string;
       /** A clicked link waiting for the panel to show where it points; cleared once shown. */
       revealUrl?: string;
@@ -216,6 +217,7 @@ interface RightPanelStoreState {
       host?: string;
       repository: string;
       number: number;
+      gerritInstallation?: string;
       url?: string;
       /** A clicked link to reveal; reopening a surface passes only its `url`. */
       revealUrl?: string;
@@ -344,11 +346,15 @@ export function pullRequestSurfaceId(target: {
   host?: string;
   repository: string;
   number: number;
+  gerritInstallation?: string;
 }): PullRequestSurface["id"] {
   const scope =
     target.environmentId === undefined ? "" : `${encodeURIComponent(target.environmentId)}:`;
   const host = target.host === undefined ? "" : `${encodeURIComponent(target.host.toLowerCase())}:`;
-  return `pull-request:${scope}${encodeURIComponent(target.projectId)}:${host}${encodeURIComponent(target.repository)}:${target.number}`;
+  const kind = target.gerritInstallation
+    ? `gerrit:${encodeURIComponent(target.gerritInstallation)}:`
+    : "";
+  return `pull-request:${kind}${scope}${encodeURIComponent(target.projectId)}:${host}${encodeURIComponent(target.repository)}:${target.number}`;
 }
 
 export type IssueSurface = Extract<RightPanelSurface, { kind: "issue" }>;
@@ -390,6 +396,7 @@ export function pullRequestSurface(target: {
   host?: string;
   repository: string;
   number: number;
+  gerritInstallation?: string;
   url?: string;
   detailTab?: PullRequestDetailTab;
 }): PullRequestSurface {
@@ -401,6 +408,9 @@ export function pullRequestSurface(target: {
     ...(typeof target.host === "string" ? { host: target.host.toLowerCase() } : {}),
     repository: target.repository,
     number: target.number,
+    ...(target.gerritInstallation === undefined
+      ? {}
+      : { gerritInstallation: target.gerritInstallation }),
     ...(typeof target.url === "string" ? { url: target.url } : {}),
     ...(target.detailTab === undefined ? {} : { detailTab: target.detailTab }),
   };

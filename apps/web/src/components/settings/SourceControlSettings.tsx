@@ -41,6 +41,7 @@ import { SourceControlHostSettings } from "./SourceControlHostSettings";
 import { SourceControlAccountSettings } from "./SourceControlAccountSettings";
 import { SourceControlAppSignInSettings } from "./SourceControlAppSignInSettings";
 import { SourceControlTokenSettings } from "./SourceControlTokenSettings";
+import { GerritConnectionSettings } from "./GerritConnectionSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
@@ -642,7 +643,15 @@ export function SourceControlSettingsPanel() {
                       }),
                   }}
                 >
-                  {hostSettingsPanel(item)}
+                  {item.kind === "gerrit" ? (
+                    <GerritConnectionSettings
+                      key={environmentId}
+                      environmentId={environmentId}
+                      onSaved={handleScan}
+                    />
+                  ) : (
+                    hostSettingsPanel(item)
+                  )}
                 </DiscoveryItemRow>
               ))}
             </SettingsSection>

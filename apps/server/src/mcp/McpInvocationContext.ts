@@ -24,6 +24,7 @@ const ALL_MCP_CAPABILITIES = [
   "pull-requests",
   "issues",
   "background-wait",
+  "gerrit",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 

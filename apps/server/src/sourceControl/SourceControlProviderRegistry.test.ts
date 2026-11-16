@@ -87,6 +87,7 @@ function makeRegistry(input: {
   readonly remotes: ReadonlyArray<{
     readonly name: string;
     readonly url: string;
+    readonly pushUrl?: string;
   }>;
   readonly discovery?: ReadonlyArray<SourceControlProviderDiscoverySpec>;
   readonly run?: SourceControlHost.SourceControlHost["Service"]["process"]["run"];
@@ -97,7 +98,7 @@ function makeRegistry(input: {
       Effect.succeed({
         remotes: input.remotes.map((remote) => ({
           ...remote,
-          pushUrl: Option.none(),
+          pushUrl: Option.fromUndefinedOr(remote.pushUrl),
           isPrimary: remote.name === "origin",
         })),
         freshness: {
@@ -152,7 +153,10 @@ function makeRegistry(input: {
           },
         }),
         input.settings
-          ? Layer.mock(ServerSettings.ServerSettingsService)(input.settings)
+          ? Layer.mock(ServerSettings.ServerSettingsService)({
+              getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+              ...input.settings,
+            })
           : ServerSettings.ServerSettingsService.layerTest(),
         ServerConfig.layerTest(process.cwd(), {
           prefix: "t3-source-control-registry-test-",

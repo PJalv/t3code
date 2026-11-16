@@ -5,6 +5,7 @@ import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeHttp from "node:http";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it, describe } from "@effect/vitest";
@@ -56,6 +57,7 @@ import { autoPullProjects } from "../serverRuntimeStartup.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { VcsAutomaticFetchInterval } from "./VcsAutomaticFetchInterval.ts";
 import { gitConfigEnv } from "./VcsProcess.ts";
+import * as GitHttpAuth from "./GitHttpAuth.ts";
 
 const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitCommandError));
 const decodeVcsRef = Schema.decodeUnknownSync(VcsRef);
@@ -1245,6 +1247,88 @@ it.effect("invalidates cached metadata after interrupted worktree creation", () 
       );
     }),
   ).pipe(Effect.provide(layerTest)),
+);
+
+it.live("scopes Git HTTP credentials and preserves caller config", () =>
+  Effect.gen(function* () {
+    const requests: Array<{
+      url: string;
+      authorization: string | undefined;
+      custom: string | undefined;
+    }> = [];
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(
+        () =>
+          new Promise<NodeHttp.Server>((resolve) => {
+            const server = NodeHttp.createServer((request, response) => {
+              requests.push({
+                url: request.url ?? "",
+                authorization: request.headers.authorization,
+                custom: request.headers["x-caller"] as string | undefined,
+              });
+              response.writeHead(404);
+              response.end();
+            });
+            server.listen(0, "127.0.0.1", () => resolve(server));
+          }),
+      ),
+      (server) =>
+        Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("missing fixture address");
+    const root = `http://127.0.0.1:${address.port}`;
+    const auth = GitHttpAuth.GitHttpAuth.of({
+      invalidate: Effect.void,
+      entries: Effect.succeed([
+        [`http.${root}/gerrit/.extraHeader`, "Authorization: Basic dXNlcjp0b2tlbg=="],
+        [`http.${root}/gerrit/.followRedirects`, "false"],
+      ]),
+    });
+    const driver = yield* makeGitVcsDriverCore().pipe(
+      Effect.provideService(GitHttpAuth.GitHttpAuth, auth),
+    );
+    const cwd = yield* makeTmpDir();
+    for (const url of [`${root}/gerrit/project`, `${root}/other/project`]) {
+      yield* driver.execute({
+        operation: "test.http",
+        cwd,
+        args: ["ls-remote", url],
+        allowNonZeroExit: true,
+        env: {
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "http.extraHeader",
+          GIT_CONFIG_VALUE_0: "X-Caller: preserved",
+        },
+      });
+    }
+    yield* driver.execute({
+      operation: "test.http.caller-auth",
+      cwd,
+      args: ["ls-remote", `${root}/gerrit/project`],
+      allowNonZeroExit: true,
+      env: {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: `http.${root}/gerrit/.extraHeader`,
+        GIT_CONFIG_VALUE_0: "Authorization: Basic Y2FsbGVy",
+      },
+    });
+    assert.equal(requests.length, 3);
+    assert.equal(requests[2]?.authorization, "Basic Y2FsbGVy");
+    assert.equal(requests[0]?.authorization, "Basic dXNlcjp0b2tlbg==");
+    assert.isUndefined(requests[1]?.authorization);
+    assert.deepEqual(
+      requests.slice(0, 2).map((request) => request.custom),
+      ["preserved", "preserved"],
+    );
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      layerServerConfig.pipe(
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
+    ),
+  ),
 );
 
 describe("pullCurrentBranch", () => {
@@ -3016,7 +3100,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             operation: "GitVcsDriver.test.notARepository",
             cwd,
             args: ["rev-parse", "--abbrev-ref", "HEAD"],
-            env: { LC_ALL: "C" },
+            env: { LC_ALL: "C", GIT_CEILING_DIRECTORIES: NodePath.dirname(cwd) },
           })
           .pipe(Effect.flip);
 

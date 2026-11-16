@@ -130,6 +130,42 @@ describe("add project shared logic", () => {
     ).toBe("https://forgejo.example.test:8443/owner/repo.git");
   });
 
+  it("honours a provider that reports its own preferred transport", () => {
+    // Gerrit commonly cannot be read anonymously: the clone runs git with
+    // GIT_TERMINAL_PROMPT=0 and injects no credentials, so defaulting an
+    // SSH-only installation to HTTPS produced an unavoidable
+    // "could not read Username" failure. A provider that knows this reports it.
+    expect(
+      getDefaultCloneUrl({
+        provider: SourceControlProviderKind.make("gerrit"),
+        url: "https://gerrit.example.test/CICD_Tools",
+        sshUrl: "ssh://gerrit-ssh.example.test:29418/CICD_Tools",
+        preferredTransport: "ssh",
+      }),
+    ).toBe("ssh://gerrit-ssh.example.test:29418/CICD_Tools");
+    // An explicit HTTPS preference still wins over the static default.
+    expect(
+      getDefaultCloneUrl({
+        provider: SourceControlProviderKind.make("gerrit"),
+        url: "https://gerrit.example.test/CICD_Tools",
+        sshUrl: "ssh://gerrit-ssh.example.test:29418/CICD_Tools",
+        preferredTransport: "https",
+      }),
+    ).toBe("https://gerrit.example.test/CICD_Tools");
+  });
+
+  it("keeps the static provider default when no transport is reported", () => {
+    // Gerrit's static default is HTTPS, so an installation with no sshHost must be
+    // unaffected by the preferredTransport addition.
+    expect(
+      getDefaultCloneUrl({
+        provider: SourceControlProviderKind.make("gerrit"),
+        url: "https://gerrit.example.test/CICD_Tools",
+        sshUrl: "ssh://gerrit.example.test:29418/CICD_Tools",
+      }),
+    ).toBe("https://gerrit.example.test/CICD_Tools");
+  });
+
   it("derives the clone folder name from any pasted clone URL", () => {
     expect(getCloneDirectoryName("https://github.com/owner/repo.git")).toBe("repo");
     expect(getCloneDirectoryName("https://github.com/owner/repo")).toBe("repo");

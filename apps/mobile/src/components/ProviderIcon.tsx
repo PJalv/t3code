@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { Defs, LinearGradient, Path, Stop, Svg } from "react-native-svg";
+import { Defs, LinearGradient, Path, Rect, Stop, Svg } from "react-native-svg";
 import { View } from "react-native";
 import {
   normalizeProviderAccentColor,
@@ -75,6 +75,19 @@ export function ProviderIcon(props: ProviderIconProps) {
   const size = props.size ?? 16;
   const mono = isDarkMode ? "#e5e5e5" : "#171717";
 
+  if (props.provider === "gerrit") {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 52 52" fill="none">
+        <Rect x="0" y="0" width="40" height="40" rx="4" fill="#D88989" />
+        <Rect x="12" y="12" width="40" height="40" rx="4" fill="#83C88A" />
+        <Path d="M18 22h12v4H18zM34 22h12v4H34z" fill="#9A4F4F" />
+        <Path
+          d="M18 36h4v-4h4v4h4v4h-4v4h-4v-4h-4zM34 36h4v-4h4v4h4v4h-4v4h-4v-4h-4z"
+          fill="#397A43"
+        />
+      </Svg>
+    );
+  }
   if (props.provider?.trim().toLowerCase() === "antigravity") {
     return (
       <Image

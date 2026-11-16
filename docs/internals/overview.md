@@ -42,6 +42,13 @@ connections and project membership. An unavailable target must not fall back to 
 default or a promise to synchronize offline or future environments. Project-group targets similarly
 select known environment-local checkouts; the group itself does not store inherited defaults.
 
+Authenticated Gerrit clones isolate Git configuration, including proxy and custom CA settings, to
+prevent credential forwarding through rewrites, helpers, or redirects. A transport configuration
+extension must make proxy and CA trust explicit for the selected installation, pass only validated
+transport options to the isolated child, and keep proxy credentials out of arguments and errors.
+It must test TLS verification, proxy authentication, redirects, and URL rewriting independently.
+See [the clone service](../../apps/server/src/sourceControl/SourceControlRepositoryService.ts).
+
 ## Durable intent and side effects
 
 Orchestration state is decided as events, and projections are the source of truth once they apply

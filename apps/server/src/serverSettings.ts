@@ -22,9 +22,11 @@ import {
   type SecretReference,
   withIdleCompaction,
 } from "@t3tools/contracts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
@@ -76,6 +78,27 @@ export {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
 } from "@t3tools/shared/serverSettings";
+
+const applySettingsPatch = Effect.fn("ServerSettings.applyPatch")(function* (
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+  crypto: typeof SecureRandom.SecureRandom.Service,
+) {
+  const generation =
+    patch.gerritConnections === undefined
+      ? current.gerritCredentialGeneration
+      : yield* crypto.uuidV4().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSettingsError({
+                settingsPath: "settings",
+                operation: "write-file",
+                cause,
+              }),
+          ),
+        );
+  return { ...applyServerSettingsPatch(current, patch), gerritCredentialGeneration: generation };
+});
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
@@ -293,6 +316,7 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
   overrides: DeepPartial<ServerSettings> = {},
   managedPolicy?: ManagedPolicySummary,
 ) {
+  const crypto = yield* SecureRandom.SecureRandom;
   const { automaticGitFetchInterval, providerHealthRefreshInterval, ...overridesForMerge } =
     overrides;
   const merged = deepMerge(DEFAULT_SERVER_SETTINGS, overridesForMerge);
@@ -327,14 +351,12 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
     ready: Effect.void,
     getSettings,
     updateSettings: (patch) =>
-      updateTestSettings((currentSettings) =>
-        Effect.succeed(applyServerSettingsPatch(currentSettings, patch)),
-      ),
+      updateTestSettings((currentSettings) => applySettingsPatch(currentSettings, patch, crypto)),
     updateProviderInstance: (mutation, patch = {}) =>
       updateTestSettings((currentSettings) =>
         Effect.gen(function* () {
           yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
-          const patched = applyServerSettingsPatch(currentSettings, patch);
+          const patched = yield* applySettingsPatch(currentSettings, patch, crypto);
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),
@@ -349,7 +371,10 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
 export const layerTest = (
   overrides: DeepPartial<ServerSettings> = {},
   managedPolicy?: ManagedPolicySummary,
-) => Layer.effect(ServerSettingsService, makeTest(overrides, managedPolicy));
+) =>
+  Layer.effect(ServerSettingsService, makeTest(overrides, managedPolicy)).pipe(
+    Layer.provide(NodeCrypto.layer),
+  );
 
 // Accept retired token delivery only on load so one old value cannot reset all settings.
 const PersistedResponseStreamingMode = Schema.Union([
@@ -674,6 +699,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
+  const crypto = yield* SecureRandom.SecureRandom;
   const sql = yield* SqlClient.SqlClient;
   const {
     settings: managed,
@@ -1417,7 +1443,7 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
-          Effect.as(applyServerSettingsPatch(current, patch)),
+          Effect.flatMap(() => applySettingsPatch(current, patch, crypto)),
         ),
       ),
     updateProviderInstance: (mutation, patch = {}) =>
@@ -1425,7 +1451,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
           yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
-          const patched = applyServerSettingsPatch(current, patch);
+          const patched = yield* applySettingsPatch(current, patch, crypto);
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),

@@ -1,3 +1,4 @@
+const testProcessEnv = process.env;
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -19,6 +20,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { VcsProcessExitError, VcsProcessSpawnError } from "@t3tools/contracts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+import * as GitHttpAuth from "./GitHttpAuth.ts";
 
 const encodeExitError = Schema.encodeEffect(Schema.fromJsonString(VcsProcessExitError));
 
@@ -53,6 +55,49 @@ const captureProcessResult = (
   );
 
 describe("VcsProcess.run", () => {
+  it.effect("adds Gerrit auth to Git except for isolated or caller-authorized commands", () =>
+    Effect.gen(function* () {
+      const auth = GitHttpAuth.GitHttpAuth.of({
+        entries: Effect.succeed([
+          ["http.https://review.example/.extraHeader", "Authorization: Basic dGVzdA=="],
+        ] as const),
+        invalidate: Effect.void,
+      });
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(GitHttpAuth.GitHttpAuth, auth),
+      );
+      const execute = (env?: NodeJS.ProcessEnv, extendEnv?: boolean) =>
+        service.run({
+          operation: "test.git-auth",
+          command: "git",
+          cwd: process.cwd(),
+          args: ["-c", "alias.t3env=!env", "t3env"],
+          ...(env !== undefined ? { env } : {}),
+          ...(extendEnv !== undefined ? { extendEnv } : {}),
+        });
+      const normal = yield* execute();
+      expect(normal.stdout).toContain("http.https://review.example/.extraHeader");
+      expect(normal.stdout).toContain("Authorization: Basic dGVzdA==");
+      const isolated = yield* execute(
+        {
+          PATH: testProcessEnv.PATH,
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "http.extraHeader",
+          GIT_CONFIG_VALUE_0: "Authorization: Basic aXNvbGF0ZWQ=",
+        },
+        false,
+      );
+      expect(isolated.stdout).toContain("Authorization: Basic aXNvbGF0ZWQ=");
+      expect(isolated.stdout).not.toContain("Authorization: Basic dGVzdA==");
+      const own = yield* execute({
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.extraHeader",
+        GIT_CONFIG_VALUE_0: "Authorization: Basic b3du",
+      });
+      expect(own.stdout).toContain("Authorization: Basic b3du");
+      expect(own.stdout).not.toContain("Authorization: Basic dGVzdA==");
+    }).pipe(Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  );
   it.effect("explains a locked Git index and allows restore after the lock is released", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -445,6 +490,51 @@ describe("VcsProcess.run", () => {
       expect(result.exitCode).not.toBe(0);
       expect(yield* fileSystem.exists(path.join(cwd, "fsmonitor-runs"))).toBe(false);
     }).pipe(Effect.scoped, provideLive, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("runs with only the supplied environment when inheritance is disabled", () =>
+    Effect.gen(function* () {
+      const result = yield* run({
+        operation: "test.isolated-environment",
+        command: process.execPath,
+        args: [
+          "-e",
+          "process.stdout.write(JSON.stringify({home:process.env.HOME??null,token:process.env.TEST_LITERAL,count:process.env.GIT_CONFIG_COUNT,key:process.env.GIT_CONFIG_KEY_0,value:process.env.GIT_CONFIG_VALUE_0}));",
+        ],
+        cwd: process.cwd(),
+        env: { TEST_LITERAL: "supplied", GIT_CONFIG_COUNT: "0" },
+        extendEnv: false,
+      });
+      expect(JSON.parse(result.stdout)).toEqual({
+        home: null,
+        token: "supplied",
+        count: "1",
+        key: "safe.bareRepository",
+        value: "explicit",
+      });
+    }).pipe(provideLive),
+  );
+
+  it.effect("writes stdin before waiting for exit", () =>
+    Effect.gen(function* () {
+      const result = yield* run({
+        operation: "test.stdin",
+        command: "node",
+        args: [
+          "-e",
+          [
+            "process.stdin.setEncoding('utf8');",
+            "let data='';",
+            "process.stdin.on('data', chunk => { data += chunk; });",
+            "process.stdin.on('end', () => { process.stdout.write(data); });",
+          ].join(""),
+        ],
+        cwd: process.cwd(),
+        stdin: "stdin payload",
+      });
+
+      expect(result.stdout).toBe("stdin payload");
+    }).pipe(provideLive),
   );
 
   it.effect("classifies authentication failures without retaining stderr", () =>

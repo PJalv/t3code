@@ -58,6 +58,8 @@ export interface ExecuteGitInput {
   readonly args: ReadonlyArray<string>;
   readonly stdin?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** Do not inherit the server process environment. */
+  readonly isolatedEnv?: boolean;
   readonly allowNonZeroExit?: boolean;
   readonly timeoutMs?: number | null;
   readonly maxOutputBytes?: number;

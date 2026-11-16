@@ -42,10 +42,13 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import * as Gerrit from "./gerrit.ts";
+import { GerritDirectUploadInput } from "./gerritDirect.ts";
+import * as GerritHook from "./gerritHook.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -467,6 +470,21 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  gerritConnections: "gerrit.connections",
+  gerritSearchProjects: "gerrit.searchProjects",
+  gerritConfigure: "gerrit.configure",
+  gerritTest: "gerrit.test",
+  gerritRemove: "gerrit.remove",
+  gerritRemoveCredentials: "gerrit.removeCredentials",
+  gerritSigningPassphrase: "gerrit.signingPassphrase",
+  gerritSetSigningPassphrase: "gerrit.setSigningPassphrase",
+  gerritDeliveryCheckout: "gerrit.deliveryCheckout",
+  gerritHook: "gerrit.hook",
+  gerritInstallHook: "gerrit.installHook",
+
+  projectsList: "projects.list",
+  projectsAdd: "projects.add",
+  projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -650,6 +668,8 @@ export const WS_METHODS = {
   pullRequestsChangeBreakdown: "pullRequests.changeBreakdown",
   pullRequestsSetFilesViewed: "pullRequests.setFilesViewed",
   pullRequestsRunAction: "pullRequests.runAction",
+  pullRequestsGerritCommand: "pullRequests.gerritCommand",
+  gerritUploadCommit: "gerrit.uploadCommit",
   pullRequestsUpdate: "pullRequests.update",
   pullRequestsComment: "pullRequests.comment",
   pullRequestsUpdateComment: "pullRequests.updateComment",
@@ -1296,6 +1316,99 @@ const WsPullRequestsSetFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestsSetFiles
   payload: PullRequestSetFilesViewedInput,
   success: Schema.Void,
   error: PullRequestRpcError,
+});
+
+export const PullRequestGerritCommandInput = Schema.Union([
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("setVotes"),
+    payload: Schema.Struct({ votes: Schema.Record(Schema.String, Schema.Number) }),
+  }),
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("setTopic"),
+    payload: Schema.Struct({ topic: Schema.NullOr(Schema.String) }),
+  }),
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("setPrivate"),
+    payload: Schema.Struct({ isPrivate: Schema.Boolean }),
+  }),
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("setCommitMessage"),
+    payload: Schema.Struct({ message: Schema.String }),
+  }),
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("rebaseChain"),
+    payload: Schema.Struct({ base: Schema.optionalKey(Schema.String) }),
+  }),
+  Schema.Struct({
+    ...PullRequestRef.fields,
+    command: Schema.Literal("cherryPick"),
+    payload: Schema.Struct({
+      destination: Schema.String,
+      message: Schema.optionalKey(Schema.String),
+    }),
+  }),
+]);
+export type PullRequestGerritCommandInput = typeof PullRequestGerritCommandInput.Type;
+
+const gerritUploadFields = new Set([
+  "kind",
+  "commit",
+  "topic",
+  "reviewers",
+  "cc",
+  "wip",
+  "private",
+  "branch",
+  "number",
+  "url",
+]);
+export const GerritUploadCommitInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  threadId: Schema.optionalKey(ThreadId),
+  upload: Schema.Unknown.check(
+    Schema.makeFilter(
+      (upload) => {
+        if (typeof upload !== "object" || upload === null) return true;
+        return (
+          Object.keys(upload).every((key) => gerritUploadFields.has(key)) &&
+          !("number" in upload && "url" in upload) &&
+          !("branch" in upload && ("number" in upload || "url" in upload))
+        );
+      },
+      { message: "Invalid upload fields or target." },
+    ),
+  ).pipe(Schema.decodeTo(GerritDirectUploadInput)),
+});
+export const GerritUploadCommitResult = Schema.Struct({
+  result: Schema.Struct({
+    pushed: Schema.Literal(true),
+    changeNumber: Schema.optionalKey(Schema.Number),
+    url: Schema.optionalKey(Schema.String),
+    patchSet: Schema.optionalKey(Schema.Number),
+  }),
+  change: Schema.NullOr(Gerrit.GerritReadChange),
+  rereadError: Schema.optionalKey(Schema.String),
+  linkError: Schema.optionalKey(Schema.String),
+});
+export class GerritUploadCommitError extends Schema.TaggedError<GerritUploadCommitError>()(
+  "GerritUploadCommitError",
+  { message: Schema.String },
+) {}
+
+export const WsPullRequestsGerritCommandRpc = Rpc.make(WS_METHODS.pullRequestsGerritCommand, {
+  payload: PullRequestGerritCommandInput,
+  success: Schema.NullOr(Schema.Struct({ number: Schema.Number, url: Schema.String })),
+  error: PullRequestRpcError,
+});
+export const WsGerritUploadCommitRpc = Rpc.make(WS_METHODS.gerritUploadCommit, {
+  payload: GerritUploadCommitInput,
+  success: GerritUploadCommitResult,
+  error: GerritUploadCommitError,
 });
 
 const WsPullRequestsRunActionRpc = Rpc.make(WS_METHODS.pullRequestsRunAction, {
@@ -2370,6 +2483,108 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsGerritSearchProjectsRpc = Rpc.make(WS_METHODS.gerritSearchProjects, {
+  payload: Gerrit.GerritProjectSearchInput,
+  success: Gerrit.GerritProjectSearchResult,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritConnectionsRpc = Rpc.make(WS_METHODS.gerritConnections, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(Gerrit.GerritConnection),
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritConfigureRpc = Rpc.make(WS_METHODS.gerritConfigure, {
+  payload: Gerrit.GerritConfigureInput,
+  success: Gerrit.GerritConnection,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritTestRpc = Rpc.make(WS_METHODS.gerritTest, {
+  payload: Gerrit.GerritInstallationInput,
+  success: Gerrit.GerritVerification,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritRemoveRpc = Rpc.make(WS_METHODS.gerritRemove, {
+  payload: Gerrit.GerritInstallationInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritSigningPassphraseRpc = Rpc.make(WS_METHODS.gerritSigningPassphrase, {
+  payload: Schema.Struct({}),
+  success: Gerrit.GerritSigningPassphraseStatus,
+  error: Schema.Union([Gerrit.GerritConnectionError, EnvironmentAuthorizationError]),
+});
+const WsGerritSetSigningPassphraseRpc = Rpc.make(WS_METHODS.gerritSetSigningPassphrase, {
+  payload: Gerrit.GerritSetSigningPassphraseInput,
+  success: Gerrit.GerritSigningPassphraseStatus,
+  error: Schema.Union([Gerrit.GerritConnectionError, EnvironmentAuthorizationError]),
+});
+const WsGerritRemoveCredentialsRpc = Rpc.make(WS_METHODS.gerritRemoveCredentials, {
+  payload: Gerrit.GerritInstallationInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsGerritDeliveryCheckoutRpc = Rpc.make(WS_METHODS.gerritDeliveryCheckout, {
+  payload: Gerrit.GerritDeliveryCheckoutInput,
+  success: Gerrit.GerritDeliveryCheckout,
+  error: Schema.Union([
+    Gerrit.GerritConnectionError,
+    Gerrit.GerritReadError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsGerritHookRpc = Rpc.make(WS_METHODS.gerritHook, {
+  payload: GerritHook.GerritHookInput,
+  success: GerritHook.GerritHookDiagnosis,
+  error: Schema.Union([GerritHook.GerritHookError, EnvironmentAuthorizationError]),
+});
+const WsGerritInstallHookRpc = Rpc.make(WS_METHODS.gerritInstallHook, {
+  payload: GerritHook.GerritHookInput,
+  success: GerritHook.GerritHookDiagnosis,
+  error: Schema.Union([
+    GerritHook.GerritHookError,
+    Gerrit.GerritConnectionError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const GerritWsRpcGroup = RpcGroup.make(
+  WsGerritSearchProjectsRpc,
+  WsGerritConnectionsRpc,
+  WsGerritConfigureRpc,
+  WsGerritTestRpc,
+  WsGerritRemoveRpc,
+  WsGerritRemoveCredentialsRpc,
+  WsGerritSigningPassphraseRpc,
+  WsGerritSetSigningPassphraseRpc,
+  WsGerritDeliveryCheckoutRpc,
+  WsGerritHookRpc,
+  WsGerritInstallHookRpc,
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsIssuesListRpc,
   WsIssuesDetailRpc,
@@ -2484,6 +2699,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsChangeBreakdownRpc,
   WsPullRequestsSetFilesViewedRpc,
   WsPullRequestsRunActionRpc,
+  WsPullRequestsGerritCommandRpc,
+  WsGerritUploadCommitRpc,
   WsPullRequestsUpdateRpc,
   WsPullRequestsCommentRpc,
   WsPullRequestsUpdateCommentRpc,
@@ -2618,4 +2835,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
-).middleware(RpcScopeAuthorization);
+)
+  .merge(GerritWsRpcGroup)
+  .middleware(RpcScopeAuthorization);
