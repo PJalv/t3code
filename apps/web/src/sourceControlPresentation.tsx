@@ -6,6 +6,7 @@ import type {
   SourceControlDefinition,
 } from "@t3tools/client-runtime/source-control-clients";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { GerritIcon } from "./components/Icons";
 import { SourceControlIconArtwork } from "./components/SourceControlIconArtwork";
 
 export type { ChangeRequestTerminology } from "@t3tools/client-runtime/source-control-clients";
@@ -16,6 +17,7 @@ const SOURCE_CONTROL_ICONS = new WeakMap<SourceControlDefinition, SourceControlI
 
 /** One component per definition, so a host's icon keeps its identity across renders. */
 export function sourceControlIcon(definition: SourceControlDefinition): SourceControlIcon {
+  if (definition.kind === "gerrit") return GerritIcon;
   const artwork = definition.icon;
   if (artwork === null) return PullRequestGlyph.pullRequest;
   let Icon = SOURCE_CONTROL_ICONS.get(definition);

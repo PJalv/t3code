@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { LegendList } from "@legendapp/list/react";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
-import { memo, useState } from "react";
+import { memo, useState, type MouseEvent } from "react";
 
 import {
   COMPOSER_PULL_REQUEST_DRAG_TYPE,
@@ -32,6 +32,7 @@ import { pullRequestLinkPanelTarget, useOpenPrLink } from "~/lib/openPullRequest
 import { useClientSettings } from "~/hooks/useSettings";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { usePullRequestIntentPrefetch } from "./usePullRequestIntentPrefetch";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { useShortcutModifierState } from "~/shortcutModifierState";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
@@ -122,6 +123,29 @@ function LinkRowImpl({
     ? { getBoundingClientRect: () => new DOMRect(menuPosition.x, menuPosition.y, 0, 0) }
     : undefined;
   const { link, depth, stack } = line;
+  const openLink = (event: MouseEvent<HTMLElement>) => {
+    const url = URL.parse(link.url);
+    if (
+      projectId !== null &&
+      url &&
+      /\/\+\/\d+(?:\/|$)/u.test(url.pathname) &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      event.button !== 1
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      useRightPanelStore.getState().openPullRequest(threadRef, {
+        projectId,
+        host: link.host,
+        repository: link.repository,
+        number: link.number,
+        url: link.url,
+      });
+      return;
+    }
+    openPrLink(event, link.url, threadRef);
+  };
   const snapshot = link.snapshot;
   const open = snapshot === null || snapshot.state === "open";
   const watching = link.watch !== undefined;
@@ -178,7 +202,7 @@ function LinkRowImpl({
       )}
       <a
         href={link.url}
-        onClick={(event) => openPrLink(event, link.url, threadRef)}
+        onClick={openLink}
         // Outside drops use the URL; the composer uses this context-chip payload.
         onDragStart={
           snapshot === null
@@ -368,7 +392,7 @@ function LinkRowImpl({
               <LinkIcon className="size-3.5" />
               <T>Copy link</T>
             </MenuItem>
-            <MenuItem onClick={(event) => openPrLink(event, link.url, threadRef)}>
+            <MenuItem onClick={openLink}>
               <ArrowUpRightIcon className="size-3.5" />
               <T context="verb, open a link">Open</T>
             </MenuItem>

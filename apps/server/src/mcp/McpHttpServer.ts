@@ -98,6 +98,14 @@ import { ToolSearchToolkit } from "./toolkits/toolSearch/tools.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import * as IssuesHandlers from "./toolkits/issues/handlers.ts";
 import { IssuesToolkit } from "./toolkits/issues/tools.ts";
+import { GerritDirectToolkit } from "./toolkits/gerritDirect/tools.ts";
+import * as GerritDirectHandlers from "./toolkits/gerritDirect/handlers.ts";
+import * as GerritTarget from "../sourceControl/GerritTarget.ts";
+import * as GerritBranchReviews from "../sourceControl/gerritBranchReviews.ts";
+import * as GerritRemotes from "@t3tools/source-control-gerrit/server/GerritRemotes";
+import * as GerritDirectUpload from "../sourceControl/GerritDirectUpload.ts";
+import * as GerritDirectService from "../sourceControl/GerritDirectService.ts";
+import * as GerritDirectRead from "../sourceControl/GerritDirectRead.ts";
 import * as DeviceHandlers from "./toolkits/device/handlers.ts";
 import {
   DeviceScreenshotTool,
@@ -1461,6 +1469,17 @@ export const layerPullRequestsToolkit = toolkitRegistration(
 ).pipe(Layer.provide(PullRequestWatchService.layer));
 
 const layerIssuesToolkit = toolkitRegistration(IssuesToolkit, IssuesHandlers.layer);
+const layerGerritDirectToolkit = toolkitRegistration(
+  GerritDirectToolkit,
+  GerritDirectHandlers.layer,
+).pipe(
+  Layer.provide(GerritDirectRead.layer),
+  Layer.provide(GerritDirectService.layer),
+  Layer.provide(GerritDirectUpload.layer),
+  Layer.provide(GerritTarget.layer),
+  Layer.provide(GerritRemotes.layer),
+  Layer.provide(GerritBranchReviews.layerGerritHttp),
+);
 
 const layerDeviceStandardToolkitRegistration = toolkitRegistration(
   DeviceStandardToolkit,
@@ -1506,7 +1525,7 @@ export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE,
     registrations,
   }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
-/** Every tool the T3 MCP server advertises. AgentContextBudget.test.ts measures this set. */
+/** Shared tools measured by AgentContextBudget.test.ts. */
 export const layerTools = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
@@ -1636,5 +1655,5 @@ export const layerMilestoneEvents = Layer.effectDiscard(
 );
 
 export const layer = layerMcpTransport(
-  Layer.mergeAll(layerTools, layerToolSearch, layerMilestoneEvents),
+  Layer.mergeAll(layerTools, layerToolSearch, layerMilestoneEvents, layerGerritDirectToolkit),
 );

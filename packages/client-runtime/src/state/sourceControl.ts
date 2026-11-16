@@ -1,4 +1,8 @@
-import { WS_METHODS } from "@t3tools/contracts";
+export { gerritConnectionConfigFromFields, gerritCredentialSaveMode } from "./gerritReview.ts";
+import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import type * as AtomRegistry from "effect/reactivity/AtomRegistry";
+
 import { Atom } from "effect/reactivity";
 
 import {
@@ -16,7 +20,80 @@ export function createSourceControlEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Persistence.EnvironmentCacheStore | R, E>,
 ) {
   const commandScheduler = createAtomCommandScheduler();
+  const gerritGeneration = Atom.family((_environmentId: EnvironmentId) =>
+    Atom.make(0).pipe(Atom.keepAlive),
+  );
+  const refreshGerrit = ({ environmentId }: { readonly environmentId: EnvironmentId }) =>
+    gerritGeneration(environmentId);
+  const invalidateGerrit = (
+    target: { readonly environmentId: EnvironmentId },
+    registry: AtomRegistry.AtomRegistry,
+  ) =>
+    Effect.sync(() =>
+      registry.update(gerritGeneration(target.environmentId), (generation) => generation + 1),
+    );
   return {
+    refreshGerrit: (registry: AtomRegistry.AtomRegistry, environmentId: EnvironmentId) => {
+      registry.update(gerritGeneration(environmentId), (generation) => generation + 1);
+    },
+    gerritHook: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:gerrit:hook",
+      tag: WS_METHODS.gerritHook,
+      refreshTrigger: refreshGerrit,
+    }),
+    gerritInstallHook: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:installhook",
+      tag: WS_METHODS.gerritInstallHook,
+      onSettled: invalidateGerrit,
+    }),
+    gerritSearchProjects: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:gerrit:search-projects",
+      tag: WS_METHODS.gerritSearchProjects,
+    }),
+    gerritConnections: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:gerrit:connections",
+      tag: WS_METHODS.gerritConnections,
+      refreshTrigger: refreshGerrit,
+    }),
+    gerritDeliveryCheckout: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:gerrit:delivery-checkout",
+      tag: WS_METHODS.gerritDeliveryCheckout,
+      refreshTrigger: refreshGerrit,
+      staleTimeMs: 0,
+    }),
+    gerritConfigure: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:configure",
+      tag: WS_METHODS.gerritConfigure,
+      scheduler: commandScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
+    gerritTest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:test",
+      tag: WS_METHODS.gerritTest,
+    }),
+    gerritRemove: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:remove",
+      tag: WS_METHODS.gerritRemove,
+      scheduler: commandScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
+    gerritRemoveCredentials: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:remove-credentials",
+      tag: WS_METHODS.gerritRemoveCredentials,
+      scheduler: commandScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
+    gerritSigningPassphrase: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:gerrit:signing-passphrase",
+      tag: WS_METHODS.gerritSigningPassphrase,
+      refreshTrigger: refreshGerrit,
+    }),
+    gerritSetSigningPassphrase: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:gerrit:set-signing-passphrase",
+      tag: WS_METHODS.gerritSetSigningPassphrase,
+      scheduler: commandScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
     discovery: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:source-control-discovery",
       tag: WS_METHODS.serverDiscoverSourceControl,

@@ -170,7 +170,15 @@ export function resolveThreadPrSource(
   return { linkedPresentation, pullRequestRef };
 }
 
-export function resolveThreadPrBadgeAction(pr: ThreadPrPresentation, resolve: MessageResolver = m) {
+export function resolveThreadPrBadgeAction(
+  pr: ThreadPrPresentation | null,
+  resolve: MessageResolver = m,
+  supportsGerrit = false,
+) {
+  if (pr === null)
+    return supportsGerrit
+      ? { kind: "list" as const, accessibilityLabel: resolve(msg("Open Gerrit changes")) }
+      : null;
   return pr.kind === "stack" || pr.others > 0
     ? {
         kind: "list" as const,

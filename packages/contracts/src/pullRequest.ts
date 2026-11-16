@@ -14,6 +14,83 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { SourceControlProviderKind } from "./sourceControl.ts";
+import { GerritAccount } from "./gerrit.ts";
+import { GerritCommentRange } from "./gerritReview.ts";
+
+export const PullRequestGerritDetail = Schema.Struct({
+  changeId: TrimmedNonEmptyString,
+  topic: Schema.NullOr(Schema.String),
+  isPrivate: Schema.Boolean,
+  isWip: Schema.Boolean,
+  permissions: Schema.optional(
+    Schema.Struct({
+      setTopic: Schema.Boolean,
+      setPrivate: Schema.Boolean,
+      setWip: Schema.Boolean,
+      setCommitMessage: Schema.Boolean,
+      cherryPick: Schema.Boolean,
+      rebase: Schema.Boolean,
+      rebaseChain: Schema.Boolean,
+      abandon: Schema.Boolean,
+      restore: Schema.Boolean,
+      submit: Schema.Boolean,
+    }),
+  ),
+  currentPatchSet: PositiveInt,
+  patchSets: Schema.Array(
+    Schema.Struct({
+      number: PositiveInt,
+      commit: TrimmedNonEmptyString,
+      createdAt: IsoDateTime,
+      uploader: Schema.optional(GerritAccount),
+    }),
+  ),
+  labels: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      votes: Schema.Array(Schema.Struct({ account: GerritAccount, value: Schema.Int })),
+      permittedValues: Schema.Array(Schema.Int),
+      required: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  submitRequirements: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      status: Schema.Literals([
+        "satisfied",
+        "unsatisfied",
+        "not-applicable",
+        "error",
+        "override",
+        "unknown",
+      ]),
+      description: Schema.optional(Schema.String),
+    }),
+  ),
+  submittable: Schema.NullOr(Schema.Boolean),
+});
+export type PullRequestGerritDetail = typeof PullRequestGerritDetail.Type;
+
+export const PullRequestGerritAnchor = Schema.Struct({
+  patchSet: Schema.NullOr(PositiveInt),
+  revision: Schema.NullOr(TrimmedNonEmptyString),
+  parent: Schema.optional(PositiveInt),
+  range: Schema.optional(GerritCommentRange),
+});
+export type PullRequestGerritAnchor = typeof PullRequestGerritAnchor.Type;
+
+export const PullRequestGerritComparison = Schema.Struct({
+  patchSet: PositiveInt,
+  base: Schema.Union([
+    Schema.Literal("base"),
+    Schema.Struct({ parent: PositiveInt }),
+    Schema.Struct({ patchSet: PositiveInt }),
+  ]),
+});
+export type PullRequestGerritComparison = typeof PullRequestGerritComparison.Type;
+
+/** Gerrit's reserved path for a comment on the change rather than a file. */
+export const GERRIT_CHANGE_LEVEL_PATH = "/PATCHSET_LEVEL";
 
 export const PullRequestInvolvement = Schema.Literals(["all", "reviewing", "authored"]);
 export type PullRequestInvolvement = typeof PullRequestInvolvement.Type;
@@ -163,6 +240,8 @@ export const PullRequestComment = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   path: Schema.NullOr(Schema.String),
   reviewState: Schema.NullOr(Schema.String),
+  gerrit: Schema.optional(PullRequestGerritAnchor),
+  isDraft: Schema.optional(Schema.Boolean),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
   canEdit: Schema.optional(Schema.Boolean),
 });
@@ -175,6 +254,8 @@ export const PullRequestReviewVerdict = Schema.Literals(["comment", "approve", "
 export type PullRequestReviewVerdict = typeof PullRequestReviewVerdict.Type;
 
 export const PullRequestThreadComment = Schema.Struct({
+  gerrit: Schema.optional(PullRequestGerritAnchor),
+  isDraft: Schema.optional(Schema.Boolean),
   id: TrimmedNonEmptyString,
   author: Schema.NullOr(PullRequestActor),
   body: Schema.String,
@@ -189,6 +270,8 @@ export const PullRequestThreadComment = Schema.Struct({
 export type PullRequestThreadComment = typeof PullRequestThreadComment.Type;
 
 export const PullRequestReviewThread = Schema.Struct({
+  gerrit: Schema.optional(PullRequestGerritAnchor),
+  isDraft: Schema.optional(Schema.Boolean),
   id: TrimmedNonEmptyString,
   path: TrimmedNonEmptyString,
   line: Schema.NullOr(PositiveInt),
@@ -364,6 +447,7 @@ export const PullRequestVisibility = Schema.Literals(["public", "private"]);
 export type PullRequestVisibility = typeof PullRequestVisibility.Type;
 
 export const PullRequestListEntry = Schema.Struct({
+  gerrit: Schema.optional(PullRequestGerritDetail),
   stack: Schema.optional(PullRequestStackMembership),
   provider: SourceControlProviderKind,
   host: TrimmedNonEmptyString,
@@ -519,6 +603,7 @@ export const PullRequestPreview = Schema.Struct({
 export type PullRequestPreview = typeof PullRequestPreview.Type;
 
 export const PullRequestSummary = Schema.Struct({
+  gerrit: Schema.optional(PullRequestGerritDetail),
   provider: SourceControlProviderKind,
   projectId: ProjectId,
   repository: TrimmedNonEmptyString,
@@ -649,6 +734,7 @@ export const PullRequestMergeQueueRemoval = Schema.Struct({
 export type PullRequestMergeQueueRemoval = typeof PullRequestMergeQueueRemoval.Type;
 
 export const PullRequestDetail = Schema.Struct({
+  gerrit: Schema.optional(PullRequestGerritDetail),
   provider: SourceControlProviderKind,
   capabilities: PullRequestCapabilities,
   viewerPermissions: PullRequestViewerPermissions,
@@ -738,6 +824,7 @@ export type PullRequestDetailView = typeof PullRequestDetailView.Type;
 /** GitHub refuses diffs past 300 files, so callers must page large changes. */
 export const PullRequestDiffInput = Schema.Struct({
   ...PullRequestRef.fields,
+  gerritComparison: Schema.optional(PullRequestGerritComparison),
   cursor: Schema.optional(TrimmedNonEmptyString),
   commit: Schema.optional(TrimmedNonEmptyString),
   /** Reads one file the paged diff withheld as too large; ignores `cursor`. */

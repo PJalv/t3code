@@ -44,6 +44,13 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
+  [WS_METHODS.gerritConnections]: AuthOrchestrationReadScope,
+  [WS_METHODS.gerritSigningPassphrase]: AuthOrchestrationReadScope,
+  [WS_METHODS.gerritSearchProjects]: AuthOrchestrationReadScope,
+  [WS_METHODS.gerritDeliveryCheckout]: AuthOrchestrationReadScope,
+  [WS_METHODS.gerritHook]: AuthOrchestrationReadScope,
+  // Moving a checkout is a source-control write, exactly like pulling a branch.
+
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: AuthOrchestrationReadScope,

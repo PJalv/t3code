@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import {
   WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
@@ -300,6 +301,16 @@ export function createThreadEnvironmentAtoms<R, E>(
       execute: updateThreadMetadata,
       scheduler,
       concurrency,
+    }),
+    linkReview: createEnvironmentRpcCommand(runtime, {
+      tag: ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+      label: "environment-data:commands:thread:link-review",
+      scheduler,
+    }),
+    unlinkReview: createEnvironmentRpcCommand(runtime, {
+      tag: ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+      label: "environment-data:commands:thread:unlink-review",
+      scheduler,
     }),
     linkPullRequest: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:link-pull-request",

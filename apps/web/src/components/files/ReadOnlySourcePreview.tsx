@@ -1,4 +1,5 @@
-import { File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
+import { StyledDiffCodeView } from "../diffs/StyledDiffCodeView";
+import { type CodeViewHandle, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
 import { type ClipboardEvent, useEffect, useRef, useState } from "react";
 
 import { DiffWorkerPoolProvider } from "~/components/DiffWorkerPoolProvider";
@@ -14,12 +15,27 @@ export default function ReadOnlySourcePreview(props: {
   readonly name: string;
   readonly text: string;
   readonly cacheKey?: string;
+  readonly initialLine?: number | null;
   readonly onPostRender?: FileOptions<unknown, undefined>["onPostRender"];
   /** A preview's own wrap toggle; omitted follows the word wrap setting. */
   readonly wordWrap?: boolean;
   /** Files with more lines than this render without highlighting; omitted keeps Pierre's limit. */
   readonly tokenizeMaxLength?: number;
 }) {
+  if (props.initialLine != null)
+    return (
+      <SourcePreviewAtLine
+        key={props.cacheKey ?? props.text}
+        name={props.name}
+        text={props.text}
+        cacheKey={props.cacheKey}
+        line={props.initialLine}
+      />
+    );
+  return <DefaultSourcePreview {...props} />;
+}
+
+function DefaultSourcePreview(props: Parameters<typeof ReadOnlySourcePreview>[0]) {
   const resolvedTheme = useRenderedAppearance();
   const defaultWordWrap = useClientSettings((settings) => settings.wordWrap);
   const wordWrap = props.wordWrap ?? defaultWordWrap;
@@ -100,5 +116,61 @@ export default function ReadOnlySourcePreview(props: {
         </Virtualizer>
       </div>
     </DiffWorkerPoolProvider>
+  );
+}
+
+function SourcePreviewAtLine(props: {
+  readonly name: string;
+  readonly text: string;
+  readonly cacheKey: string | undefined;
+  readonly line: number;
+}) {
+  const theme = useRenderedAppearance();
+  const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const reveal = (viewer: CodeViewHandle<undefined, undefined> | null) => {
+    const item = viewer?.getItem(props.name);
+    if (
+      item?.type !== "file" ||
+      item.file.contents !== props.text ||
+      item.file.cacheKey !== props.cacheKey
+    )
+      return;
+    viewer?.setSelectedLines({
+      id: props.name,
+      range: { start: props.line, end: props.line },
+    });
+    viewer?.scrollTo({
+      type: "line",
+      id: props.name,
+      lineNumber: props.line,
+      align: "center",
+      behavior: "instant",
+    });
+  };
+  const items = [
+    {
+      id: props.name,
+      type: "file" as const,
+      file: {
+        name: props.name,
+        contents: props.text,
+        ...(props.cacheKey ? { cacheKey: props.cacheKey } : {}),
+      },
+    },
+  ];
+  return (
+    <StyledDiffCodeView
+      viewerRef={reveal}
+      items={items}
+      className="min-h-0 flex-1 overflow-auto"
+      options={{
+        disableFileHeader: true,
+        overflow: wordWrap ? "wrap" : "scroll",
+        theme: resolveDiffThemeName(theme),
+        themeType: theme,
+        preferredHighlighter: PREFERRED_HIGHLIGHTER,
+      }}
+      unsafeCSSExtra={FILE_LINK_REVEAL_UNSAFE_CSS}
+    />
   );
 }

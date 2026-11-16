@@ -377,6 +377,188 @@ function makeService(input: {
   );
 }
 
+it.effect("dispatches Gerrit commands to the selected provider", () =>
+  Effect.gen(function* () {
+    let called: unknown;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          gerrit: {
+            setVotes: () => Effect.void,
+            setTopic: (input) =>
+              Effect.sync(() => {
+                called = input;
+              }),
+            setPrivate: () => Effect.void,
+            setCommitMessage: () => Effect.void,
+            rebaseChain: () => Effect.void,
+            cherryPick: () => Effect.succeed({ number: 2, url: "https://review.example/2" }),
+          },
+        }),
+      ],
+    });
+    const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    assert.isNull(
+      yield* service.gerritCommand({ ...ref, command: "setTopic", payload: { topic: "topic" } }),
+    );
+    assert.deepInclude(called as object, {
+      cwd: "/w",
+      repository: "acme/web",
+      number: 1,
+      topic: "topic",
+    });
+    assert.deepEqual(
+      yield* service.gerritCommand({
+        ...ref,
+        command: "cherryPick",
+        payload: { destination: "stable" },
+      }),
+      { number: 2, url: "https://review.example/2" },
+    );
+  }),
+);
+
+it.effect("returns the provider's Gerrit change detail", () =>
+  Effect.gen(function* () {
+    const gerrit = {
+      changeId: `I${"a".repeat(40)}`,
+      topic: "topic",
+      isPrivate: false,
+      isWip: true,
+      currentPatchSet: 2,
+      patchSets: [],
+      labels: [{ name: "Code-Review", votes: [], permittedValues: [-1, 0, 1] }],
+      submitRequirements: [],
+      submittable: false,
+    };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          getChangeRequest: () => Effect.succeed({ ...hostedChangeRequest("Description"), gerrit }),
+        }),
+      ],
+    });
+    const detail = yield* service.detail({
+      projectId: "p1" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+    });
+    assert.deepStrictEqual(detail.gerrit, gerrit);
+  }),
+);
+
+it.effect("rejects Gerrit commands for providers without the extension", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [fakePullRequestProvider(SourceControlProviderKind.make("github"))],
+    });
+    const failure = yield* service
+      .gerritCommand({
+        projectId: "p1" as ProjectId,
+        repository: "acme/web",
+        number: 1,
+        command: "setTopic",
+        payload: { topic: "topic" },
+      })
+      .pipe(Effect.flip);
+    assert.match(failure.message, /does not support Gerrit commands/);
+  }),
+);
+
+it.effect(
+  "lists a stored checkout through its resolved Gerrit identity without changing GitHub",
+  () =>
+    Effect.gen(function* () {
+      const gerrit = project({
+        id: "g",
+        title: "gerrit",
+        workspaceRoot: "/g",
+        repository: "gerrit/a/platform/tools/x",
+        provider: "unknown",
+        host: "review.example",
+      });
+      const github = project({
+        id: "h",
+        title: "github",
+        workspaceRoot: "/h",
+        repository: "org/repo",
+      });
+      const resolved = project({
+        id: "g",
+        title: "gerrit",
+        workspaceRoot: "/g",
+        repository: "platform/tools/x",
+        provider: "gerrit",
+        host: "review.example:8443",
+      }).repositoryIdentity!;
+      const calls: string[] = [];
+      const service = yield* makeService({
+        projects: [gerrit, github],
+        resolveRepositoryIdentity: (cwd) => Effect.succeed(cwd === "/g" ? resolved : null),
+        providers: [
+          fakePullRequestProvider(SourceControlProviderKind.make("gerrit"), {
+            listChangeRequests: ({ host, repository }) => {
+              calls.push(`gerrit:${host}/${repository}`);
+              return Effect.succeed({ items: [], truncated: false, continues: false });
+            },
+          }),
+          fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+            listChangeRequests: ({ host, repository }) => {
+              calls.push(`github:${host}/${repository}`);
+              return Effect.succeed({ items: [], truncated: false, continues: false });
+            },
+          }),
+        ],
+      });
+      yield* service.list({ state: "open" });
+      assert.deepStrictEqual(calls.sort(), [
+        "gerrit:review.example:8443/platform/tools/x",
+        "github:github.com/org/repo",
+      ]);
+    }),
+);
+
+it.effect("reports an ambiguous Gerrit host alongside readable projects", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "g",
+          title: "gerrit",
+          workspaceRoot: "/g",
+          repository: "team/repo",
+          provider: "gerrit",
+          host: "review.example:8443",
+        }),
+        project({ id: "h", title: "github", workspaceRoot: "/h", repository: "org/repo" }),
+      ],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("gerrit"), {
+          getViewer: () =>
+            Effect.fail(
+              new PullRequestProviderError({
+                provider: SourceControlProviderKind.make("gerrit"),
+                operation: "credentials",
+                reason: "failed",
+                detail: "Multiple Gerrit servers are configured for this host.",
+              }),
+            ),
+        }),
+        fakePullRequestProvider(SourceControlProviderKind.make("github")),
+      ],
+    });
+    const result = yield* service.list({ state: "open" });
+    assert.include(
+      result.providers.find((provider) => provider.kind === "gerrit")?.detail,
+      "Multiple Gerrit servers",
+    );
+    assert.strictEqual(result.errors[0]?.projectId, "g");
+  }),
+);
+
 it.effect("lists GitHub Enterprise PRs for a stored unknown repository after host discovery", () =>
   Effect.gen(function* () {
     const service = yield* makeService({
