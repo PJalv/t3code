@@ -79,6 +79,10 @@ export class GerritDirectService extends Context.Service<
       { readonly ref: string; readonly commit: string; readonly patchSet: number },
       GerritDirectError
     >;
+    readonly fetchBranch: (input: {
+      readonly cwd: string;
+      readonly branch: string;
+    }) => Effect.Effect<{ readonly ref: string; readonly commit: string }, GerritDirectError>;
     readonly upload: (input: {
       readonly cwd: string;
       readonly upload: GerritDirectUploadInput;
@@ -397,6 +401,30 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "target", cause })));
     return { ref, commit: change.currentRevision, patchSet: change.currentPatchSet };
   });
+  const fetchBranch = Effect.fn("GerritDirectService.fetchBranch")(function* (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) {
+    const config = yield* settings.getSettings.pipe(
+      Effect.mapError((cause) => new GerritDirectError({ reason: "target", cause })),
+    );
+    const discovery = yield* remotes
+      .discover({
+        cwd: input.cwd,
+        configuration: gerritRemoteConfiguration(Object.values(config.gerritConnections)),
+      })
+      .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "target", cause })));
+    const matches = discovery.remotes.filter(
+      (r) =>
+        r.effective.fetch.length === 1 &&
+        r.effective.fetch[0]?.kind === "candidate" &&
+        r.effective.fetch[0].repositories.length === 1,
+    );
+    if (matches.length !== 1) return yield* new GerritDirectError({ reason: "target" });
+    return yield* uploader
+      .fetchBranch({ cwd: input.cwd, remote: matches[0]!.name, branch: input.branch })
+      .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "upload", cause })));
+  });
   const amendSigned = Effect.fn("GerritDirectService.amendSigned")(function* (input: {
     readonly cwd: string;
   }) {
@@ -404,6 +432,6 @@ const make = Effect.gen(function* () {
       .amendSigned(input)
       .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "upload", cause })));
   });
-  return GerritDirectService.of({ act, upload, amendSigned, fetchPatchSet });
+  return GerritDirectService.of({ act, upload, amendSigned, fetchPatchSet, fetchBranch });
 });
 export const layer = Layer.effect(GerritDirectService, make);
