@@ -82,7 +82,9 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
       case "commit-signing":
         return "Could not sign the amended commit. No upload was attempted.";
       case "fetch":
-        return "Could not fetch and verify the Gerrit patch set.";
+        return this.detail
+          ? `Could not fetch from Gerrit: ${this.detail}`
+          : "Could not fetch and verify from Gerrit.";
       case "push":
         return this.detail ? `Gerrit rejected the upload: ${this.detail}` : "Gerrit upload failed.";
     }
@@ -105,6 +107,11 @@ export class GerritDirectUpload extends Context.Service<
       readonly patchSet: number;
       readonly commit: string;
     }) => Effect.Effect<string, GerritDirectUploadError>;
+    readonly fetchBranch: (input: {
+      readonly cwd: string;
+      readonly remote: string;
+      readonly branch: string;
+    }) => Effect.Effect<{ readonly ref: string; readonly commit: string }, GerritDirectUploadError>;
   }
 >()("t3/sourceControl/GerritDirectUpload") {}
 
@@ -402,7 +409,58 @@ const make = Effect.gen(function* () {
     if (updated.exitCode !== 0) return yield* new GerritDirectUploadError({ reason: "fetch" });
     return ref;
   });
-  return GerritDirectUpload.of({ upload, amendSigned, fetchPatchSet });
+  // Agents' own git has no Gerrit login, so the base they rebase onto is fetched with T3's.
+  const fetchBranch = Effect.fn("GerritDirectUpload.fetchBranch")(function* (input: {
+    readonly cwd: string;
+    readonly remote: string;
+    readonly branch: string;
+  }) {
+    if (!isTargetBranch(input.branch) || !/^[A-Za-z0-9._-]+$/.test(input.remote))
+      return yield* new GerritDirectUploadError({ reason: "invalid-input" });
+    const baseEnv = { ...process.env, ...NON_INTERACTIVE_GIT_ENV };
+    const env = { ...baseEnv, ...(yield* gitHttpAuthEnv(baseEnv, platform, httpAuth)) };
+    const ref = `refs/remotes/${input.remote}/${input.branch}`;
+    const run = (args: string[]) =>
+      host.process
+        .run({
+          operation: "GerritDirectUpload.fetchBranch",
+          command: "git",
+          cwd: input.cwd,
+          args,
+          env,
+          extendEnv: false,
+          allowNonZeroExit: true,
+          timeoutMs: 120_000,
+          maxOutputBytes: 1024 * 1024,
+        })
+        .pipe(Effect.mapError((cause) => new GerritDirectUploadError({ reason: "fetch", cause })));
+    const fetched = yield* run([
+      "fetch",
+      "--no-tags",
+      "--no-recurse-submodules",
+      "--",
+      input.remote,
+      `+refs/heads/${input.branch}:${ref}`,
+    ]);
+    if (fetched.exitCode !== 0) {
+      const detail = pushRejection(`${fetched.stderr}\n${fetched.stdout}`);
+      return yield* new GerritDirectUploadError({
+        reason: "fetch",
+        ...(detail === undefined ? {} : { detail }),
+      });
+    }
+    const resolved = yield* run([
+      "--no-replace-objects",
+      "rev-parse",
+      "--verify",
+      `${ref}^{commit}`,
+    ]);
+    const commit = resolved.stdout.trim();
+    if (resolved.exitCode !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit))
+      return yield* new GerritDirectUploadError({ reason: "fetch" });
+    return { ref, commit };
+  });
+  return GerritDirectUpload.of({ upload, amendSigned, fetchPatchSet, fetchBranch });
 });
 
 export const layer = Layer.effect(GerritDirectUpload, make);
