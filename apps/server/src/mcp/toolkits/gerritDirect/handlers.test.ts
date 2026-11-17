@@ -129,6 +129,18 @@ describe("direct Gerrit handlers", () => {
       const result = yield* h.call("read_gerrit", { mode: "search" });
       expect(result).toMatchObject({ input: { cwd: "/worktree", request: { mode: "search" } } });
       expect(JSON.stringify(result)).not.toContain("installation");
+      yield* h.call("read_gerrit", { mode: "diff", target: { number: 12 } }).pipe(
+        Effect.match({
+          onSuccess: () => {
+            throw new Error("Expected missing path to fail");
+          },
+          onFailure: (invalid) =>
+            expect(invalid.cause).toMatchObject({
+              message:
+                "read_gerrit mode diff requires path. Read mode change for available file paths.",
+            }),
+        }),
+      );
     }),
   );
   it.effect("rejects a deleted thread or a missing project", () =>

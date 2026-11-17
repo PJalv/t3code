@@ -98,6 +98,14 @@ export const GerritDirectRead = Schema.Union([
     includeDrafts: Schema.optionalKey(Schema.Boolean),
   }),
   strictStruct({
+    mode: Schema.Literal("comments"),
+    target: GerritDirectTarget,
+    revision: Schema.optionalKey(NonEmpty),
+    includeDrafts: Schema.optionalKey(Schema.Boolean),
+    cursor: Schema.optionalKey(NonEmpty),
+    limit: Schema.optionalKey(PositiveInt.check(Schema.isLessThanOrEqualTo(100))),
+  }),
+  strictStruct({
     mode: Schema.Literal("diff"),
     target: GerritDirectTarget,
     path: NonEmpty,
