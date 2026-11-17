@@ -86,7 +86,11 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
           ? `Could not fetch from Gerrit: ${this.detail}`
           : "Could not fetch and verify from Gerrit.";
       case "push":
-        return this.detail ? `Gerrit rejected the upload: ${this.detail}` : "Gerrit upload failed.";
+        if (this.detail === undefined) return "Gerrit upload failed.";
+        // A base the agent never fetched is the usual cause, and the agent cannot git fetch.
+        return /no common ancestry/i.test(this.detail)
+          ? `Gerrit rejected the upload: ${this.detail}. The commit is not based on the target branch: fetch it with fetch_gerrit_branch, rebase onto <remote>/<branch>, then upload again.`
+          : `Gerrit rejected the upload: ${this.detail}`;
     }
   }
 }
