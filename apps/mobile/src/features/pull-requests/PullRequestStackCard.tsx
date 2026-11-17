@@ -25,7 +25,7 @@ export function PullRequestStackCard(props: {
       props.params.initialSummary?.number === props.params.number
         ? props.params.initialSummary.stack
         : undefined;
-    if (!summary) return null;
+    if (!summary || summary.size <= 1) return null;
     return (
       <PullRequestCardGroup>
         <PullRequestCardRow
@@ -37,6 +37,7 @@ export function PullRequestStackCard(props: {
       </PullRequestCardGroup>
     );
   }
+  if (stack.layers.length <= 1) return null;
   const position = stack.layers.findIndex((layer) => layer.number === props.params.number) + 1;
   return (
     <PullRequestCardGroup>

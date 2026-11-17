@@ -24,13 +24,17 @@ export function filterGerritPatchSetFile(parsed: ReviewParsedDiff): ReviewParsed
   };
 }
 
-export function gerritVoteOptions(values: readonly number[]) {
+export function gerritVoteOptions(
+  values: readonly number[],
+  descriptions: Readonly<Record<string, string>> = {},
+) {
   return [...new Set(values)]
     .sort((a, b) => b - a)
-    .map((value) => ({
-      value: String(value),
-      label: value > 0 ? `+${value}` : String(value),
-    }));
+    .map((value) => {
+      const score = value > 0 ? `+${value}` : String(value);
+      const description = descriptions[score] ?? descriptions[String(value)];
+      return { value: String(value), label: description ? `${score} ${description}` : score };
+    });
 }
 
 export function gerritRequirementStatus(status: string | null) {
@@ -145,7 +149,7 @@ export function PullRequestGerritSection({
         <Text>No labels reported.</Text>
       ) : (
         gerrit.labels.map((label) => {
-          const options = gerritVoteOptions(label.permittedValues);
+          const options = gerritVoteOptions(label.permittedValues, label.valueDescriptions);
           return (
             <View key={label.name} className="gap-1">
               <Text className="font-t3-medium">{label.name}</Text>

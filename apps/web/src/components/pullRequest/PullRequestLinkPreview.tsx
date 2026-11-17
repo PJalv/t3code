@@ -1,4 +1,8 @@
 import type { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card";
+import {
+  actorDisplayName,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { useMessages } from "gt-react";
 import { parsePullRequestAnchor, pullRequestLinkCommit } from "@t3tools/shared/pullRequestAnchor";
@@ -112,6 +116,10 @@ export function PullRequestLinkPreview({
       : link;
   const preview = previewQuery.data;
   const card = preview ?? summary;
+  const provider =
+    summary?.provider ??
+    preview?.provider ??
+    sourceControlClients.parseChangeRequestUrl(originalUrl)?.definition.kind;
   const showCard = card !== null || (previewQuery.error !== null && fallback !== undefined);
   const showUrlTooltip = open && previewQuery.error !== null && !showCard;
   const state =
@@ -119,11 +127,13 @@ export function PullRequestLinkPreview({
       ? null
       : resolvePullRequestState({ state: card.state, isDraft: card.isDraft ?? false }, messages);
   const authorLabel =
-    card?.author === null
-      ? "ghost"
-      : card?.author?.name && card.author.name !== card.author.login
-        ? `${card.author.name} (@${card.author.login})`
-        : (card?.author?.login ?? null);
+    provider === "gerrit"
+      ? (actorDisplayName(card?.author, provider) ?? "ghost")
+      : card?.author === null
+        ? "ghost"
+        : card?.author?.name && card.author.name !== card.author.login
+          ? `${card.author.name} (@${card.author.login})`
+          : (card?.author?.login ?? null);
 
   return (
     <PreviewCard open={open} onOpenChange={setOpen} actionsRef={previewActionsRef}>
@@ -159,9 +169,9 @@ export function PullRequestLinkPreview({
                   )}
                 </div>
                 {subject?.kind === "comment" ? (
-                  <LinkedComment subject={subject} />
+                  <LinkedComment subject={subject} provider={provider} />
                 ) : subject?.kind === "commit" ? (
-                  <LinkedCommit commit={subject.commit} />
+                  <LinkedCommit commit={subject.commit} provider={provider} />
                 ) : (
                   <p className="mt-1 text-sm font-medium leading-snug text-foreground text-pretty">
                     {card.title}
@@ -190,13 +200,11 @@ export function PullRequestLinkPreview({
   );
 }
 
-function actorLabel(actor: { readonly login: string } | null | undefined) {
-  return actor?.login ?? "ghost";
-}
-
 function LinkedComment({
   subject,
+  provider,
 }: {
+  provider: string | undefined;
   subject: Extract<ReturnType<typeof pullRequestLinkSubject>, { kind: "comment" }>;
 }) {
   const outcome = pullRequestReviewOutcome(subject.reviewState);
@@ -205,7 +213,7 @@ function LinkedComment({
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <PullRequestActorAvatar actor={subject.author} className="size-4" />
         <span className="min-w-0 truncate font-medium text-foreground">
-          {actorLabel(subject.author)}
+          {actorDisplayName(subject.author, provider) ?? "ghost"}
         </span>
         {outcome === null ? (
           <span className="shrink-0">commented</span>
@@ -228,7 +236,9 @@ function LinkedComment({
 
 function LinkedCommit({
   commit,
+  provider,
 }: {
+  provider: string | undefined;
   commit: Extract<ReturnType<typeof pullRequestLinkSubject>, { kind: "commit" }>["commit"];
 }) {
   const author = commit.authors?.[0];
@@ -243,7 +253,9 @@ function LinkedCommit({
           <>
             <span aria-hidden>·</span>
             <PullRequestActorAvatar actor={author} className="size-4" />
-            <span className="min-w-0 truncate">{actorLabel(author)}</span>
+            <span className="min-w-0 truncate">
+              {actorDisplayName(author, provider) ?? "ghost"}
+            </span>
           </>
         )}
         <span aria-hidden>·</span>

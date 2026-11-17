@@ -1456,7 +1456,15 @@ it.effect("searches compact authenticated pages with escaped literal operators",
     requests.push({ url: request.url, authorization: request.headers.authorization });
     const rows =
       page++ === 0
-        ? [{ ...change(), updated: "2026-01-01 00:00:00.000000000", _more_changes: true }]
+        ? [
+            {
+              ...change(),
+              updated: "2026-01-01 00:00:00.000000000",
+              _more_changes: true,
+              submittable: true,
+              labels: { "Code-Review": { approved: { name: "Alice" } } },
+            },
+          ]
         : [];
     return Effect.succeed(
       HttpClientResponse.fromWeb(request, new Response(`)]}'\n${JSON.stringify(rows)}`)),
@@ -1479,13 +1487,19 @@ it.effect("searches compact authenticated pages with escaped literal operators",
     const first = yield* http.searchChanges(input);
     expect(first.nextOffset).toBe(1);
     expect(first.completeness).toBe("more");
-    expect(first.changes[0]).toMatchObject({ installation, number: 1, project: "Team/Repo" });
+    expect(first.changes[0]).toMatchObject({
+      installation,
+      number: 1,
+      project: "Team/Repo",
+      submittable: true,
+      reviewStatus: "approved",
+    });
     const url = new URL(requests[0]!.url);
     expect(url.searchParams.get("q")).toBe(
       'status:open project:"Team/Repo" branch:"refs/heads/Release/Next" owner:"alice\\" OR status:merged" message:"fix \\\\ \\"it\\""',
     );
     expect(url.searchParams.get("n")).toBe("1");
-    expect(url.searchParams.getAll("o")).toEqual(["DETAILED_ACCOUNTS"]);
+    expect(url.searchParams.getAll("o")).toEqual(["DETAILED_ACCOUNTS", "LABELS", "SUBMITTABLE"]);
     expect(requests[0]!.authorization).toMatch(/^Basic /);
     const second = yield* http.searchChanges({ ...input, offset: first.nextOffset! });
     expect(second.nextOffset).toBeNull();

@@ -3,8 +3,16 @@ import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { visibleLinkedThreads } from "@t3tools/client-runtime/state/threads";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import {
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 import { MessageSquareIcon } from "lucide-react";
 import { Branch, msg, T, useGT } from "gt-react";
 import { useState } from "react";
@@ -47,12 +55,18 @@ interface PullRequestThreadLinksProps {
 export function PullRequestThreadLinks(props: PullRequestThreadLinksProps) {
   const configs = useServerConfigs();
   if (
-    threadPullRequestLinkMode(configs.get(props.environmentId)?.environment.capabilities) ===
-    "unsupported"
+    threadPullRequestLinkMode(
+      configs.get(props.environmentId)?.environment.capabilities,
+    ) === "unsupported"
   ) {
     return null;
   }
-  return <EnabledPullRequestThreadLinks key={`${props.environmentId}:${props.url}`} {...props} />;
+  return (
+    <EnabledPullRequestThreadLinks
+      key={`${props.environmentId}:${props.url}`}
+      {...props}
+    />
+  );
 }
 
 function EnabledPullRequestThreadLinks({
@@ -66,9 +80,12 @@ function EnabledPullRequestThreadLinks({
   const parsedUrl = sourceControlClients.parseChangeRequestUrl(url);
   const parsed = parsedUrl?.link ?? null;
   const term = changeRequestTermKind(
-    (parsedUrl?.definition ?? sourceControlClients.get(undefined)).changeRequest,
+    (parsedUrl?.definition ?? sourceControlClients.get(undefined))
+      .changeRequest,
   );
-  const thread = useThreadShell(threadRef?.environmentId === environmentId ? threadRef : null);
+  const thread = useThreadShell(
+    threadRef?.environmentId === environmentId ? threadRef : null,
+  );
   const currentThreadRef = thread === null ? null : threadRef;
   const linking = usePullRequestLinking(environmentId);
   const linkedHere = linking.isLinked(thread, url);
@@ -135,7 +152,9 @@ function EnabledPullRequestThreadLinks({
 
   if (parsed === null || (!linkedHere && !linking.canLink(url))) return null;
   const linkedThreads = visibleLinkedThreads(
-    linking.mode === "multiple" ? ((relations.data ?? lastRelations)?.threads ?? []) : [],
+    linking.mode === "multiple"
+      ? ((relations.data ?? lastRelations)?.threads ?? [])
+      : [],
     environmentId,
     loadedThreadRefs,
     hiddenKeys,
@@ -152,7 +171,8 @@ function EnabledPullRequestThreadLinks({
       : gt("Linked threads");
   return (
     <>
-      {display === "count" && (linkedThreads.length > 0 || relations.error !== null) ? (
+      {display === "count" &&
+      (linkedThreads.length > 0 || relations.error !== null) ? (
         <SharedTooltipTrigger
           render={
             <Button
@@ -164,15 +184,22 @@ function EnabledPullRequestThreadLinks({
                   query: url,
                   ...((relations.data ?? lastRelations) === null
                     ? {}
-                    : { linkedThreads: { environmentId, threads: linkedThreads } }),
+                    : {
+                        linkedThreads: {
+                          environmentId,
+                          threads: linkedThreads,
+                        },
+                      }),
                 })
               }
             >
-              <MessageSquareIcon aria-hidden className="size-3.5" />
+              <PullRequestGlyph.link aria-hidden className="size-3.5" />
               <span aria-hidden>{linkedThreads.length || "?"}</span>
             </Button>
           }
-          label={gt("{label}. Search in the command palette.", { label: linkedThreadsLabel })}
+          label={gt("{label}. Search in the command palette.", {
+            label: linkedThreadsLabel,
+          })}
         />
       ) : null}
       {display === "menu-item" ? (

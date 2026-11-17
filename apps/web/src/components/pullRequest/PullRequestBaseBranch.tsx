@@ -93,6 +93,7 @@ function PullRequestBaseFreshnessWarning({
 /** The base branch, warning when the pull request has fallen behind it. */
 export function PullRequestBaseBranch({
   baseBranch,
+  terminology,
   freshness,
   stacked,
   pending,
@@ -100,6 +101,7 @@ export function PullRequestBaseBranch({
   iconClassName,
 }: {
   readonly baseBranch: string;
+  readonly terminology: string;
   readonly freshness: BaseFreshness | null;
   readonly stacked: boolean;
   readonly pending: boolean;
@@ -110,10 +112,7 @@ export function PullRequestBaseBranch({
   const label = (
     <>
       {stacked ? (
-        <PullRequestGlyph.stack
-          aria-label={gt("Stacked pull request")}
-          className="size-3 shrink-0"
-        />
+        <PullRequestGlyph.stack aria-label={gt("Stacked {term}", { term: terminology })} className="size-3 shrink-0" />
       ) : null}
       <code className="flex min-w-0">
         <MiddleTruncate value={baseBranch} showTitle={false} />

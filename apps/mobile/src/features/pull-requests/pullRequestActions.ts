@@ -62,15 +62,16 @@ export function pullRequestActionLabel(
   const term = changeRequestTermKind(terminology);
   switch (action) {
     case "merge":
+      if (terminology.verbs?.merge) return `${terminology.verbs.merge} ${terminology.singular}`;
       return resolve(
         msg("Merge {term, select, mr {merge request} cr {change request} other {pull request}}", {
           term,
         }),
       );
     case "ready":
-      return resolve(msg("Mark ready for review"));
+      return terminology.verbs?.ready ?? resolve(msg("Mark ready for review"));
     case "draft":
-      return resolve(msg("Convert to draft"));
+      return terminology.verbs?.draft ?? resolve(msg("Convert to draft"));
     case "close":
       return resolve(
         msg("Close {term, select, mr {merge request} cr {change request} other {pull request}}", {

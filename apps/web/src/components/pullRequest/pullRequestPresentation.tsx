@@ -1,3 +1,4 @@
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
 import { Spinner } from "~/components/ui/spinner";
 import type {
   PullRequestActor,
@@ -492,6 +493,7 @@ export function PullRequestActorAvatar({
 
 export function PullRequestActorLabel({
   actor,
+  provider,
   className,
   variant = "label",
   tooltip = true,
@@ -499,6 +501,7 @@ export function PullRequestActorLabel({
 }: {
   actor: PullRequestActor | null;
   className?: string;
+  provider?: string | undefined;
   variant?: "label" | "avatar";
   tooltip?: boolean;
   profileUrl?: string | null;
@@ -509,7 +512,7 @@ export function PullRequestActorLabel({
     <span className={cn("flex min-w-0 items-baseline", variant === "label" && "gap-1.5")}>
       <PullRequestActorAvatar actor={actor} className="self-center" />
       <span className={variant === "label" ? "truncate font-medium text-foreground" : "sr-only"}>
-        {login}
+        {actorDisplayName(actor, provider) ?? "ghost"}
       </span>
     </span>
   );

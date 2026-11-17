@@ -233,6 +233,9 @@ function snapshotFieldsOf(summary: PullRequestSummary): SnapshotFields {
     ...(summary.additions === undefined ? {} : { additions: summary.additions }),
     ...(summary.deletions === undefined ? {} : { deletions: summary.deletions }),
     ...(summary.changedFiles === undefined ? {} : { changedFiles: summary.changedFiles }),
+    ...(summary.gerritSubmittable === undefined
+      ? {}
+      : { gerritSubmittable: summary.gerritSubmittable }),
     ...(summary.reviewDecision === undefined ? {} : { reviewDecision: summary.reviewDecision }),
     ...(summary.checksState === undefined ? {} : { checksState: summary.checksState }),
     ...(summary.mergeability === undefined ? {} : { mergeability: summary.mergeability }),
@@ -279,11 +282,13 @@ function snapshotFieldsEqual(left: SnapshotFields, right: SnapshotFields): boole
     (left.closedAt ?? null) === (right.closedAt ?? null) &&
     (left.mergedAt ?? null) === (right.mergedAt ?? null) &&
     (left.author?.login ?? null) === (right.author?.login ?? null) &&
+    (left.author?.name ?? null) === (right.author?.name ?? null) &&
     avatarIdentity(left.author?.avatarUrl) === avatarIdentity(right.author?.avatarUrl) &&
     left.additions === right.additions &&
     left.deletions === right.deletions &&
     left.changedFiles === right.changedFiles &&
     (left.reviewDecision ?? null) === (right.reviewDecision ?? null) &&
+    left.gerritSubmittable === right.gerritSubmittable &&
     (left.checksState ?? null) === (right.checksState ?? null) &&
     left.mergeability === right.mergeability &&
     left.rebaseRequired === right.rebaseRequired
