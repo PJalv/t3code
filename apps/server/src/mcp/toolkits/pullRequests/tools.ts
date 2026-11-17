@@ -263,6 +263,7 @@ export const WatchPullRequestResult = Schema.Struct({
     }),
   ),
   next: Schema.optional(Schema.String),
+  ownAccountCommentsIgnored: Schema.Boolean,
 });
 export type WatchPullRequestResult = typeof WatchPullRequestResult.Type;
 

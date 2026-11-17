@@ -68,6 +68,7 @@ export class PullRequestWatchService extends Context.Service<
         readonly wasWatching: boolean;
         /** Set when the PR already ended, so no watch was registered. */
         readonly state?: "merged" | "closed";
+        readonly ownAccountCommentsIgnored: boolean;
       },
       | PullRequestWatchFailedError
       | PullRequestWatchFromSubagentError
@@ -180,6 +181,7 @@ const make = Effect.gen(function* () {
       ...target,
       watching: watchedLink(after)?.watch !== undefined,
       wasWatching,
+      ownAccountCommentsIgnored: true,
     };
   });
 
