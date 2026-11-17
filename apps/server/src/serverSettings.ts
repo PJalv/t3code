@@ -87,8 +87,45 @@ const textDecoder = new TextDecoder();
 const foldProviderInstanceEnabledFlags = (settings: ServerSettings): ServerSettings => {
   let changed = false;
   const providerInstances: Record<string, ProviderInstanceConfig> = {};
-  for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
-    const config = instance.config;
+  for (const [instanceId, originalInstance] of Object.entries(settings.providerInstances)) {
+    let instance = originalInstance;
+    let config = instance.config;
+    if (
+      instance.driver === "acpRegistry" &&
+      config !== null &&
+      typeof config === "object" &&
+      !Array.isArray(config)
+    ) {
+      const legacy = config as Record<string, unknown>;
+      if (legacy.launchMode === "custom" || legacy.launchMode === "registry") {
+        const { launchMode, args, env, ...rest } = legacy;
+        const environment = new Map(
+          (instance.environment ?? []).map((entry) => [entry.name, entry]),
+        );
+        if (
+          launchMode === "custom" &&
+          env !== null &&
+          typeof env === "object" &&
+          !Array.isArray(env)
+        ) {
+          for (const [name, value] of Object.entries(env)) {
+            if (typeof value === "string")
+              environment.set(name, {
+                name,
+                value,
+                sensitive: environment.get(name)?.sensitive ?? false,
+              });
+          }
+        }
+        config = {
+          ...rest,
+          source: rest.source ?? (launchMode === "custom" ? "local" : "registry"),
+          ...(launchMode === "custom" ? { commandArgs: rest.commandArgs ?? args ?? [] } : {}),
+        };
+        instance = { ...instance, config, environment: [...environment.values()] };
+        changed = true;
+      }
+    }
     // Leave malformed flags for driver schema validation rather than silently repairing them.
     if (
       config === null ||

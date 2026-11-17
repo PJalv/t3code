@@ -42,7 +42,6 @@ export type ThreadGuestMessage = typeof ThreadGuestMessage.Type;
 
 export const ThreadGuestShare = Schema.Struct({
   id: GuestShareId,
-  /** The T3 Connect tunnel hostname the link points at. Guest routes require it to still serve. */
   host: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   expiresAt: IsoDateTime,
@@ -66,7 +65,8 @@ export type GuestShareCreateResult = typeof GuestShareCreateResult.Type;
 
 const GUEST_SHARE_CREATE_MESSAGES = {
   disabled: "Guest links are off. Turn them on in Settings > Labs.",
-  connect_unavailable: "Guest links need a running T3 Connect tunnel.",
+  connect_unavailable:
+    "Guest links need a configured HTTPS endpoint or a running T3 Connect tunnel.",
   thread_unavailable: "This thread cannot be shared.",
   read_failed: "Failed to read the shared thread.",
   changed: "The guest link changed while it was being created.",

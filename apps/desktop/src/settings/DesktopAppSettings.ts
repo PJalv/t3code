@@ -33,6 +33,13 @@ export interface DesktopSettings {
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
+  /**
+   * Network interface whose IPv4 address is advertised as the "Local
+   * network" endpoint. `null` means automatic selection: the first usable
+   * non-virtual interface in enumeration order. Persisted as a name so a
+   * DHCP address change keeps working without rewriting the setting.
+   */
+  readonly preferredLanInterfaceName: string | null;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
@@ -74,6 +81,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   mainWindowBounds: null,
   mainWindowMaximized: false,
   serverExposureMode: "local-only",
+  preferredLanInterfaceName: null,
   tailscaleServeEnabled: false,
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
   updateChannel: "latest",
@@ -101,6 +109,7 @@ const DesktopSettingsDocument = Schema.Struct({
   mainWindowBounds: optionalReadableKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: optionalReadableKey(Schema.Boolean),
   serverExposureMode: optionalReadableKey(DesktopServerExposureModeSchema),
+  preferredLanInterfaceName: optionalReadableKey(Schema.NullOr(Schema.String)),
   tailscaleServeEnabled: optionalReadableKey(Schema.Boolean),
   tailscaleServePort: optionalReadableKey(Schema.Number),
   updateChannel: optionalReadableKey(DesktopUpdateChannelSchema),
@@ -162,6 +171,9 @@ export class DesktopAppSettings extends Context.Service<
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setServerExposureMode: (
       mode: DesktopServerExposureMode,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    readonly setPreferredLanInterfaceName: (
+      name: string | null,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setTailscaleServe: (input: {
       readonly enabled: boolean;
@@ -231,6 +243,11 @@ function normalizeDesktopSettingsDocument(
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
     serverExposureMode:
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
+    preferredLanInterfaceName:
+      typeof parsed.preferredLanInterfaceName === "string" &&
+      parsed.preferredLanInterfaceName.length > 0
+        ? parsed.preferredLanInterfaceName
+        : null,
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
     updateChannel: updateChannelConfiguredByUser
@@ -261,6 +278,9 @@ function toDesktopSettingsDocument(
   }
   if (settings.mainWindowMaximized) {
     document.mainWindowMaximized = true;
+  }
+  if (settings.preferredLanInterfaceName !== defaults.preferredLanInterfaceName) {
+    document.preferredLanInterfaceName = settings.preferredLanInterfaceName;
   }
   if (settings.serverExposureMode !== defaults.serverExposureMode) {
     document.serverExposureMode = settings.serverExposureMode;
@@ -299,6 +319,18 @@ function setServerExposureMode(
     : {
         ...settings,
         serverExposureMode: requestedMode,
+      };
+}
+
+function setPreferredLanInterfaceName(
+  settings: DesktopSettings,
+  name: string | null,
+): DesktopSettings {
+  return settings.preferredLanInterfaceName === name
+    ? settings
+    : {
+        ...settings,
+        preferredLanInterfaceName: name,
       };
 }
 
@@ -567,6 +599,12 @@ export const make = Effect.gen(function* () {
 
       return yield* persist((settings) => setServerExposureMode(settings, mode));
     }),
+    setPreferredLanInterfaceName: Effect.fn("desktop.settings.setPreferredLanInterfaceName")(
+      function* (name) {
+        yield* Effect.annotateCurrentSpan({ name });
+        return yield* persist((settings) => setPreferredLanInterfaceName(settings, name));
+      },
+    ),
     setTailscaleServe: Effect.fn("desktop.settings.setTailscaleServe")(function* (input) {
       yield* Effect.annotateCurrentSpan(input);
 
@@ -638,6 +676,11 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         setServerExposureMode: Effect.fn("DesktopAppSettings.setServerExposureMode")(
           function (mode) {
             return update((settings) => setServerExposureMode(settings, mode));
+          },
+        ),
+        setPreferredLanInterfaceName: Effect.fn("DesktopAppSettings.setPreferredLanInterfaceName")(
+          function (name) {
+            return update((settings) => setPreferredLanInterfaceName(settings, name));
           },
         ),
         setTailscaleServe: Effect.fn("DesktopAppSettings.setTailscaleServe")(function (input) {

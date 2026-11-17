@@ -436,6 +436,7 @@ export function createDeviceStreamClient(
   let decodedVideoGeneration: number | null = null;
   let iosInputAdmitted = false;
   let iosInputUnavailable = false;
+  let awaitingSessionAck = false;
   let timestamp = 0;
   let awaitingKeyframe = true;
   let screen: DeviceScreenSize | null = null;
@@ -693,10 +694,16 @@ export function createDeviceStreamClient(
     }
   };
 
-  const requestKeyframe = () => {
-    if (platform === "android" && socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "reset-video", ack: false }));
-    }
+  // serve-emu re-announces video-session for every reset-video request.
+  let lastKeyframeRequestAt = -Infinity;
+  const KEYFRAME_REQUEST_INTERVAL_MS = 1_000;
+  const requestKeyframe = (force = false) => {
+    if (platform !== "android" || socket?.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (!force && now - lastKeyframeRequestAt < KEYFRAME_REQUEST_INTERVAL_MS) return;
+    lastKeyframeRequestAt = now;
+    awaitingSessionAck = true;
+    socket.send(JSON.stringify({ type: "reset-video", ack: false }));
   };
 
   const scheduleRetry = (channel: "video" | "input", run: () => void) => {
@@ -1228,6 +1235,12 @@ export function createDeviceStreamClient(
   /** `inputOnly` keeps a socket for input beside a WebRTC feed, so its reconnects leave video alone. */
   const connectAndroid = (inputOnly = false) => {
     if (stopped) return;
+    // Only a full video socket starts a new video session; the input-only
+    // sidecar beside a WebRTC feed must not reset the keyframe throttle.
+    if (!inputOnly) {
+      awaitingSessionAck = false;
+      lastKeyframeRequestAt = -Infinity;
+    }
     const ws = new WebSocket(
       wsUrl(`/ws?device=${device}&${inputOnly ? "video=0" : "frame-meta=1"}`),
     );
@@ -1241,13 +1254,16 @@ export function createDeviceStreamClient(
     ws.onmessage = (event) => {
       if (stopped || socket !== ws || inputOnly) return;
       if (typeof event.data === "string") {
-        // The encoder restarts at a new size when the device rotates; the
-        // next keyframe carries a fresh SPS, so the decoder is rebuilt from it.
         if (isVideoSessionMessage(event.data)) {
+          if (awaitingSessionAck) {
+            awaitingSessionAck = false;
+            return;
+          }
+          // An unsolicited new session signals an encoder restart, typically rotation.
           closeDecoder();
           configuring = false;
           connecting();
-          requestKeyframe();
+          requestKeyframe(true);
         }
         return;
       }
@@ -1268,7 +1284,11 @@ export function createDeviceStreamClient(
             if (!isCurrent() || epoch !== decoderEpoch) return;
             configuring = false;
             awaitingKeyframe = true;
-            if (configured) requestKeyframe();
+            // Configure from this SPS-bearing keyframe, then decode it rather than discarding it.
+            if (configured) {
+              decode(isKey, packet.data, packet.timestamp);
+              if (awaitingKeyframe) requestKeyframe();
+            }
           },
         );
         return;
@@ -1436,9 +1456,20 @@ export function createDeviceStreamClient(
       }
       if (phase !== "down") return;
       if (event.key === "Escape") return send(JSON.stringify({ type: "back" }));
-      const keycode = ANDROID_KEYCODE_BY_KEY[event.key];
-      if (keycode !== undefined) return send(JSON.stringify({ type: "key", keycode }));
-      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
+      const modified = event.ctrlKey || event.altKey || event.metaKey;
+      const letter = event.key.toLowerCase();
+      const keycode =
+        ANDROID_KEYCODE_BY_KEY[event.key] ??
+        (modified && /^[a-z]$/.test(letter) ? 29 + letter.charCodeAt(0) - 97 : undefined);
+      if (keycode !== undefined) {
+        const metaState =
+          (event.shiftKey ? 0x1 : 0) |
+          (event.altKey ? 0x2 : 0) |
+          (event.ctrlKey ? 0x1000 : 0) |
+          (event.metaKey ? 0x10000 : 0);
+        return send(JSON.stringify({ type: "key", keycode, ...(metaState ? { metaState } : {}) }));
+      }
+      if (event.key.length === 1 && !modified) {
         send(JSON.stringify({ type: "text", text: event.key }));
       }
     },

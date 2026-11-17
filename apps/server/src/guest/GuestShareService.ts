@@ -281,8 +281,13 @@ const make = Effect.gen(function* () {
     return decodeSessionClaims(base64UrlDecodeUtf8(parts.payload));
   });
 
-  const connectHostname = managedEndpoint.inspectConnector.pipe(
-    Effect.map((facts) => facts?.hostname ?? null),
+  const endpointHost = serverSettings.getSettings.pipe(
+    Effect.flatMap((settings) =>
+      settings.guestLinkBaseUrl === null
+        ? managedEndpoint.inspectConnector.pipe(Effect.map((facts) => facts?.hostname ?? null))
+        : Effect.succeed(new URL(settings.guestLinkBaseUrl).host),
+    ),
+    Effect.orElseSucceed(() => null),
   );
   // A beta: while it is off, no link opens and every guest request is refused.
   const sharingEnabled = serverSettings.getSettings.pipe(
@@ -308,7 +313,6 @@ const make = Effect.gen(function* () {
       Effect.orDie,
     );
 
-  /** Checks a token against the live share: same id, not expired, and Connect still serving it. */
   const authorize = Effect.fn("GuestShareService.authorize")(function* (
     token: string,
     kind: "invite" | "session",
@@ -330,7 +334,7 @@ const make = Effect.gen(function* () {
       thread.deletedAt !== null ||
       DateTime.toEpochMillis(now) >= Date.parse(share.expiresAt) ||
       (kind === "session" && share.guestName === null) ||
-      (yield* connectHostname) !== share.host
+      (yield* endpointHost) !== share.host
     ) {
       return yield* inactive;
     }
@@ -341,7 +345,7 @@ const make = Effect.gen(function* () {
     if (!(yield* sharingEnabled)) {
       return yield* new GuestShareCreateError({ reason: "disabled" });
     }
-    const host = yield* connectHostname;
+    const host = yield* endpointHost;
     if (host === null) {
       return yield* new GuestShareCreateError({ reason: "connect_unavailable" });
     }
@@ -598,11 +602,8 @@ const make = Effect.gen(function* () {
         }),
       ),
       Stream.takeUntil((event) => event.type === "ended"),
-      // Unlinking T3 Connect closes it quietly, so a tunnel that comes back on the same host
-      // keeps the guest in. Turning the beta off closes it the same way. Closing and expiry end
-      // it above, with `ended`.
       Stream.interruptWhen(
-        Effect.all([connectHostname, sharingEnabled]).pipe(
+        Effect.all([endpointHost, sharingEnabled]).pipe(
           Effect.repeat({
             schedule: Schedule.spaced(ACCESS_RECHECK_INTERVAL),
             until: ([host, enabled]) => host !== share.host || !enabled,

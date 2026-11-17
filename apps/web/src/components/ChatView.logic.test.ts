@@ -54,13 +54,15 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
-import type { Thread } from "../types";
+import type { Thread, TurnDiffSummary } from "../types";
 import { DraftId, hydrateImagesFromPersisted, useComposerDraftStore } from "../composerDraftStore";
 import { derivePhase } from "../session-logic";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 import {
   getAntigravitySendBlockReason,
+  resolveBackgroundDraftWorkspaceOptions,
   resolveComposerProviderSelection,
+  resolveProactiveTurnDiffAction,
   resolveWorktreeSetupProgress,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
@@ -73,6 +75,7 @@ import {
   deriveLockedProvider,
   hasCompactableConversation,
   hasServerAcknowledgedLocalDispatch,
+  shouldRefocusComposerOnWindowFocus,
   waitForRevertedMessage,
 } from "./ChatView.logic";
 
@@ -792,6 +795,136 @@ describe("resolveComposerProviderSelection", () => {
   });
 });
 
+describe("resolveBackgroundDraftWorkspaceOptions", () => {
+  it("keeps New worktree selected without reusing the launched worktree", () => {
+    expect(
+      resolveBackgroundDraftWorkspaceOptions({
+        envMode: "worktree",
+        branch: "main",
+        startFromOrigin: true,
+      }),
+    ).toEqual({
+      envMode: "worktree",
+      branch: "main",
+      worktreePath: null,
+      startFromOrigin: true,
+    });
+  });
+});
+
+describe("proactive completed diff guard", () => {
+  it.each([
+    { files: 0, additions: 0, deletions: 0, action: "ignore" },
+    { files: 1, additions: 1, deletions: 0, action: "ignore" },
+    { files: 2, additions: 12, deletions: 12, action: "ignore" },
+    { files: 1, additions: 25, deletions: 24, action: "ignore" },
+    { files: 1, additions: 25, deletions: 25, action: "open" },
+    { files: 1, additions: 0, deletions: 50, action: "open" },
+    { files: 3, additions: 1, deletions: 0, action: "open" },
+  ])(
+    "uses change size for automatic diffs: $files files, +$additions/-$deletions",
+    ({ files, additions, deletions, action }) => {
+      const changedCheckpoint = {
+        status: "ready",
+        files: Array.from({ length: files }, (_, index) => ({
+          path: `src/app-${index}.ts`,
+          kind: "modified" as const,
+          additions,
+          deletions,
+        })),
+      } satisfies Pick<TurnDiffSummary, "status" | "files">;
+
+      expect(
+        resolveProactiveTurnDiffAction({
+          checkpoint: changedCheckpoint,
+          isGitRepo: true,
+        }),
+      ).toBe(action);
+    },
+  );
+
+  it("waits for definitive checkpoint and repository state", () => {
+    const missingCheckpoint = {
+      status: "missing",
+      files: [],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+    const changedCheckpoint = {
+      status: "ready",
+      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: undefined,
+        isGitRepo: true,
+      }),
+    ).toBe("defer");
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: missingCheckpoint,
+        isGitRepo: true,
+      }),
+    ).toBe("defer");
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: changedCheckpoint,
+        isGitRepo: undefined,
+      }),
+    ).toBe("defer");
+  });
+});
+
+describe("shouldRefocusComposerOnWindowFocus", () => {
+  function element(
+    tagName: string,
+    options?: { editable?: boolean; role?: string; within?: string },
+  ) {
+    return {
+      tagName,
+      isContentEditable: options?.editable ?? false,
+      getAttribute: (name: string) => (name === "role" ? (options?.role ?? null) : null),
+      closest: (selector: string) =>
+        options?.within !== undefined && selector.includes(options.within) ? ({} as Element) : null,
+    };
+  }
+
+  it("refocuses when nothing or the body holds focus", () => {
+    expect(shouldRefocusComposerOnWindowFocus(null)).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(element("BODY"))).toBe(true);
+  });
+
+  it("refocuses away from a plain button, such as a pull request tab", () => {
+    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON"))).toBe(true);
+  });
+
+  it("leaves other text fields alone", () => {
+    expect(shouldRefocusComposerOnWindowFocus(element("INPUT"))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("TEXTAREA"))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { editable: true }))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "textbox" }))).toBe(false);
+  });
+
+  it.each(["IFRAME", "WEBVIEW"])("leaves a focused %s preview alone", (tagName) => {
+    expect(shouldRefocusComposerOnWindowFocus(element(tagName))).toBe(false);
+  });
+
+  it("leaves a focused terminal alone in the drawer and the right panel", () => {
+    expect(
+      shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "data-terminal-owner" })),
+    ).toBe(false);
+  });
+
+  it("leaves a focused device screen alone", () => {
+    expect(
+      shouldRefocusComposerOnWindowFocus(element("DIV", { within: 'role="application"' })),
+    ).toBe(false);
+  });
+
+  it("leaves focus inside a dialog or popup alone", () => {
+    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "dialog" }))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "-popup" }))).toBe(false);
+  });
+});
 describe("checkout Git memory", () => {
   it("does not confuse an environment id containing the separator with a path", () => {
     rememberCheckoutIsRepo(EnvironmentId.make("env"), "a:b", false);

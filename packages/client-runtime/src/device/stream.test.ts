@@ -102,6 +102,169 @@ describe("native device stream transport", () => {
     return { client, opened, waitForSocket, events, fetch };
   }
 
+  it("uses authenticated iOS MJPEG and forwards controls without a cross-origin video fetch", async () => {
+    const { client, opened, events, fetch } = setup("ios");
+    client.start();
+    const socket = await opened;
+    const imageUrl = new URL(events.onMjpegFallback.mock.calls[0]![0] as string);
+    expect(imageUrl.pathname).toContain("test%20device/stream.mjpeg");
+    expect(imageUrl.searchParams.get("wsTicket")).toBe("stream-ticket");
+    expect(imageUrl.searchParams.get("hostId")).toBe("ssh-host");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    socket.onopen?.();
+    expect(socket.send).not.toHaveBeenCalled();
+    socket.onmessage?.({ data: Uint8Array.of(0x83).buffer });
+    client.setOrientation("landscape_right");
+    client.pressButton("home");
+    client.sendTouch("begin", 0.25, 0.75);
+    const messages = socket.send.mock.calls.map(([bytes]) => {
+      const packet = bytes as Uint8Array;
+      return {
+        tag: packet[0],
+        body: JSON.parse(new TextDecoder().decode(packet.subarray(1))) as unknown,
+      };
+    });
+    expect(messages).toEqual([
+      { tag: 0x07, body: { orientation: "landscape_right" } },
+      { tag: 0x04, body: { button: "home" } },
+      { tag: 0x03, body: { type: "begin", x: 0.25, y: 0.75 } },
+    ]);
+    client.stop();
+    expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("forwards Android gestures and device controls through the ticketed host socket", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    const url = new URL(socket.url);
+    expect(url.searchParams.get("device")).toBe("test device");
+    expect(url.searchParams.get("wsTicket")).toBe("stream-ticket");
+    expect(url.searchParams.get("hostId")).toBe("ssh-host");
+    client.sendTouch("begin", 0.2, 0.8);
+    client.sendTouch("move", 0.2, 0.4);
+    client.sendTouch("end", 0.2, 0.1);
+    client.setOrientation("landscape_right");
+    client.pressButton("home");
+    client.pressButton("appSwitcher");
+    expect(
+      socket.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+    ).toEqual([
+      { type: "touch", action: "down", x: 0.2, y: 0.8 },
+      { type: "touch", action: "move", x: 0.2, y: 0.4 },
+      { type: "touch", action: "up", x: 0.2, y: 0.1 },
+      { type: "home" },
+      { type: "recents" },
+    ]);
+    client.stop();
+    expect(socket.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards Android typing and editing keys without duplicating keyup", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    for (const key of ["a", "A", " ", "Enter", "Backspace", "ArrowLeft", "Escape"]) {
+      const event = { key, metaKey: false, ctrlKey: false } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    expect(
+      socket.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+    ).toEqual([
+      { type: "text", text: "a" },
+      { type: "text", text: "A" },
+      { type: "text", text: " " },
+      { type: "key", keycode: 66 },
+      { type: "key", keycode: 67 },
+      { type: "key", keycode: 21 },
+      { type: "back" },
+    ]);
+    client.stop();
+  });
+
+  it("preserves Android modifiers for editing shortcuts and selection", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    for (const key of ["a", "c", "x", "v", "z"]) {
+      const event = { key, ctrlKey: true } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    client.sendKey({ key: "ArrowLeft", ctrlKey: true, shiftKey: true } as KeyboardEvent, "down");
+    client.sendKey({ key: "ArrowRight", shiftKey: true } as KeyboardEvent, "down");
+    client.sendKey({ key: "A", ctrlKey: true, shiftKey: true } as KeyboardEvent, "down");
+    expect(
+      socket.send.mock.calls.map(([message]) => JSON.parse(message as string) as unknown),
+    ).toEqual([
+      ...[29, 31, 52, 50, 54].map((keycode) => ({ type: "key", keycode, metaState: 0x1000 })),
+      { type: "key", keycode: 21, metaState: 0x1001 },
+      { type: "key", keycode: 22, metaState: 0x1 },
+      { type: "key", keycode: 29, metaState: 0x1001 },
+    ]);
+    client.stop();
+  });
+
+  it("chunks pasted Android text at the hub's UTF-8 limit without losing characters", async () => {
+    const { client, opened } = setup("android");
+    client.start();
+    const socket = await opened;
+    const text = "a".repeat(299) + "🙂é".repeat(120) + "\nend";
+    client.sendText(text);
+    client.sendText("");
+    const messages = socket.send.mock.calls.map(
+      ([message]) => JSON.parse(message as string) as { type: string; text: string },
+    );
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.every((message) => message.type === "text")).toBe(true);
+    expect(messages.map((message) => message.text).join("")).toBe(text);
+    for (const message of messages) {
+      expect(new TextEncoder().encode(message.text).length).toBeLessThanOrEqual(300);
+      expect(message.text).not.toContain("\ufffd");
+    }
+    expect(messages[0]!.text).toBe("a".repeat(299));
+    client.stop();
+  });
+
+  it("does not inject Android paste messages on an iOS socket", async () => {
+    const { client, opened } = setup("ios");
+    client.start();
+    const socket = await opened;
+    socket.send.mockClear();
+    client.sendText("hello");
+    expect(socket.send).not.toHaveBeenCalled();
+    client.stop();
+  });
+
+  it("forwards iOS keyboard press and release events, including modifiers", async () => {
+    const { client, opened } = setup("ios");
+    client.start();
+    const socket = await opened;
+    socket.onopen?.();
+    socket.onmessage?.({ data: Uint8Array.of(0x83).buffer });
+    socket.send.mockClear();
+    for (const code of ["ShiftLeft", "KeyA", "Enter", "Backspace", "ArrowLeft"]) {
+      const event = { code } as KeyboardEvent;
+      client.sendKey(event, "down");
+      client.sendKey(event, "up");
+    }
+    const messages = socket.send.mock.calls.map(([bytes]) => {
+      const packet = bytes as Uint8Array;
+      return {
+        tag: packet[0],
+        body: JSON.parse(new TextDecoder().decode(packet.subarray(1))) as unknown,
+      };
+    });
+    expect(messages).toEqual(
+      [0xe1, 0x04, 0x28, 0x2a, 0x50].flatMap((usage) => [
+        { tag: 0x06, body: { type: "down", usage } },
+        { tag: 0x06, body: { type: "up", usage } },
+      ]),
+    );
+    client.stop();
+  });
   it("renews an expired Android ticket when the HTTP upgrade is rejected instead of retrying it forever", async () => {
     const { client, opened, events } = setup("android");
     client.start();
@@ -340,7 +503,9 @@ function recoveryFixture(
   const signals: AbortSignal[] = [];
   const fetch = vi.fn((url: string, init: RequestInit) => {
     const signal = init.signal!;
-    signals.push(signal);
+    // The transport probe is a short-lived capability read, not a stream
+    // transfer, so it is excluded from the abort-on-teardown assertion.
+    if (!url.includes("/api?")) signals.push(signal);
     if (url.includes("/api?")) return Promise.resolve(Response.json({}));
     if (!url.includes("stream.avcc")) return Promise.resolve(new Response("prime"));
     return Promise.resolve(
@@ -515,6 +680,189 @@ describe("shared device stream readiness and recovery", () => {
     client.stop();
   });
 
+  it("waits for actual MJPEG dimensions without requiring a multipart load event", async () => {
+    const { client, events, image } = recoveryFixture();
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(image.src).toContain("stream.mjpeg");
+    expect(events.onStatus).not.toHaveBeenCalledWith("streaming", undefined);
+    image.naturalWidth = 400;
+    image.naturalHeight = 800;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    client.stop();
+  });
+
+  it("observes a web image attached after MJPEG fallback has already begun", async () => {
+    const { client, image, imageReady, events } = recoveryFixture();
+    client.setMjpegImage(null);
+    client.start();
+    expect(image.src).toBe("");
+    await vi.advanceTimersByTimeAsync(1000);
+    client.setMjpegImage(image as unknown as HTMLImageElement);
+    imageReady();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    client.stop();
+    expect(image.src).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops input and video on an image error without treating it as expired credentials", async () => {
+    const { client, image, imageReady, sockets, events } = recoveryFixture();
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.onopen?.();
+    imageReady();
+    image.dispatchEvent(new Event("error"));
+    expect(events.onStatus).toHaveBeenLastCalledWith("error", expect.stringContaining("Reconnect"));
+    expect(events.onInputConnected).toHaveBeenLastCalledWith(false, expect.any(String));
+    expect(events.onUnauthorized).not.toHaveBeenCalled();
+    expect(sockets[0]!.close).toHaveBeenCalledOnce();
+    expect(image.src).toBe("");
+    client.pressButton("home");
+    expect(sockets[0]!.send).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ["ios", true],
+    ["ios", false],
+    ["android", false],
+  ] as const)(
+    "bounds missing first frames for %s with preferMjpeg=%s",
+    async (platform, preferMjpeg) => {
+      const { client, events, signals, sockets, image } = recoveryFixture(platform, preferMjpeg);
+      client.start();
+      // Android now probes the hub before opening its socket.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(events.onStatus.mock.calls.some(([status]) => status === "error")).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(events.onStatus).toHaveBeenLastCalledWith(
+        "error",
+        expect.stringContaining("No video"),
+      );
+      expect(events.onInputConnected).toHaveBeenLastCalledWith(false, expect.any(String));
+      // iOS transfers video over fetch, so the abort assertion has real targets.
+      // Android SEMU streams over the socket, so an empty list is legitimate there
+      // and only the close assertion below carries weight.
+      if (platform === "ios") {
+        expect(signals.length).toBeGreaterThan(0);
+        expect(signals.every((signal) => signal.aborted)).toBe(true);
+      }
+      expect(sockets[0]!.close).toHaveBeenCalledOnce();
+      expect(image.src).toBe("");
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("does not extend the first-frame deadline each time a socket reconnects", async () => {
+    const { client, sockets, events } = recoveryFixture("android");
+    client.start();
+    // Android now probes the hub before opening its socket.
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.onopen?.();
+    sockets[0]!.onclose?.({ code: 1000, reason: "restart" });
+    await vi.advanceTimersByTimeAsync(14_999);
+    sockets[1]!.onopen?.();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events.onStatus).toHaveBeenLastCalledWith("error", expect.stringContaining("No video"));
+    expect(sockets[1]!.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("gives a manual restart a fresh deadline and ignores queued image events from its old binding", async () => {
+    const { client, image, events } = recoveryFixture();
+    const listeners: EventListener[] = [];
+    const add = image.addEventListener.bind(image);
+    vi.spyOn(image, "addEventListener").mockImplementation((name, callback, options) => {
+      if (typeof callback === "function") listeners.push(callback);
+      add(name, callback, options);
+    });
+    client.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    client.stop();
+    client.start();
+    events.onStatus.mockClear();
+    for (const listener of listeners.slice(0, 2)) listener(new Event("error"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(events.onStatus).not.toHaveBeenCalled();
+    const replacement = new MjpegImage();
+    client.setMjpegImage(replacement as unknown as HTMLImageElement);
+    replacement.naturalWidth = 400;
+    replacement.naturalHeight = 800;
+    replacement.dispatchEvent(new Event("load"));
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    client.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("falls back from unsupported iOS H.264 without publishing a terminal error", async () => {
+    const { client, videoBodies, Decoder, events, imageReady } = recoveryFixture("ios", false);
+    Decoder.isConfigSupported.mockResolvedValue({ supported: false });
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    videoBodies[0]!.enqueue(new Uint8Array(envelope(1, [1, 0x64, 0, 0x1f])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.onMjpegFallback).toHaveBeenCalledOnce();
+    expect(events.onStatus.mock.calls.some(([status]) => status === "error")).toBe(false);
+    imageReady();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    client.stop();
+  });
+
+  it("publishes a terminal unsupported-profile error for Android and closes its socket", async () => {
+    const { client, sockets, sps, Decoder, events } = recoveryFixture("android");
+    Decoder.isConfigSupported.mockResolvedValue({ supported: false });
+    client.start();
+    // Android now probes the hub before opening its socket.
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.onStatus).toHaveBeenLastCalledWith(
+      "error",
+      expect.stringContaining("cannot decode"),
+    );
+    expect(sockets[0]!.close).toHaveBeenCalledOnce();
+    expect(events.onMjpegFallback).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("decodes the SPS keyframe and distinguishes reset acknowledgements from rotation", async () => {
+    const { client, sockets, sps, events, decodedFrame, drawImage, decoders } =
+      recoveryFixture("android");
+    client.start();
+    // Android now probes the hub before opening its socket.
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.onStatus.mock.calls.some(([status]) => status === "streaming")).toBe(false);
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    expect(decodedFrame()).toHaveBeenCalledOnce();
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    const initialResetCount = sockets[0]!.send.mock.calls.filter(([message]) =>
+      String(message).includes("reset-video"),
+    ).length;
+    expect(initialResetCount).toBe(0);
+    // A genuine, unsolicited encoder session change starts one reset request.
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    const afterRotationResetCount = sockets[0]!.send.mock.calls.filter(([message]) =>
+      String(message).includes("reset-video"),
+    ).length;
+    expect(afterRotationResetCount).toBe(1);
+    // Its session announcement is an acknowledgement, not another rotation.
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    expect(
+      sockets[0]!.send.mock.calls.filter(([message]) => String(message).includes("reset-video")),
+    ).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(events.onStatus).toHaveBeenLastCalledWith("error", expect.stringContaining("No video"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("discards decoder support results and output from a previous Android socket", async () => {
     const { client, sockets, sps, events, Decoder, decoders, decodedFrame, drawImage } =
       recoveryFixture("android");

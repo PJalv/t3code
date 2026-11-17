@@ -139,6 +139,33 @@ function strictSecretReferencePaths(
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
+  it.effect("loads, normalizes, persists and clears a custom guest endpoint", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.writeFileString(
+        config.settingsPath,
+        JSON.stringify({
+          guestSharingEnabled: true,
+          guestLinkBaseUrl: "HTTPS://GUEST.example:8443/",
+        }),
+      );
+      const loaded = yield* service.getSettings;
+      assert.equal(loaded.guestLinkBaseUrl, "https://guest.example:8443");
+      assert.isTrue(loaded.guestSharingEnabled);
+      yield* service.updateSettings({ guestLinkBaseUrl: "https://OTHER.example:443/" });
+      const saved = yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath));
+      assert.equal(saved.guestLinkBaseUrl, "https://other.example");
+      assert.isTrue(saved.guestSharingEnabled);
+      yield* service.updateSettings({ guestLinkBaseUrl: null });
+      const cleared = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.isNull(cleared.guestLinkBaseUrl);
+      assert.isTrue(cleared.guestSharingEnabled);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
   it.effect("serializes concurrent model preference edits without cancelling duplicate adds", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;
@@ -220,6 +247,45 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         assert.deepEqual(migrated.providerModelPreferences, {});
       }),
     ).pipe(Effect.provide(layerServerSettings())),
+  );
+  it.effect("migrates saved custom ACP commands to native local configuration", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("acp_maki");
+      yield* fs.writeFileString(
+        config.settingsPath,
+        JSON.stringify({
+          providerInstances: {
+            [instanceId]: {
+              driver: "acpRegistry",
+              environment: [{ name: "PROFILE", value: "original", sensitive: false }],
+              config: {
+                launchMode: "custom",
+                commandPath: "nix",
+                args: ["run", "maki", "--", "acp"],
+                env: { PROFILE: "custom" },
+              },
+            },
+          },
+        }),
+      );
+      const migrated = (yield* service.getSettings).providerInstances[instanceId]!;
+      assert.deepEqual(migrated.config, {
+        source: "local",
+        commandPath: "nix",
+        commandArgs: ["run", "maki", "--", "acp"],
+      });
+      assert.deepEqual(migrated.environment, [
+        { name: "PROFILE", value: "custom", sensitive: false },
+      ]);
+      yield* service.updateSettings({});
+      const persisted = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.deepEqual(persisted.providerInstances[instanceId]?.config, migrated.config);
+    }).pipe(Effect.provide(layerServerSettings())),
   );
   it.effect("migrates saved token delivery to paragraph buffering without resetting settings", () =>
     Effect.gen(function* () {

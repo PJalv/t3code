@@ -157,8 +157,13 @@ const layerTest = GuestShareService.layer.pipe(
 
 const threadId = ThreadId.make("thread:guest-share-service");
 
-const shareThreadFor = Effect.fn(function* (threadId: ThreadId) {
-  yield* Ref.set(hostname, "env.t3.test");
+const shareThreadFor = Effect.fn(function* (
+  threadId: ThreadId,
+  guestLinkBaseUrl: string | null = null,
+) {
+  yield* Ref.set(hostname, guestLinkBaseUrl === null ? "env.t3.test" : null);
+  const settings = yield* ServerSettings.ServerSettingsService;
+  yield* settings.updateSettings({ guestLinkBaseUrl });
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   yield* orchestrator.dispatch({
     type: "thread.create",
@@ -176,37 +181,42 @@ const shareThreadFor = Effect.fn(function* (threadId: ThreadId) {
   });
   const guestShares = yield* GuestShareService.GuestShareService;
   const { url } = yield* guestShares.create({ threadId });
-  assert.isTrue(url.startsWith("https://env.t3.test/guest#"));
+  assert.isTrue(url.startsWith(`${guestLinkBaseUrl ?? "https://env.t3.test"}/guest#`));
   const credential = url.slice(url.indexOf("#") + 1);
   return { orchestrator, guestShares, credential };
 });
 const shareThread = shareThreadFor(threadId);
 
-it.effect("spends an invite once and ends the guest stream when the owner stops sharing", () =>
-  Effect.gen(function* () {
-    const { orchestrator, guestShares, credential } = yield* shareThread;
-    const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
-    const again = yield* Effect.exit(guestShares.redeem({ credential, name: "Eve" }));
-    assert.isTrue(Exit.isFailure(again));
-    // The browser that joined can come back without the spent invite.
-    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(session))));
-    // An invite token is not a session token.
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.stream(credential))));
+it.effect.each([{ guestLinkBaseUrl: null }, { guestLinkBaseUrl: "https://guest.example:8443" }])(
+  "spends an invite once and ends the guest stream when the owner stops sharing ($guestLinkBaseUrl)",
+  ({ guestLinkBaseUrl }) =>
+    Effect.gen(function* () {
+      const { orchestrator, guestShares, credential } = yield* shareThreadFor(
+        threadId,
+        guestLinkBaseUrl,
+      );
+      const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
+      const again = yield* Effect.exit(guestShares.redeem({ credential, name: "Eve" }));
+      assert.isTrue(Exit.isFailure(again));
+      // The browser that joined can come back without the spent invite.
+      assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(session))));
+      // An invite token is not a session token.
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.stream(credential))));
 
-    const events = yield* guestShares.stream(session);
-    yield* orchestrator.dispatch({
-      type: "thread.guest-share.close",
-      commandId: CommandId.make("close-guest-share"),
-      threadId,
-    });
-    const received = Array.from(yield* Stream.runCollect(events));
-    assert.deepEqual(
-      received.map((event) => (event.type === "thread" ? event.item.kind : event.type)),
-      ["view", "snapshot", "ended"],
-    );
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.stream(session))));
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.check(session))));
-  }).pipe(Effect.provide(layerTest)),
+      const events = yield* guestShares.stream(session);
+      yield* orchestrator.dispatch({
+        type: "thread.guest-share.close",
+        commandId: CommandId.make("close-guest-share"),
+        threadId,
+      });
+      const received = Array.from(yield* Stream.runCollect(events));
+      assert.deepEqual(
+        received.map((event) => (event.type === "thread" ? event.item.kind : event.type)),
+        ["view", "snapshot", "ended"],
+      );
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.stream(session))));
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.check(session))));
+    }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("counts a guest joining and sending, without their name or text", () =>
@@ -343,37 +353,109 @@ it.effect("closes an open guest stream when T3 Connect stops serving the link's 
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("refuses new links and every guest request while the beta is off", () =>
+it.effect("uses the configured origin without Connect and gives it precedence over Connect", () =>
   Effect.gen(function* () {
-    const { guestShares, credential } = yield* shareThread;
-    const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
-    const collecting = yield* Stream.runCollect(yield* guestShares.stream(session)).pipe(
+    const { guestShares } = yield* shareThread;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ guestLinkBaseUrl: "HTTPS://GUEST.example:8443/" });
+    const { url, share } = yield* guestShares.create({ threadId });
+    assert.isTrue(url.startsWith("https://guest.example:8443/guest#"));
+    assert.equal(share.host, "guest.example:8443");
+    yield* Ref.set(hostname, null);
+    const credential = url.slice(url.indexOf("#") + 1);
+    const { token, shareId } = yield* guestShares.redeem({ credential, name: "Sam" });
+    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(token))));
+    yield* guestShares.submit(token, { shareId, text: "Hello from the custom endpoint" }, []);
+    const collecting = yield* Stream.runCollect(yield* guestShares.stream(token)).pipe(
       Effect.forkChild,
     );
-    const settings = yield* ServerSettings.ServerSettingsService;
-    yield* settings.updateSettings({ guestSharingEnabled: false });
-    // An open stream closes at the next access check.
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://GUEST.example:8443/" });
+    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(token))));
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://guest.example:9443" });
     yield* TestClock.adjust("30 seconds");
-    yield* Fiber.join(collecting);
-    assert.equal((yield* Effect.flip(guestShares.create({ threadId }))).reason, "disabled");
-    assert.equal((yield* Effect.flip(guestShares.check(session))).reason, "inactive");
-    // Turning it back on lets the same guest back in.
-    yield* settings.updateSettings({ guestSharingEnabled: true });
-    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(session))));
+    const received = Array.from(yield* Fiber.join(collecting));
+    assert.notInclude(
+      received.map((event) => event.type),
+      "ended",
+    );
+    assert.equal((yield* Effect.flip(guestShares.check(token))).reason, "inactive");
+    assert.equal((yield* Effect.flip(guestShares.stream(token))).reason, "inactive");
+    assert.equal(
+      (yield* Effect.flip(guestShares.submit(token, { shareId, text: "Blocked" }, []))).reason,
+      "inactive",
+    );
+    assert.equal(
+      (yield* Effect.flip(guestShares.redeem({ credential, name: "Eve" }))).reason,
+      "inactive",
+    );
+    yield* settings.updateSettings({ guestLinkBaseUrl: null });
+    assert.equal(
+      (yield* Effect.flip(guestShares.create({ threadId }))).reason,
+      "connect_unavailable",
+    );
+    yield* Ref.set(hostname, "env.t3.test");
+    const fallback = yield* guestShares.create({ threadId });
+    assert.isTrue(fallback.url.startsWith("https://env.t3.test/guest#"));
+    assert.equal((yield* Effect.flip(guestShares.check(token))).reason, "inactive");
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("ends an open guest stream when the link expires", () =>
+it.effect("refuses a Connect invite after selecting a custom endpoint", () =>
   Effect.gen(function* () {
     const { guestShares, credential } = yield* shareThread;
-    const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
-    const collecting = yield* Stream.runCollect(yield* guestShares.stream(session)).pipe(
-      Effect.forkChild,
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://guest.example" });
+    assert.equal(
+      (yield* Effect.flip(guestShares.redeem({ credential, name: "Sam" }))).reason,
+      "inactive",
     );
-    yield* TestClock.adjust("25 hours");
-    const received = Array.from(yield* Fiber.join(collecting));
-    assert.equal(received.at(-1)?.type, "ended");
+    yield* settings.updateSettings({ guestLinkBaseUrl: null });
+    assert.isTrue(
+      Exit.isSuccess(yield* Effect.exit(guestShares.redeem({ credential, name: "Sam" }))),
+    );
   }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect.each([{ guestLinkBaseUrl: null }, { guestLinkBaseUrl: "https://guest.example:8443" }])(
+  "refuses new links and every guest request while the beta is off ($guestLinkBaseUrl)",
+  ({ guestLinkBaseUrl }) =>
+    Effect.gen(function* () {
+      const { guestShares, credential } = yield* shareThreadFor(threadId, guestLinkBaseUrl);
+      const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
+      const collecting = yield* Stream.runCollect(yield* guestShares.stream(session)).pipe(
+        Effect.forkChild,
+      );
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.updateSettings({ guestSharingEnabled: false });
+      // An open stream closes at the next access check.
+      yield* TestClock.adjust("30 seconds");
+      yield* Fiber.join(collecting);
+      assert.equal((yield* Effect.flip(guestShares.create({ threadId }))).reason, "disabled");
+      assert.equal((yield* Effect.flip(guestShares.check(session))).reason, "inactive");
+      // Turning it back on lets the same guest back in.
+      yield* settings.updateSettings({ guestSharingEnabled: true });
+      assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(session))));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect.each([{ guestLinkBaseUrl: null }, { guestLinkBaseUrl: "https://guest.example:8443" }])(
+  "ends an open guest stream and refuses access when the link expires ($guestLinkBaseUrl)",
+  ({ guestLinkBaseUrl }) =>
+    Effect.gen(function* () {
+      const { guestShares, credential } = yield* shareThreadFor(threadId, guestLinkBaseUrl);
+      const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
+      const collecting = yield* Stream.runCollect(yield* guestShares.stream(session)).pipe(
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("25 hours");
+      const received = Array.from(yield* Fiber.join(collecting));
+      assert.equal(received.at(-1)?.type, "ended");
+      assert.equal((yield* Effect.flip(guestShares.check(session))).reason, "inactive");
+      assert.equal(
+        (yield* Effect.flip(guestShares.redeem({ credential, name: "Eve" }))).reason,
+        "inactive",
+      );
+    }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("shows the guest the thread's new model", () =>
@@ -759,14 +841,15 @@ const storedFiles = Effect.gen(function* () {
   return yield* fileSystem.readDirectory(attachmentsDir).pipe(Effect.orElseSucceed(() => []));
 });
 
-const joinedGuest = Effect.gen(function* () {
-  const shared = yield* shareThread;
+const joinedGuestFor = Effect.fn(function* (guestLinkBaseUrl: string | null) {
+  const shared = yield* shareThreadFor(threadId, guestLinkBaseUrl);
   const { token: session, shareId } = yield* shared.guestShares.redeem({
     credential: shared.credential,
     name: "Sam",
   });
   return { ...shared, session, shareId };
 });
+const joinedGuest = joinedGuestFor(null);
 
 const waitingMessages = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -920,11 +1003,17 @@ it.effect("deletes a waiting message's files when the owner dismisses it or stop
   }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
 
-it.effect.each(["thread.archive", "thread.delete"] as const)(
-  "deletes a waiting message's files on %s",
-  (type) =>
+it.effect.each([
+  { type: "thread.archive", guestLinkBaseUrl: null },
+  { type: "thread.delete", guestLinkBaseUrl: null },
+  { type: "thread.archive", guestLinkBaseUrl: "https://guest.example:8443" },
+  { type: "thread.delete", guestLinkBaseUrl: "https://guest.example:8443" },
+] as const)(
+  "deletes waiting files and refuses guest access on $type ($guestLinkBaseUrl)",
+  ({ type, guestLinkBaseUrl }) =>
     Effect.gen(function* () {
-      const { orchestrator, guestShares, session, shareId } = yield* joinedGuest;
+      const { orchestrator, guestShares, session, shareId } =
+        yield* joinedGuestFor(guestLinkBaseUrl);
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const before = yield* storedFiles;
       yield* guestShares.submit(
@@ -940,72 +1029,78 @@ it.effect.each(["thread.archive", "thread.delete"] as const)(
       });
       yield* worker.drain();
       assert.deepEqual(yield* storedFiles, before);
+      assert.equal((yield* Effect.flip(guestShares.check(session))).reason, "inactive");
+      assert.equal((yield* Effect.flip(guestShares.stream(session))).reason, "inactive");
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
 
-it.effect("sends a guest's files as the guest's message and keeps them the guest's to load", () =>
-  Effect.gen(function* () {
-    const { orchestrator, guestShares, session, shareId } = yield* joinedGuest;
-    yield* guestShares.submit(
-      session,
-      { shareId, text: "See this" },
-      yield* uploadsOf([png("a.png")]),
-    );
-    const [message] = yield* waitingMessages;
-    const pending = message!.attachments!;
-    // Served while it waits.
-    const served = yield* guestShares.attachment(session, pending[0]!.id);
-    assert.equal(served.attachment.mimeType, "image/png");
+it.effect.each([{ guestLinkBaseUrl: null }, { guestLinkBaseUrl: "https://guest.example:8443" }])(
+  "sends guest files with owner approval and keeps them available to the guest ($guestLinkBaseUrl)",
+  ({ guestLinkBaseUrl }) =>
+    Effect.gen(function* () {
+      const { orchestrator, guestShares, session, shareId } =
+        yield* joinedGuestFor(guestLinkBaseUrl);
+      yield* guestShares.submit(
+        session,
+        { shareId, text: "See this" },
+        yield* uploadsOf([png("a.png")]),
+      );
+      const [message] = yield* waitingMessages;
+      const pending = message!.attachments!;
+      // Served while it waits.
+      const served = yield* guestShares.attachment(session, pending[0]!.id);
+      assert.equal(served.attachment.mimeType, "image/png");
 
-    // The day-old pending-upload sweep leaves a waiting guest's files alone.
-    const { attachmentsDir } = yield* ServerConfig.ServerConfig;
-    // Any pending upload counts as stale at the end of time.
-    sweepStalePendingAttachments({ attachmentsDir, nowMs: Number.MAX_SAFE_INTEGER });
-    const copied = pending[0]!;
-    yield* orchestrator.dispatch({
-      type: "message.dispatch",
-      commandId: CommandId.make("send-guest-files"),
-      threadId,
-      messageId: MessageId.make("message:guest-files"),
-      guestMessageId: message!.id,
-      text: "",
-      attachments: [copied],
-      dispatchMode: { type: "defer_start" },
-      createdBy: "user",
-      creationSource: "web",
-    });
-    const items = (yield* orchestrator.getThreadSnapshotWindow(threadId, {
-      rowLimit: 20,
-    })).projection.visibleTurnItems.map((entry) => entry.item);
-    const sent = items.find(
-      (item) => item.type === "user_message" && item.context?.guest?.guestMessageId === message!.id,
-    );
-    assert.deepInclude(sent, { attachments: [copied] });
-    if (sent?.type !== "user_message") return;
-    assert.deepEqual(sent.context?.guest, {
-      guestMessageId: message!.id,
-      name: "Sam",
-      text: "See this",
-      shareId,
-    });
-    // The guest loads the thread's copy from their own row.
-    const fromRow = yield* guestShares.attachment(session, copied.id);
-    assert.equal(fromRow.attachment.id, copied.id);
-
-    // Still theirs after their share's message list has trimmed it away.
-    for (let index = 0; index < 21; index += 1) {
-      yield* guestShares.submit(session, { shareId, text: `note ${index}` }, []);
-      const [waiting] = (yield* waitingMessages).filter((next) => next.status === "pending");
+      // The day-old pending-upload sweep leaves a waiting guest's files alone.
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      // Any pending upload counts as stale at the end of time.
+      sweepStalePendingAttachments({ attachmentsDir, nowMs: Number.MAX_SAFE_INTEGER });
+      const copied = pending[0]!;
       yield* orchestrator.dispatch({
-        type: "thread.guest-message.dismiss",
-        commandId: CommandId.make(`dismiss-note-${index}`),
+        type: "message.dispatch",
+        commandId: CommandId.make("send-guest-files"),
         threadId,
-        guestMessageId: waiting!.id,
+        messageId: MessageId.make("message:guest-files"),
+        guestMessageId: message!.id,
+        text: "",
+        attachments: [copied],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
       });
-    }
-    assert.isFalse((yield* waitingMessages).some((next) => next.id === message!.id));
-    assert.equal((yield* guestShares.attachment(session, copied.id)).attachment.id, copied.id);
-  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+      const items = (yield* orchestrator.getThreadSnapshotWindow(threadId, {
+        rowLimit: 20,
+      })).projection.visibleTurnItems.map((entry) => entry.item);
+      const sent = items.find(
+        (item) =>
+          item.type === "user_message" && item.context?.guest?.guestMessageId === message!.id,
+      );
+      assert.deepInclude(sent, { attachments: [copied] });
+      if (sent?.type !== "user_message") return;
+      assert.deepEqual(sent.context?.guest, {
+        guestMessageId: message!.id,
+        name: "Sam",
+        text: "See this",
+        shareId,
+      });
+      // The guest loads the thread's copy from their own row.
+      const fromRow = yield* guestShares.attachment(session, copied.id);
+      assert.equal(fromRow.attachment.id, copied.id);
+
+      // Still theirs after their share's message list has trimmed it away.
+      for (let index = 0; index < 21; index += 1) {
+        yield* guestShares.submit(session, { shareId, text: `note ${index}` }, []);
+        const [waiting] = (yield* waitingMessages).filter((next) => next.status === "pending");
+        yield* orchestrator.dispatch({
+          type: "thread.guest-message.dismiss",
+          commandId: CommandId.make(`dismiss-note-${index}`),
+          threadId,
+          guestMessageId: waiting!.id,
+        });
+      }
+      assert.isFalse((yield* waitingMessages).some((next) => next.id === message!.id));
+      assert.equal((yield* guestShares.attachment(session, copied.id)).attachment.id, copied.id);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
 
 it.effect("serves the shared thread's files to its guest, never another thread's", () =>

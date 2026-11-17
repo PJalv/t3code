@@ -90,6 +90,11 @@ export function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   if (isSurfaceLauncherKey(event)) return false;
   if (isKeyClaimedInPath(event)) return false;
 
+  const launcherKeys = document
+    .querySelector("[data-surface-launcher-keys]")
+    ?.getAttribute("data-surface-launcher-keys");
+  if (launcherKeys && launcherKeys.toLowerCase().includes(event.key.toLowerCase())) return false;
+
   return true;
 }
 
