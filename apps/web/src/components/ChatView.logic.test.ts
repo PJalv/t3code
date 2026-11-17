@@ -887,42 +887,78 @@ describe("shouldRefocusComposerOnWindowFocus", () => {
         options?.within !== undefined && selector.includes(options.within) ? ({} as Element) : null,
     };
   }
+  // The refocus is gated on a deliberate text selection; a collapsed selection
+  // means "no selected text", so every element case below passes one to
+  // exercise the element branch, not the selection gate.
+  const collapsed: Pick<Selection, "isCollapsed"> = { isCollapsed: true };
+  const spread: Pick<Selection, "isCollapsed"> = { isCollapsed: false };
 
   it("refocuses when nothing or the body holds focus", () => {
-    expect(shouldRefocusComposerOnWindowFocus(null)).toBe(true);
-    expect(shouldRefocusComposerOnWindowFocus(element("BODY"))).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(null, collapsed)).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(element("BODY"), collapsed)).toBe(true);
   });
 
   it("refocuses away from a plain button, such as a pull request tab", () => {
-    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON"))).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON"), collapsed)).toBe(true);
   });
 
   it("leaves other text fields alone", () => {
-    expect(shouldRefocusComposerOnWindowFocus(element("INPUT"))).toBe(false);
-    expect(shouldRefocusComposerOnWindowFocus(element("TEXTAREA"))).toBe(false);
-    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { editable: true }))).toBe(false);
-    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "textbox" }))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("INPUT"), collapsed)).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("TEXTAREA"), collapsed)).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { editable: true }), collapsed)).toBe(
+      false,
+    );
+    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "textbox" }), collapsed)).toBe(
+      false,
+    );
   });
 
   it.each(["IFRAME", "WEBVIEW"])("leaves a focused %s preview alone", (tagName) => {
-    expect(shouldRefocusComposerOnWindowFocus(element(tagName))).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element(tagName), collapsed)).toBe(false);
   });
 
   it("leaves a focused terminal alone in the drawer and the right panel", () => {
     expect(
-      shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "data-terminal-owner" })),
+      shouldRefocusComposerOnWindowFocus(
+        element("BUTTON", { within: "data-terminal-owner" }),
+        collapsed,
+      ),
     ).toBe(false);
   });
 
   it("leaves a focused device screen alone", () => {
     expect(
-      shouldRefocusComposerOnWindowFocus(element("DIV", { within: 'role="application"' })),
+      shouldRefocusComposerOnWindowFocus(
+        element("DIV", { within: 'role="application"' }),
+        collapsed,
+      ),
     ).toBe(false);
   });
 
   it("leaves focus inside a dialog or popup alone", () => {
-    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "dialog" }))).toBe(false);
-    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "-popup" }))).toBe(false);
+    expect(
+      shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "dialog" }), collapsed),
+    ).toBe(false);
+    expect(
+      shouldRefocusComposerOnWindowFocus(element("BUTTON", { within: "-popup" }), collapsed),
+    ).toBe(false);
+  });
+
+  it("leaves selected text alone even when focus would yield to the composer", () => {
+    expect(shouldRefocusComposerOnWindowFocus(null, spread)).toBe(false);
+    expect(shouldRefocusComposerOnWindowFocus(element("BODY"), spread)).toBe(false);
+    expect(
+      shouldRefocusComposerOnWindowFocus(
+        element("BUTTON", { within: "data-terminal-owner" }),
+        spread,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a missing selection like a collapsed one", () => {
+    expect(shouldRefocusComposerOnWindowFocus(null, null)).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(element("BUTTON"), null)).toBe(true);
+    expect(shouldRefocusComposerOnWindowFocus(element("INPUT"), null)).toBe(false);
   });
 });
 describe("checkout Git memory", () => {
