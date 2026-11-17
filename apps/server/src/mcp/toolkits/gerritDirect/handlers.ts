@@ -15,6 +15,7 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as GerritDirectRead from "../../../sourceControl/GerritDirectRead.ts";
 import * as GerritDirectService from "../../../sourceControl/GerritDirectService.ts";
 import * as GerritTarget from "../../../sourceControl/GerritTarget.ts";
+import { GerritDirectUploadError } from "../../../sourceControl/GerritDirectUpload.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { actInput, GerritDirectToolkit } from "./tools.ts";
@@ -42,6 +43,7 @@ const invalidRead = (input: { mode: string; target?: unknown; path?: string; que
   return new OrchestratorMcpFailure({ code: "invalid_request", message });
 };
 const isTargetError = Schema.is(GerritTarget.GerritTargetError);
+const isUploadError = Schema.is(GerritDirectUploadError);
 const failed = (error: unknown) => {
   const cause =
     typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined;
@@ -65,6 +67,7 @@ const failed = (error: unknown) => {
       : closed
         ? "This Gerrit change is merged or abandoned; its review is closed. Do not retry."
         : (target?.message ??
+          (isUploadError(cause) ? cause.message : undefined) ??
           "Gerrit operation failed. Read the change before retrying a mutation."),
   });
 };
