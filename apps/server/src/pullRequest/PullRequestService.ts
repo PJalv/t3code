@@ -1365,6 +1365,9 @@ export const make = Effect.gen(function* () {
     const viewer = input.viewer.toLowerCase();
     return {
       ...(input.item.stack === undefined ? {} : { stack: input.item.stack }),
+      ...(input.item.gerritSubmittable === undefined
+        ? {}
+        : { gerritSubmittable: input.item.gerritSubmittable }),
       provider: input.project.api.kind,
       host: input.project.host,
       projectId: input.project.project.id,
@@ -1859,6 +1862,9 @@ export const make = Effect.gen(function* () {
     ...(changeRequest.changedFiles === undefined
       ? {}
       : { changedFiles: changeRequest.changedFiles }),
+    ...(changeRequest.gerritSubmittable === undefined
+      ? {}
+      : { gerritSubmittable: changeRequest.gerritSubmittable }),
     ...(changeRequest.reviewDecision === undefined
       ? {}
       : { reviewDecision: changeRequest.reviewDecision }),
@@ -2025,6 +2031,7 @@ export const make = Effect.gen(function* () {
 
   const previewFields = (value: PullRequestPreview): PullRequestPreview => ({
     projectId: value.projectId,
+    ...(value.provider === undefined ? {} : { provider: value.provider }),
     repository: value.repository,
     number: value.number,
     title: value.title,
@@ -2048,6 +2055,7 @@ export const make = Effect.gen(function* () {
             previewFields({
               ...value,
               projectId: project.project.id,
+              provider: project.api.kind,
               repository: project.repository,
             }),
           ),
@@ -2648,6 +2656,17 @@ export const make = Effect.gen(function* () {
                 }),
               );
             }
+            if (
+              input.resolve &&
+              (!project.api.capabilities.review.resolveWithReply || !viewer.resolve)
+            ) {
+              return Effect.fail(
+                new PullRequestOperationError({
+                  operation: "replyToThread",
+                  detail: "You cannot resolve this conversation with a reply.",
+                }),
+              );
+            }
             return project.api
               .replyToThread({
                 cwd: project.project.workspaceRoot,
@@ -2656,6 +2675,7 @@ export const make = Effect.gen(function* () {
                 number: input.number,
                 threadId: input.threadId,
                 body: input.body,
+                ...(input.resolve ? { resolve: true } : {}),
               })
               .pipe(Effect.mapError(toPullRequestError("replyToThread")));
           }),

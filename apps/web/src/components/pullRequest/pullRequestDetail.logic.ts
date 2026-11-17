@@ -511,7 +511,7 @@ export interface PullRequestTimelineThread
   extends
     Pick<
       PullRequestConversationThread,
-      "id" | "path" | "line" | "isResolved" | "isOutdated" | "canResolve"
+      "id" | "path" | "line" | "isResolved" | "isOutdated" | "canResolve" | "isDraft"
     >,
     PullRequestReplyAvailability {
   readonly replies: ReadonlyArray<PullRequestTimelineEvent>;
@@ -529,6 +529,7 @@ export function groupPullRequestTimelineConversations(
     if (
       (event.kind === "comment" || event.kind === "review") &&
       event.thread === undefined &&
+      event.comment?.vote === undefined &&
       pullRequestReviewOutcome(event.reviewState) === null
     ) {
       const last = rows.at(-1);
@@ -545,6 +546,12 @@ export function groupPullRequestTimelineConversations(
 }
 
 /** Marker-only bodies are empty; otherwise retain text, including fenced HTML comments. */
+// Gerrit review messages open with their votes ("Patch Set 7: Code-Review+2") and an inline
+// comment count; neither is a finding, and the inline comments arrive as threads.
+function reviewRemark(body: string): string {
+  return body.replace(/^Patch Set \d+:[^\n]*\n*(?:\(\d+ (?:inline )?comments?\)\s*)?/u, "");
+}
+
 export function visibleBody(body: string): string | null {
   return body.replace(/<!--[\s\S]*?-->/gu, "").trim().length === 0 ? null : body.trim();
 }
@@ -853,6 +860,7 @@ export function buildPullRequestTimeline(
         ...commentTimelineEvent(item.root),
         thread: {
           id: item.thread.id,
+          ...(item.thread.isDraft === undefined ? {} : { isDraft: item.thread.isDraft }),
           ...(item.thread.canResolve === undefined ? {} : { canResolve: item.thread.canResolve }),
           path: item.thread.path,
           line: item.thread.line,
@@ -1078,7 +1086,7 @@ export function buildFixFindingsHandoff(input: {
         !attached.has(comment.id),
     )
     .flatMap((comment) => {
-      const body = visibleBody(comment.body);
+      const body = visibleBody(reviewRemark(comment.body));
       if (body === null) return [];
       const where = comment.path === null ? "" : ` on \`${boundedField(comment.path)}\``;
       return [`${boundedField(comment.author?.login ?? "ghost")}${where}: ${boundedField(body)}`];

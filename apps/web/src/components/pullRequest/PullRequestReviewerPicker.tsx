@@ -59,9 +59,11 @@ const TRUNCATED_LABELS: Record<
 export function PullRequestReviewerPicker({
   environmentId,
   reference,
+  provider,
   allowed,
   searchable,
 }: {
+  provider?: string | undefined;
   environmentId: EnvironmentId;
   reference: PullRequestRef;
   allowed: boolean;
@@ -194,7 +196,7 @@ export function PullRequestReviewerPicker({
     >
       {(candidate) => (
         <>
-          <PullRequestActorLabel actor={candidate} className="flex-1" />
+          <PullRequestActorLabel actor={candidate} provider={provider} className="flex-1" />
           {candidate.kind === "team" ? (
             <span className="shrink-0 text-muted-foreground">team</span>
           ) : null}

@@ -90,6 +90,7 @@ export interface PullRequestProviderFailure {
 
 export interface ProviderChangeRequest {
   readonly gerrit?: PullRequestGerritDetail;
+  readonly gerritSubmittable?: boolean;
   readonly stack?: PullRequestStackMembership;
   readonly number: number;
   readonly title: string;
@@ -118,6 +119,7 @@ export interface ProviderChangeRequest {
 
 export interface ProviderChangeRequestSummary {
   readonly gerrit?: PullRequestGerritDetail;
+  readonly gerritSubmittable?: boolean;
   readonly number: number;
   readonly title: string;
   readonly url: string;
@@ -705,6 +707,7 @@ export interface PullRequestProviderApi {
       readonly number: number;
       readonly threadId: string;
       readonly body: string;
+      readonly resolve?: boolean | undefined;
     },
   ) => Effect.Effect<void, PullRequestProviderError>;
 

@@ -69,6 +69,95 @@ const detail: PullRequestDetailView = {
   },
 };
 
+it.each([false, true])(
+  "labels a discussion and initially collapses it only when resolved=%s",
+  async (resolved) => {
+    const value: PullRequestDetailView = {
+      ...detail,
+      commits: [],
+      reviewThreads: [
+        {
+          id: "status-thread",
+          path: "/PATCHSET_LEVEL",
+          line: null,
+          side: "right",
+          isResolved: resolved,
+          isOutdated: false,
+          comments: [
+            {
+              id: "status-root",
+              author: detail.author,
+              body: "Discussion status body",
+              createdAt: "2026-10-01T00:00:00Z",
+              url: null,
+            },
+          ],
+        },
+      ],
+    };
+    await using screen = await render(
+      <div style={{ height: 600 }}>
+        <PullRequestTimelineTab
+          scrollerRef={() => {}}
+          environmentId={EnvironmentId.make("environment")}
+          reference={value}
+          detail={value}
+          order="oldest"
+          onOpenCommit={() => {}}
+          onRefresh={() => {}}
+        />
+      </div>,
+    );
+    await expect
+      .element(screen.getByText(resolved ? "Resolved" : "Unresolved", { exact: true }))
+      .toBeVisible();
+    if (resolved) {
+      await expect
+        .element(screen.getByText("Discussion status body", { exact: true }))
+        .not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /Resolved/ }));
+    }
+    await expect.element(screen.getByText("Discussion status body", { exact: true })).toBeVisible();
+  },
+);
+
+it("shows Gerrit votes without expanding comment groups", async () => {
+  const value: PullRequestDetailView = {
+    ...detail,
+    provider: SourceControlProviderKind.make("gerrit"),
+    commits: [],
+    comments: [1, -1, 2, -2].map((vote, index) => ({
+      id: `vote-${index}`,
+      kind: "review" as const,
+      author: { login: `reviewer-${index}`, name: `Reviewer ${index}`, avatarUrl: null },
+      body: `Vote ${index}`,
+      createdAt: `2026-10-01T00:0${index}:00Z`,
+      url: null,
+      path: null,
+      reviewState: index === 2 ? "DISMISSED" : index === 3 ? "CHANGES_REQUESTED" : "COMMENTED",
+      vote: { label: "Code-Review", value: vote },
+    })),
+  };
+  await using screen = await render(
+    <div style={{ height: 1000 }}>
+      <PullRequestTimelineTab
+        scrollerRef={() => {}}
+        environmentId={EnvironmentId.make("environment")}
+        reference={value}
+        detail={value}
+        order="oldest"
+        onOpenCommit={() => {}}
+        onRefresh={() => {}}
+      />
+    </div>,
+  );
+  for (const score of ["+1", "−1", "+2", "−2"]) {
+    await expect.element(screen.getByText(score, { exact: true })).toBeVisible();
+  }
+  await expect.element(screen.getByText("Reviewer 0", { exact: true })).toBeVisible();
+  await expect.element(screen.getByText("reviewer-0", { exact: true })).not.toBeInTheDocument();
+});
+
 it("mounts only the timeline rows near the viewport of a huge pull request", async () => {
   await using screen = await render(
     <div style={{ height: 600 }}>

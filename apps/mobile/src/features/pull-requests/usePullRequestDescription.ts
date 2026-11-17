@@ -2,6 +2,7 @@ import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import {
   descriptionDraftInForce,
+  gerritCommitMessageParts,
   settleDescriptionSave,
   startDescriptionSave,
   type DescriptionDraft,
@@ -55,11 +56,11 @@ export function usePullRequestDescription(
     if (savesRunning.current === 0) refreshDetail();
   };
   return {
-    body,
+    body: pr?.gerrit ? gerritCommitMessageParts(body).body : body,
     /** The edit screen starts from the host's copy, so it waits for a reading with the ticks. */
     pending: kept !== null,
     toggleTask:
-      canEdit && pr !== null
+      canEdit && pr !== null && !pr.gerrit
         ? ({ markerOffset, checked }: { markerOffset: number; checked: boolean }) => {
             const next = setMarkdownTaskChecked(body, markerOffset, checked);
             if (next === body) return false;

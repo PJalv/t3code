@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import { expect } from "vite-plus/test";
 import { GerritHttp } from "./GerritHttp.ts";
 import { gerritDetailPermissions, make } from "./GerritPullRequestProvider.ts";
+import { gerritAccountActor } from "./gerritAccount.ts";
 
 const decodeInstallation = Schema.decodeEffect(GerritInstallationId);
 const decodeNumber = Schema.decodeEffect(GerritChangeNumber);
@@ -85,6 +86,7 @@ const setup = Effect.fn("GerritProvider.test.setup")(function* () {
         });
       return Effect.void;
     },
+    readSelfAccount: () => Effect.succeed({ _account_id: 1000123, email: "jane@corp.com" }),
     getChangeByNumber: () => Effect.succeed(change),
     searchChanges: (input: { offset: number; status: "open" | "merged" | "abandoned" }) => {
       calls.push(input.offset);
@@ -107,6 +109,8 @@ const setup = Effect.fn("GerritProvider.test.setup")(function* () {
             owner: {},
             updated: person.date,
             workInProgress: true,
+            submittable: true,
+            reviewStatus: "approved" as const,
             ...(input.status === "open" ? { currentPatchSet: 3 } : {}),
           },
         ],
@@ -127,7 +131,18 @@ const setup = Effect.fn("GerritProvider.test.setup")(function* () {
       readReview: () =>
         Effect.succeed({
           topic: null,
-          labels: {},
+          checks: {
+            kind: "available" as const,
+            values: [
+              {
+                checker_uuid: "ci",
+                state: "FAILED" as const,
+                created: person.date,
+                updated: person.date,
+              },
+            ],
+          },
+          labels: { "Code-Review": { values: { "+2": "Approved" } } },
           reviewers: { REVIEWER: [{ _account_id: 7, username: "bob", name: "Bob" }] },
           requirements: [{ name: "Future", status: "NEW_STATUS" }],
           submittable: null,
@@ -163,6 +178,18 @@ const setup = Effect.fn("GerritProvider.test.setup")(function* () {
               updated: "2026-01-02T00:00:00Z",
               inReplyTo: "root",
               unresolved: true,
+              visibility: "published",
+            },
+            {
+              id: "change-root",
+              patchSet: 2,
+              revision: null,
+              anchor: { path: "/PATCHSET_LEVEL", side: "REVISION" },
+              message: "change comment",
+              author: null,
+              updated: "2026-01-01T00:00:00Z",
+              inReplyTo: null,
+              unresolved: false,
               visibility: "published",
             },
           ],
@@ -214,11 +241,43 @@ const input = {
   repository: "nested/project",
   number: 1,
 };
+it.effect("maps Gerrit account display names and avatars without losing the login", () =>
+  Effect.sync(() => {
+    expect(
+      gerritAccountActor({
+        username: "alvin.la",
+        name: "Alvin La",
+        avatars: [{ url: "https://example.test/avatar" }],
+      }),
+    ).toEqual({ login: "alvin.la", name: "Alvin La", avatarUrl: "https://example.test/avatar" });
+    expect(gerritAccountActor({ email: "a@example.test" })).toMatchObject({
+      login: "a@example.test",
+      name: "a@example.test",
+    });
+  }),
+);
+
+it.effect("uses the same login for an email-only viewer and author", () =>
+  Effect.gen(function* () {
+    const { api, change } = yield* setup();
+    change.owner = { username: " ", email: " jane@corp.com " } as typeof change.owner;
+    const viewer = yield* api.getViewer(input);
+    const detail = yield* api.getChangeRequest(input);
+    expect(viewer).toBe("jane@corp.com");
+    expect(detail.author?.login).toBe(viewer);
+    expect(gerritAccountActor({ username: " ", email: " ", _account_id: 42 })?.login).toBe("42");
+  }),
+);
+
 it.effect("maps Gerrit detail permissions and retains unknown requirements", () =>
   Effect.gen(function* () {
     const { api } = yield* setup();
     const result = yield* api.getChangeRequest(input);
     expect(result.gerrit?.submitRequirements).toEqual([{ name: "Future", status: "unknown" }]);
+    expect(result.gerrit?.labels[0]?.valueDescriptions).toEqual({ "+2": "Approved" });
+    expect(result.checks).toEqual([
+      { name: "ci", status: "failure", description: null, url: null },
+    ]);
     expect(result.gerrit?.permissions?.submit).toBe(true);
     expect(result.gerrit?.permissions?.setTopic).toBe(false);
   }),
@@ -328,6 +387,7 @@ it.effect("maps statuses and draft while forwarding the offset cursor", () =>
       });
       expect(page.items[0]?.state).toBe(expected);
       expect(page.items[0]?.isDraft).toBe(true);
+      expect(page.items[0]).toMatchObject({ gerritSubmittable: true, reviewDecision: "approved" });
       expect(page.continues).toBe(true);
       expect(page.cursorAdvance).toBe(1);
     }
@@ -436,11 +496,54 @@ it.effect("maps writes and propagates rejection", () =>
     );
   }),
 );
+it.effect(
+  "replies on the original change-level patch set without changing resolution or votes",
+  () =>
+    Effect.gen(function* () {
+      const { api, writes } = yield* setup();
+      yield* api.replyToThread({ ...input, threadId: "gerrit:change-root", body: "answer" });
+      expect(writes).toHaveLength(1);
+      expect(writes).toMatchObject([
+        {
+          path: "changes/1/revisions/2/review",
+          body: {
+            labels: {},
+            drafts: "KEEP",
+            comments: {
+              "/PATCHSET_LEVEL": [
+                {
+                  side: "REVISION",
+                  in_reply_to: "change-root",
+                  message: "answer",
+                  unresolved: false,
+                },
+              ],
+            },
+          },
+        },
+      ]);
+    }),
+);
+it.effect("resolves a thread in the same review post as its reply", () =>
+  Effect.gen(function* () {
+    const { api, writes } = yield* setup();
+    yield* api.replyToThread({ ...input, threadId: "gerrit:root", body: "Fixed", resolve: true });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      path: `changes/1/revisions/${"a".repeat(40)}/review`,
+      body: {
+        comments: { "a.txt": [{ in_reply_to: "last", message: "Fixed", unresolved: false }] },
+      },
+    });
+  }),
+);
 it.effect("wires diff and activity", () =>
   Effect.gen(function* () {
     const { api } = yield* setup();
     expect((yield* api.getDiff(input)).patch).toContain("-old\n+new");
-    expect((yield* api.getChangeRequestActivity(input)).reviewThreads[0]?.id).toBe("gerrit:root");
+    expect(
+      (yield* api.getChangeRequestActivity(input)).reviewThreads.map((thread) => thread.id),
+    ).toContain("gerrit:root");
   }),
 );
 it.effect("pages all statuses with one combined Gerrit query", () => {

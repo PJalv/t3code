@@ -50,6 +50,7 @@ export const PullRequestGerritDetail = Schema.Struct({
       name: TrimmedNonEmptyString,
       votes: Schema.Array(Schema.Struct({ account: GerritAccount, value: Schema.Int })),
       permittedValues: Schema.Array(Schema.Int),
+      valueDescriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
       required: Schema.optional(Schema.Boolean),
     }),
   ),
@@ -240,6 +241,7 @@ export const PullRequestComment = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   path: Schema.NullOr(Schema.String),
   reviewState: Schema.NullOr(Schema.String),
+  vote: Schema.optional(Schema.Struct({ label: Schema.String, value: Schema.Number })),
   gerrit: Schema.optional(PullRequestGerritAnchor),
   isDraft: Schema.optional(Schema.Boolean),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
@@ -345,6 +347,7 @@ export const PullRequestReviewCapabilities = Schema.Struct({
   rangeComment: Schema.optional(Schema.Boolean),
   reply: Schema.Boolean,
   resolve: Schema.Boolean,
+  resolveWithReply: Schema.optional(Schema.Boolean),
   verdicts: ForwardCompatibleArray(PullRequestReviewVerdict),
 });
 export type PullRequestReviewCapabilities = typeof PullRequestReviewCapabilities.Type;
@@ -446,6 +449,7 @@ export type PullRequestVisibility = typeof PullRequestVisibility.Type;
 
 export const PullRequestListEntry = Schema.Struct({
   gerrit: Schema.optional(PullRequestGerritDetail),
+  gerritSubmittable: Schema.optional(Schema.Boolean),
   stack: Schema.optional(PullRequestStackMembership),
   provider: SourceControlProviderKind,
   host: TrimmedNonEmptyString,
@@ -587,6 +591,8 @@ export type PullRequestLinkedThreadsResult = typeof PullRequestLinkedThreadsResu
 
 export const PullRequestPreview = Schema.Struct({
   projectId: ProjectId,
+  // Optional because cached previews from before it existed still decode.
+  provider: Schema.optional(SourceControlProviderKind),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -602,6 +608,7 @@ export type PullRequestPreview = typeof PullRequestPreview.Type;
 
 export const PullRequestSummary = Schema.Struct({
   gerrit: Schema.optional(PullRequestGerritDetail),
+  gerritSubmittable: Schema.optional(Schema.Boolean),
   provider: SourceControlProviderKind,
   projectId: ProjectId,
   repository: TrimmedNonEmptyString,
@@ -1028,6 +1035,7 @@ export const PullRequestThreadReplyInput = Schema.Struct({
   ...PullRequestRef.fields,
   threadId: TrimmedNonEmptyString,
   body: CommentBody,
+  resolve: Schema.optional(Schema.Boolean),
 });
 export type PullRequestThreadReplyInput = typeof PullRequestThreadReplyInput.Type;
 

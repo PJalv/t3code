@@ -25,6 +25,13 @@ export {
 
 export const sourceControlClients = builtInSourceControlDefinitions;
 
+export function actorDisplayName(
+  actor: { readonly login: string; readonly name?: string | null } | null | undefined,
+  provider: string | null | undefined,
+): string | undefined {
+  return actor ? (provider === "gerrit" ? actor.name || actor.login : actor.login) : undefined;
+}
+
 /** The saved per-hostname accounts and tokens of a host whose definition has `credentials`. */
 export function readHostCredentialSettings(
   settings: Pick<ServerSettings, "sourceControlHosts">,
