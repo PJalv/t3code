@@ -80,6 +80,20 @@ export const GerritDirectToolkit = Toolkit.make(
     .annotate(Tool.Destructive, false)
     .annotate(Tool.Strict, true)
     .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients),
+  Tool.make("fetch_gerrit_branch", {
+    description:
+      "Fetch a Gerrit branch into this thread's checkout as <remote>/<branch> using the saved Gerrit login, for example to rebase onto the latest master. Use it instead of git fetch, which has no Gerrit credentials here.",
+    parameters: Schema.Struct({
+      branch: Schema.String.annotate({ description: "Branch name, such as master." }),
+    }),
+    success: Schema.Unknown,
+    failure: OrchestratorMcpFailure,
+    dependencies,
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.Strict, true)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients),
   Tool.make("amend_gerrit_signed", {
     description:
       "Amend HEAD with already staged files and sign it using the saved GPG passphrase. Operates in this thread's bound checkout; never disables signing.",
