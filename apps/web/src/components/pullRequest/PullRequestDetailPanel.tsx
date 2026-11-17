@@ -163,7 +163,6 @@ import {
   PullRequestMetaLine,
   PullRequestReviewOutcomeIcon,
   pullRequestChecksState,
-  pullRequestChecksStatePresentation,
   pullRequestReviewOutcomeToneClassName,
   resolvePullRequestState,
   summarizePullRequestChecks,
@@ -1506,9 +1505,7 @@ export function PullRequestDetailPanel({
   const showsApproveWorkflows =
     workflowApprovalsRequired > 0 && !checksStale && can("approve-workflows");
   const checksSummary = checksStale
-    ? checksState === null
-      ? gt("No checks reported")
-      : pullRequestChecksStatePresentation(checksState, resolve).label
+    ? gt("Check details are out of date")
     : detail
       ? summarizePullRequestChecks(detail.checks, resolve)
       : null;
@@ -1616,7 +1613,7 @@ export function PullRequestDetailPanel({
                   <T>Retry stack lookup</T>
                 </Button>
               ) : null}
-              {nativeStack ? (
+              {nativeStack && nativeStack.layers.length > 1 ? (
                 <PullRequestStackMenu
                   hostLabel={hostClient.label}
                   terminology={terminology}
@@ -1747,6 +1744,7 @@ export function PullRequestDetailPanel({
                   <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
                     <PullRequestActorLabel
                       actor={detail.author}
+                      provider={detail.provider}
                       profileUrl={authorProfileUrl}
                       variant="avatar"
                       className="shrink-0"
@@ -1758,6 +1756,7 @@ export function PullRequestDetailPanel({
                   <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
                   <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
                     <PullRequestBaseBranch
+                      terminology={terminology.singular}
                       baseBranch={detail.baseBranch}
                       freshness={freshness}
                       stacked={isStackedPullRequest}
@@ -1843,7 +1842,11 @@ export function PullRequestDetailPanel({
                   />
                 }
                 author={
-                  <PullRequestActorLabel actor={detail.author} profileUrl={authorProfileUrl} />
+                  <PullRequestActorLabel
+                    actor={detail.author}
+                    provider={detail.provider}
+                    profileUrl={authorProfileUrl}
+                  />
                 }
                 updated={
                   <span>
@@ -1881,6 +1884,7 @@ export function PullRequestDetailPanel({
                 }
                 base={
                   <PullRequestBaseBranch
+                    terminology={terminology.singular}
                     baseBranch={detail.baseBranch}
                     freshness={freshness}
                     stacked={isStackedPullRequest}
@@ -1954,6 +1958,7 @@ export function PullRequestDetailPanel({
         ) : null}
         {detail ? (
           <PullRequestDetailTabBar
+            label={`${capitalizeTerm(terminology.singular)} tabs`}
             tabs={visibleTabs}
             value={tab}
             onValueChange={selectTab}
@@ -2026,14 +2031,18 @@ export function PullRequestDetailPanel({
                     className="inline-flex items-center gap-1"
                     aria-label={
                       activityError
-                        ? gt("Commits unavailable")
-                        : gt(
-                            "{count, plural, one {{formatted} commit} other {{formatted} commits}}",
-                            {
-                              count: detail.commits.length,
-                              formatted: detail.commits.length.toLocaleString(),
-                            },
-                          )
+                        ? detail.provider === "gerrit"
+                          ? gt("Patch sets unavailable")
+                          : gt("Commits unavailable")
+                        : `${detail.commits.length.toLocaleString()} ${
+                            detail.provider === "gerrit"
+                              ? detail.commits.length === 1
+                                ? "patch set"
+                                : "patch sets"
+                              : detail.commits.length === 1
+                                ? "commit"
+                                : "commits"
+                          }`
                     }
                   >
                     <GitCommitHorizontalIcon aria-hidden className="size-3" />

@@ -819,6 +819,20 @@ describe("pull request quick actions", () => {
       "close",
       "ready",
     ]);
+    const gerritActions = new Set(["close", "merge"] as const);
+    for (const submittable of [false, null, true] as const) {
+      expect(
+        pullRequestQuickActions(
+          {
+            state: "open",
+            isDraft: false,
+            provider: SourceControlProviderKind.make("gerrit"),
+            ...(submittable === null ? {} : { gerritSubmittable: submittable }),
+          },
+          gerritActions,
+        ),
+      ).toEqual(submittable ? ["close", "merge"] : ["close"]);
+    }
     const gitlab = actionsOf({
       host: "gitlab.com",
       provider: SourceControlProviderKind.make("gitlab"),

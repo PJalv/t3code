@@ -164,6 +164,7 @@ const snapshotFingerprint = ({ link }: WatchTarget) => {
         snapshot.mergeability,
         snapshot.rebaseRequired,
         snapshot.reviewDecision,
+        snapshot.gerritSubmittable,
         snapshot.isDraft,
       ].join(" ");
 };
@@ -392,15 +393,28 @@ export const make = Effect.gen(function* () {
     ) {
       // Comment cursors cannot account for missing threads. Only finish a truncated read
       // when the host confirms that every thread was listed.
-      if (activity.commentsTruncated && activity.reviewThreadsTruncated !== false) return null;
+      if (
+        activity.reviewThreadsTruncated === true ||
+        (activity.commentsTruncated && activity.reviewThreadsTruncated !== false)
+      )
+        return null;
 
-      const visibleThrough = activity.comments.reduce(
+      const threads = [...activity.reviewThreads, ...(activity.overviewThreads ?? [])];
+      const visible = [...activity.comments, ...threads.flatMap((thread) => thread.comments)];
+      const visibleThrough = visible.reduce(
         (latest, comment) => Math.max(latest, Date.parse(comment.editedAt ?? comment.createdAt)),
         0,
       );
-      const paginated = activity.reviewThreads.filter(
-        (thread) => thread.nextCommentsCursor != null,
-      );
+      const paginated = threads.filter((thread) => thread.nextCommentsCursor != null);
+      if (
+        threads.some(
+          (thread) =>
+            thread.nextCommentsCursor == null &&
+            thread.commentCount !== undefined &&
+            thread.comments.length < thread.commentCount,
+        )
+      )
+        return null;
       const cached = threadTails.get(key);
       // All tails share one watermark, so newer visible remarks or a changed thread must
       // refresh the entire group before any remarks can advance it.
@@ -416,7 +430,24 @@ export const make = Effect.gen(function* () {
         string,
         { count: number; comments: ReadonlyArray<PullRequestComment> }
       >();
-      const remarks = [...activity.comments];
+      const remarks = new Map<string, PullRequestComment>();
+      const addRemark = (comment: PullRequestComment) => {
+        if (comment.isDraft) return;
+        const previous = remarks.get(comment.id);
+        if (
+          !previous ||
+          Date.parse(comment.editedAt ?? comment.createdAt) >=
+            Date.parse(previous.editedAt ?? previous.createdAt)
+        )
+          remarks.set(comment.id, comment);
+      };
+      for (const comment of activity.comments) addRemark(comment);
+      for (const thread of threads) {
+        if (thread.isDraft) continue;
+        for (const comment of thread.comments) {
+          addRemark({ ...comment, kind: "review-comment", path: thread.path, reviewState: null });
+        }
+      }
       for (const thread of paginated) {
         let cursor = thread.nextCommentsCursor ?? null;
         const count = thread.commentCount ?? 0;
@@ -444,18 +475,29 @@ export const make = Effect.gen(function* () {
             hidden += page.hiddenCount ?? 0;
             cursor = page.nextCursor;
           }
-          if (thread.comments.length + comments.size + hidden < count) return null;
+          if (
+            new Set([...thread.comments.map((comment) => comment.id), ...comments.keys()]).size +
+              hidden <
+            count
+          )
+            return null;
           tail = { count, comments: [...comments.values()] };
         }
         tails.set(thread.id, tail);
-        remarks.push(...tail.comments);
+        if (!thread.isDraft) {
+          for (const comment of tail.comments) {
+            addRemark(comment);
+          }
+        }
       }
       threadTails.set(key, {
         fetchedAt: reuse ? cached.fetchedAt : now,
         visibleThrough,
         tails,
       });
-      return remarks.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      return [...remarks.values()].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      );
     },
     Effect.catch((error) =>
       Effect.logWarning("pull request watch comment pagination failed", { error }).pipe(

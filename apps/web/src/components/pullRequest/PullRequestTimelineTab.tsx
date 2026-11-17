@@ -4,7 +4,11 @@ import {
   resolvePullRequestReviewAnchor,
 } from "@t3tools/shared/pullRequestAnchor";
 import { holdLinkedNodeInView } from "./holdLinkedNodeInView";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import {
+  actorDisplayName,
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { GERRIT_CHANGE_LEVEL_PATH } from "@t3tools/contracts";
 import type {
@@ -17,7 +21,6 @@ import type {
 } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
-  CircleCheckIcon,
   ExternalLinkIcon,
   FileCode2Icon,
   GitCommitHorizontalIcon,
@@ -27,7 +30,7 @@ import {
 import { msg, T, useGT, useMessages, Var } from "gt-react";
 
 import { m } from "~/i18n/messages";
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -35,7 +38,9 @@ import { pullRequestEnvironment } from "~/state/pullRequests";
 import { RelativeTime } from "~/components/RelativeTime";
 
 import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
 import { PullRequestEditButton } from "./PullRequestEditButton";
+import { PullRequestDiscussionStatus } from "./PullRequestDiscussionStatus";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -59,6 +64,7 @@ import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { canReactPullRequestComment } from "@t3tools/client-runtime/pull-request-reactions";
 import { PullRequestResolveThreadButton } from "./PullRequestResolveThreadButton";
+import { PullRequestThreadReply } from "./PullRequestThreadReply";
 import {
   PullRequestActorAvatar,
   PullRequestDiffStat,
@@ -118,8 +124,15 @@ function TimelineBody({
   );
 }
 
+const TimelineProvider = createContext<string | undefined>(undefined);
+
 function ActorName({ actor }: { actor: PullRequestActor | null }) {
-  return <span className="font-semibold text-foreground">{actor?.login ?? "ghost"}</span>;
+  const provider = useContext(TimelineProvider);
+  return (
+    <span className="font-semibold text-foreground">
+      {actorDisplayName(actor, provider) ?? "ghost"}
+    </span>
+  );
 }
 
 function TimelineMarker({
@@ -518,102 +531,110 @@ function ReviewThreadEvent({
         fallback={<MessageSquareIcon className="size-3.5" />}
         muted={!expanded}
       />
-      <button
-        type="button"
-        className="flex w-full min-w-0 items-center gap-2 px-2 py-2 text-left text-2xs text-muted-foreground hover:text-foreground"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+      <div
+        className={cn(
+          "rounded-lg border-l-2 pl-3",
+          thread.isResolved ? "border-border/60" : "border-warning/70",
+        )}
       >
-        {thread.path === null ? (
-          <span className="min-w-0 truncate">
-            <T context="review thread without a file">Overview</T>
-          </span>
-        ) : (
-          <>
-            {changeLevel ? <MessageSquareIcon aria-hidden className="size-3 shrink-0" /> : <FileCode2Icon aria-hidden className="size-3 shrink-0" />}
-            <span className={cn("min-w-0 truncate", !changeLevel && "font-mono")}>
-              {changeLevel ? gt("Change-level discussion") : thread.line === null ? thread.path : `${thread.path}:${thread.line}`}
-            </span>
-          </>
-        )}
-        {thread.isResolved ? (
-          <span className="inline-flex shrink-0 items-center gap-1 font-medium text-success-foreground">
-            <CircleCheckIcon aria-hidden className="size-3" />
-            <T context="review thread state">Resolved</T>
-          </span>
-        ) : null}
-        {dismissed ? (
-          <span className="shrink-0 font-medium">
-            <T>Review dismissed</T>
-          </span>
-        ) : null}
-        {thread.isOutdated ? (
-          <span className="shrink-0 font-medium">
-            <T context="review thread state">Outdated</T>
-          </span>
-        ) : null}
-        {expanded ? null : (
-          <span className="shrink-0">
-            · {event.actor?.login ?? "ghost"}
-            {replyCount > 0 ? (
+        <div className="flex min-w-0 items-center gap-1">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-2xs text-muted-foreground hover:text-foreground"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {thread.path === null ? (
+              <span className="min-w-0 truncate"><T context="review thread without a file">Overview</T></span>
+            ) : (
               <>
-                {" "}
-                ·{" "}
-                {gt("{count, plural, one {{formatted} reply} other {{formatted} replies}}", {
-                  count: replyCount,
-                  formatted: replyCount.toLocaleString(),
-                })}
+                {changeLevel ? (
+                  <MessageSquareIcon aria-hidden className="size-3 shrink-0" />
+                ) : (
+                  <FileCode2Icon aria-hidden className="size-3 shrink-0" />
+                )}
+                <span className={cn("min-w-0 truncate", !changeLevel && "font-mono")}>
+                  {changeLevel
+                    ? gt("Change-level discussion")
+                    : thread.line === null
+                      ? thread.path
+                      : `${thread.path}:${thread.line}`}
+                </span>
               </>
-            ) : null}
-          </span>
-        )}
-        <ChevronDownIcon
-          aria-hidden
-          className={cn("ml-auto size-3.5 shrink-0 transition-transform", expanded && "rotate-180")}
-        />
-      </button>
-      {expanded ? (
-        <>
-          <ConversationCard
-            event={event}
-            editable={editable.get(event.id) ?? null}
-            cwd={cwd}
-            onOpen={onOpen}
-            reactions={reactions}
-            showPath={false}
-            resolveButton={
-              <PullRequestResolveThreadButton
-                environmentId={reactions.environmentId}
-                reference={reactions.reference}
-                detail={detail}
-                thread={thread}
-                onRefresh={reactions.onRefresh}
-              />
-            }
-          />
-          {thread.replies.length > 0 ? (
-            <div className="ml-2 space-y-1 border-l border-border/60 pl-3">
-              {thread.replies.map((reply) => (
-                <ConversationCard
-                  key={reply.id}
-                  event={reply}
-                  editable={editable.get(reply.id) ?? null}
-                  cwd={cwd}
-                  onOpen={onOpen}
-                  reactions={reactions}
-                  showPath={false}
-                  reply
-                />
-              ))}
-            </div>
+            )}
+            <PullRequestDiscussionStatus resolved={thread.isResolved} />
+            {dismissed ? <span className="shrink-0 font-medium"><T>Review dismissed</T></span> : null}
+            {thread.isOutdated ? <span className="shrink-0 font-medium"><T context="review thread state">Outdated</T></span> : null}
+            {expanded ? null : (
+              <span className="shrink-0">
+                · {actorDisplayName(event.actor, detail.provider) ?? "ghost"}
+                {replyCount > 0 ? (
+                  <>
+                    {" "}
+                    · {gt("{count, plural, one {{formatted} reply} other {{formatted} replies}}", { count: replyCount, formatted: replyCount.toLocaleString() })}
+                  </>
+                ) : null}
+              </span>
+            )}
+            <ChevronDownIcon
+              aria-hidden
+              className={cn(
+                "ml-auto size-3.5 shrink-0 transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
+          </button>
+          {expanded ? (
+            <PullRequestResolveThreadButton
+              environmentId={reactions.environmentId}
+              reference={reactions.reference}
+              detail={detail}
+              thread={thread}
+              onRefresh={reactions.onRefresh}
+            />
           ) : null}
-        </>
-      ) : null}
-      {thread.hasMoreReplies ? (
-        <div className="px-2">
-          <PullRequestMoreReplies {...thread} />
         </div>
-      ) : null}
+        {expanded ? (
+          <>
+            <ConversationCard
+              event={event}
+              editable={editable.get(event.id) ?? null}
+              cwd={cwd}
+              onOpen={onOpen}
+              reactions={reactions}
+              showPath={false}
+            />
+            {thread.replies.length > 0 ? (
+              <div className="ml-2 space-y-1 border-l border-border/60 pl-3">
+                {thread.replies.map((reply) => (
+                  <ConversationCard
+                    key={reply.id}
+                    event={reply}
+                    editable={editable.get(reply.id) ?? null}
+                    cwd={cwd}
+                    onOpen={onOpen}
+                    reactions={reactions}
+                    showPath={false}
+                    reply
+                  />
+                ))}
+              </div>
+            ) : null}
+            <PullRequestThreadReply
+              environmentId={reactions.environmentId}
+              reference={reactions.reference}
+              detail={detail}
+              thread={thread}
+              onRefresh={reactions.onRefresh}
+            />
+          </>
+        ) : null}
+        {thread.hasMoreReplies ? (
+          <div className="px-2">
+            <PullRequestMoreReplies {...thread} />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -621,16 +642,18 @@ function ReviewThreadEvent({
 function CommitEvent({
   event,
   onOpen,
+  isGerrit,
 }: {
   event: PullRequestTimelineEvent;
   onOpen: (oid: string) => void;
+  isGerrit: boolean;
 }) {
   const gt = useGT();
   return (
     <button
       type="button"
       className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left outline-none [contain-intrinsic-block-size:48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      aria-label={gt("View commit {sha}", { sha: event.id })}
+      aria-label={isGerrit ? gt("View patch set {sha}", { sha: event.id }) : gt("View commit {sha}", { sha: event.id })}
       onClick={() => onOpen(event.id)}
     >
       <ActorTimelineMarker
@@ -728,13 +751,15 @@ function ReviewVerdictEvent({
   event,
   outcome,
   stale,
+  latestRevisionLabel,
   cwd,
   onOpen,
   reactions,
 }: {
   event: PullRequestTimelineEvent;
-  outcome: PullRequestReviewOutcome;
+  outcome: PullRequestReviewOutcome | null;
   stale: boolean;
+  latestRevisionLabel: string;
   cwd: string;
   onOpen: (url: string) => void;
   reactions: ReactionSurface;
@@ -747,12 +772,25 @@ function ReviewVerdictEvent({
       <ActorTimelineMarker
         actors={event.actor ? [event.actor] : []}
         className="top-6"
-        fallback={<PullRequestReviewOutcomeIcon outcome={outcome} />}
+        fallback={
+          outcome ? (
+            <PullRequestReviewOutcomeIcon outcome={outcome} />
+          ) : (
+            <MessageSquareIcon className="size-4" />
+          )
+        }
       />
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-1.5">
         <div className="min-w-0 flex-1">
           <h2 className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
             <ActorName actor={event.actor} />
+            {event.comment?.vote ? (
+              <Badge variant={event.comment.vote.value > 0 ? "success" : "error"}>
+                {event.comment.vote.value > 0 ? "+" : "−"}
+                {Math.abs(event.comment.vote.value)}
+              </Badge>
+            ) : null}
+            {outcome ? (
             <Tooltip disabled={!stale}>
               <TooltipTrigger
                 render={
@@ -777,6 +815,7 @@ function ReviewVerdictEvent({
               </TooltipTrigger>
               <TooltipPopup>{pullRequestReviewOutcomeStaleLabel(outcome, resolve)}</TooltipPopup>
             </Tooltip>
+            ) : null}
           </h2>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <PullRequestMetaLine className="flex-wrap text-2xs text-muted-foreground">
@@ -868,6 +907,7 @@ export function PullRequestTimelineTab({
   const matches = (event: PullRequestTimelineEvent) =>
     anchor !== null && pullRequestTimelineEventMatches(event, anchor);
 
+  const terminology = sourceControlClients.get(detail.provider).changeRequest;
   const term = changeRequestTermKind(sourceControlClients.get(detail.provider).changeRequest);
   const newestCommitAt = newestPullRequestCommitAt(detail.commits);
   const reactions: ReactionSurface = {
@@ -954,14 +994,18 @@ export function PullRequestTimelineTab({
         />
       );
     }
-    if (event.kind === "commit") return <CommitEvent event={event} onOpen={onOpenCommit} />;
+    if (event.kind === "commit")
+      return (
+        <CommitEvent event={event} onOpen={onOpenCommit} isGerrit={detail.provider === "gerrit"} />
+      );
     const outcome = pullRequestReviewOutcome(event.reviewState);
-    if (outcome !== null) {
+    if (outcome !== null || event.comment?.vote !== undefined) {
       return (
         <ReviewVerdictEvent
           event={event}
           outcome={outcome}
           stale={isPullRequestVerdictStale(event.at, newestCommitAt)}
+          latestRevisionLabel={terminology.latestRevisionLabel ?? "commits"}
           cwd={detail.workspaceRoot}
           onOpen={openOnHost}
           reactions={reactions}
@@ -992,6 +1036,7 @@ export function PullRequestTimelineTab({
   // Virtualized: a large pull request has thousands of events, and mounting every one stalls
   // the page. The connector line is drawn by the content container, behind the rows.
   return (
+    <TimelineProvider value={detail.provider}>
     <LegendList<PullRequestTimelineRow>
       ref={(list: LegendListRef | null) => {
         listRef.current = list;
@@ -1017,5 +1062,6 @@ export function PullRequestTimelineTab({
       }
       ListFooterComponent={<div className="h-5" />}
     />
+    </TimelineProvider>
   );
 }

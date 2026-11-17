@@ -1,3 +1,4 @@
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
 import type { PullRequestReviewPosition, PullRequestReviewThread } from "@t3tools/contracts";
 import { msg } from "gt-react-native";
 
@@ -46,6 +47,7 @@ export function annotatePullRequestDiff(
   drafts: readonly PendingReviewComment[],
   headSha: string | undefined,
   resolve: MessageResolver = m,
+  provider?: string,
 ): NativeReviewDiffData {
   if (threads.length === 0 && drafts.length === 0) return data;
   const anchors = new Map<string, NativeReviewDiffRow[]>();
@@ -92,7 +94,7 @@ export function annotatePullRequestDiff(
     attach(
       anchor,
       `discussion:${thread.id}`,
-      `${first?.author?.login ?? resolve(msg("Discussion"))}${
+      `${actorDisplayName(first?.author, provider) ?? resolve(msg("Discussion"))}${
         thread.isResolved
           ? ` · ${resolve(msg("Resolved", { $context: "review thread state" }))}`
           : ""

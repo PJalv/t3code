@@ -162,6 +162,8 @@ function LinkRowImpl({
           number: link.number,
           state: snapshot.state,
           isDraft: snapshot.isDraft,
+          provider: linkHost.kind,
+          gerritSubmittable: snapshot.gerritSubmittable,
           ...(link.stack === null ? {} : { stack: link.stack }),
         }
       : null;
@@ -311,6 +313,7 @@ function LinkRowImpl({
               {snapshot?.author ? (
                 <PullRequestRowAuthor
                   actor={snapshot.author}
+                  provider={linkHost.kind}
                   className="shrink-0"
                   labelClassName="max-w-28"
                 />

@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { EnvironmentId, ProjectId, type PullRequestDetailView } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   update: vi.fn(),
@@ -40,6 +40,10 @@ vi.mock(import("~/state/pullRequests"), async (original) => {
       ...actual.pullRequestEnvironment,
       update: {
         ...actual.pullRequestEnvironment.update,
+        permissionAtom: () => (state.canUpdate ? allowed : denied),
+      },
+      replyToThread: {
+        ...actual.pullRequestEnvironment.replyToThread,
         permissionAtom: () => (state.canUpdate ? allowed : denied),
       },
     },
@@ -249,6 +253,146 @@ it("fixes an overview thread as its opening remark, since it has no line to atta
   await userEvent.click(screen.getByRole("button", { name: "Fix in a thread" }));
   expect(onFixFinding).toHaveBeenCalledWith({ kind: "comment", comment: remark });
 });
+
+it.each(["src/file.ts", "/PATCHSET_LEVEL"])(
+  "replies to a Gerrit discussion at %s without losing a failed draft",
+  async (path) => {
+    setup();
+    state.update.mockResolvedValueOnce({ _tag: "Failure", cause: new Error("offline") });
+    const note = {
+      id: "root",
+      author: detail.author,
+      body: "A discussion",
+      createdAt: "2026-09-01T00:00:00Z",
+      url: null,
+    };
+    const value: PullRequestDetailView = {
+      ...detail,
+      provider: SourceControlProviderKind.make("gerrit"),
+      gerrit: {
+        changeId: "I123",
+        topic: null,
+        isPrivate: false,
+        isWip: false,
+        currentPatchSet: 2,
+        patchSets: [],
+        labels: [],
+        submitRequirements: [],
+        submittable: null,
+      },
+      capabilities: {
+        ...detail.capabilities,
+        review: { ...detail.capabilities.review, reply: true },
+      },
+      reviewThreads: [
+        {
+          id: "gerrit:root",
+          path,
+          line: path === "/PATCHSET_LEVEL" ? null : 3,
+          side: "right",
+          isResolved: false,
+          isOutdated: false,
+          comments: [note],
+        },
+      ],
+    };
+    const refresh = vi.fn();
+    await using screen = await renderUi(
+      <PullRequestSummaryTab
+        scrollerRef={() => {}}
+        environmentId={EnvironmentId.make("environment")}
+        threadRef={null}
+        reference={value}
+        detail={value}
+        activityPending={false}
+        activityError={null}
+        onRefresh={refresh}
+      />,
+    );
+    await expect
+      .element(
+        screen.getByText(path === "/PATCHSET_LEVEL" ? "Change-level discussion" : "src/file.ts:3", {
+          exact: true,
+        }),
+      )
+      .toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Reply", exact: true }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Reply to this conversation" }),
+      "My reply",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    await expect.element(screen.getByRole("alert")).toBeVisible();
+    expect(screen.container.querySelector("textarea")?.value).toBe("My reply");
+    expect(state.update).toHaveBeenCalledWith({
+      environmentId: EnvironmentId.make("environment"),
+      input: { ...value, threadId: "gerrit:root", body: "My reply" },
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    expect(refresh).toHaveBeenCalledOnce();
+    await expect.element(screen.getByRole("button", { name: "Reply", exact: true })).toBeVisible();
+  },
+);
+
+it.each([false, true])(
+  "labels a discussion and initially collapses it only when resolved=%s",
+  async (resolved) => {
+    setup();
+    const value: PullRequestDetailView = {
+      ...detail,
+      commits: [],
+      reviewThreads: [
+        {
+          id: "status-thread",
+          path: "/PATCHSET_LEVEL",
+          line: null,
+          side: "right",
+          isResolved: resolved,
+          isOutdated: false,
+          comments: [
+            {
+              id: "status-root",
+              author: detail.author,
+              body: "Discussion status body",
+              createdAt: "2026-10-01T00:00:00Z",
+              url: null,
+            },
+          ],
+        },
+      ],
+    };
+    await using screen = await renderUi(
+      <div style={{ height: 600 }}>
+        <PullRequestSummaryTab
+          scrollerRef={() => {}}
+          environmentId={EnvironmentId.make("environment")}
+          reference={value}
+          detail={value}
+          threadRef={null}
+          activityPending={false}
+          activityError={null}
+          onRefresh={() => {}}
+        />
+      </div>,
+    );
+    if (resolved) {
+      await userEvent.click(screen.getByRole("button", { name: "Filter comments" }));
+      await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Resolved or dismissed" }));
+      await userEvent.keyboard("{Escape}");
+    }
+    await expect
+      .element(screen.getByText(resolved ? "Resolved" : "Unresolved", { exact: true }))
+      .toBeVisible();
+    if (resolved) {
+      await expect
+        .element(screen.getByText("Discussion status body", { exact: true }))
+        .toBeVisible();
+      await userEvent.click(screen.getByRole("button", { name: /Resolved/ }));
+    }
+    await expect.element(screen.getByText("Discussion status body", { exact: true })).toBeVisible();
+  },
+);
 
 it("shows a comment's exact time in the chosen 24-hour clock", async () => {
   setup();

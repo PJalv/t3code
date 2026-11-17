@@ -7159,6 +7159,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
 
   it.effect.each([
     "single page",
+    "loaded thread",
     "paginated",
     "page failure",
     "repeated cursor",
@@ -7240,7 +7241,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         body: "Twelfth reply.",
         createdAt: "2999-01-01T00:00:02.000Z",
       };
-      const incomplete = mode !== "single page" && mode !== "paginated" && mode !== "hidden reply";
+      const incomplete =
+        mode !== "single page" &&
+        mode !== "loaded thread" &&
+        mode !== "paginated" &&
+        mode !== "hidden reply";
       let recovering = false;
       let pagesRead = 0;
       const reactor = yield* PullRequestWatchReactor.make.pipe(
@@ -7255,30 +7260,47 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
                   comments:
                     mode === "single page"
                       ? [remark]
-                      : [...firstTen, { ...remark, kind: "issue-comment" }],
+                      : mode === "loaded thread"
+                        ? []
+                        : [...firstTen, { ...remark, kind: "issue-comment" }],
                   commentCount: mode === "single page" ? 1 : 13,
-                  commentsTruncated: mode !== "single page",
+                  commentsTruncated: mode !== "single page" && mode !== "loaded thread",
                   reviewThreadsTruncated: mode === "thread list truncated" && !recovering,
                   reviewThreads:
                     mode === "single page"
                       ? []
-                      : [
-                          {
-                            id: "review-thread",
-                            path: "src/index.ts",
-                            line: 1,
-                            side: "right",
-                            isResolved: false,
-                            isOutdated: false,
-                            comments: firstTen,
-                            commentCount: mode === "hidden reply" ? 13 : 12,
-                            nextCommentsCursor: "after-10",
-                          },
-                        ],
+                      : mode === "loaded thread"
+                        ? [
+                            {
+                              id: "review-thread",
+                              path: "src/index.ts",
+                              line: 1,
+                              side: "right",
+                              isResolved: false,
+                              isOutdated: false,
+                              comments: [
+                                remark,
+                                { ...remark, id: "draft", body: "Private draft", isDraft: true },
+                              ],
+                            },
+                          ]
+                        : [
+                            {
+                              id: "review-thread",
+                              path: "src/index.ts",
+                              line: 1,
+                              side: "right",
+                              isResolved: false,
+                              isOutdated: false,
+                              comments: firstTen,
+                              commentCount: mode === "hidden reply" ? 13 : 12,
+                              nextCommentsCursor: "after-10",
+                            },
+                          ],
                   commits: [],
                 }),
               threadComments: (input) => {
-                pagesRead += 1;
+                if (input.projectId === projectId) pagesRead += 1;
                 assert.equal(input.threadId, "review-thread");
                 if (input.cursor === "after-10") {
                   return Effect.succeed({ comments: [eleventh], nextCursor: "after-11" });
@@ -7331,7 +7353,10 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         ),
         ["#7: new comments"],
       );
-      if (mode !== "single page") {
+      if (mode === "loaded thread") {
+        assert.include(messages.at(-1)?.text ?? "", "One more thing.");
+        assert.notInclude(messages.at(-1)?.text ?? "", "Private draft");
+      } else if (mode !== "single page") {
         const wake = messages.at(-1);
         assert.include(wake?.text ?? "", "3 new comments");
         assert.include(wake?.text ?? "", "Eleventh reply.");
