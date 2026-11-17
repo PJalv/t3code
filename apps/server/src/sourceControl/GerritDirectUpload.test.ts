@@ -151,3 +151,13 @@ it.effect("fetches a branch into its remote-tracking ref for the agent to rebase
     expect(missing.message).toContain("no-such-branch");
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
+
+it("points an upload with no common history at fetching the target branch", () => {
+  const stale = new Direct.GerritDirectUploadError({
+    reason: "push",
+    detail: "! [remote rejected] (no common ancestry)",
+  });
+  expect(stale.message).toContain("fetch_gerrit_branch");
+  const other = new Direct.GerritDirectUploadError({ reason: "push", detail: "prohibited" });
+  expect(other.message).not.toContain("fetch_gerrit_branch");
+});
