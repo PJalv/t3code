@@ -115,6 +115,13 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(failed));
       }),
     ),
+    fetch_gerrit_branch: McpToolAccess.actsAsCaller((input) =>
+      Effect.gen(function* () {
+        return yield* service
+          .fetchBranch({ cwd: yield* cwd(), branch: input.branch })
+          .pipe(Effect.mapError(failed));
+      }),
+    ),
     amend_gerrit_signed: McpToolAccess.actsAsCaller(() =>
       Effect.gen(function* () {
         yield* service.amendSigned({ cwd: yield* cwd() }).pipe(Effect.mapError(failed));

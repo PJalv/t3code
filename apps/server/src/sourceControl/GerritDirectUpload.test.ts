@@ -125,3 +125,29 @@ it("keeps Gerrit's rejection lines for the agent without the remote URL's passwo
   expect(detail).not.toContain("Processing changes");
   expect(Direct.pushRejection("Everything up-to-date\n")).toBeUndefined();
 });
+
+it.effect("fetches a branch into its remote-tracking ref for the agent to rebase onto", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture();
+    const service = yield* Direct.GerritDirectUpload;
+    f.run("push", "origin", "HEAD:refs/heads/main");
+    f.run("commit", "--allow-empty", "-m", `Upstream\n\nChange-Id: I${"b".repeat(40)}`);
+    const upstream = f.run("rev-parse", "HEAD").trim();
+    f.run("push", "origin", "HEAD:refs/heads/main");
+    f.run("reset", "--hard", "HEAD~1");
+
+    const fetched = yield* service.fetchBranch({ cwd: f.cwd, remote: "origin", branch: "main" });
+    expect(fetched).toEqual({ ref: "refs/remotes/origin/main", commit: upstream });
+    expect(f.run("rev-parse", "origin/main").trim()).toBe(upstream);
+
+    const invalid = yield* Effect.flip(
+      service.fetchBranch({ cwd: f.cwd, remote: "origin", branch: "../main" }),
+    );
+    expect(invalid.reason).toBe("invalid-input");
+    const missing = yield* Effect.flip(
+      service.fetchBranch({ cwd: f.cwd, remote: "origin", branch: "no-such-branch" }),
+    );
+    expect(missing.reason).toBe("fetch");
+    expect(missing.message).toContain("no-such-branch");
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
