@@ -349,7 +349,14 @@ function PullRequestAuthorChoices({
           <MenuRadioItem key={option.actor.login.toLowerCase()} value={option.actor.login}>
             <span className="flex min-w-0 items-center gap-2">
               <PullRequestActorAvatar actor={option.actor} />
-              <span className="min-w-0 flex-1 truncate">{option.actor.login}</span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span className="truncate">{option.actor.login}</span>
+                {option.actor.name && option.actor.name !== option.actor.login ? (
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
+                    {option.actor.name}
+                  </span>
+                ) : null}
+              </span>
               {option.mergedCount > 0 ? (
                 <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                   {option.mergedCount} {option.mergedCount === 1 ? "merge" : "merges"} loaded

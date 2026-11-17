@@ -1,3 +1,4 @@
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
 import {
   parsePullRequestAnchor,
   pullRequestAnchorMatchesUrl,
@@ -20,6 +21,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { byTimestamp, relativeTime } from "../../lib/time";
 import { PullRequestAvatar } from "./PullRequestPresentation";
+import { PullRequestDiscussionStatus } from "./PullRequestDiscussionStatus";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { PullRequestCommentFooter } from "./PullRequestReactions";
 import { collapsedTimelineCommentMarkdown } from "./PullRequestTimeline.logic";
@@ -80,10 +82,12 @@ function TimelineComment({
   comment,
   params,
   actions,
+  isGerrit,
 }: {
   comment: PullRequestComment;
   params: PullRequestParams;
   actions: CommentActions;
+  isGerrit: boolean;
 }) {
   const target = parsePullRequestAnchor(params.navigationUrl);
   const linked =
@@ -113,27 +117,47 @@ function TimelineComment({
             {approved ? (
               <T>
                 <Text className="font-t3-medium">
-                  <Var>{comment.author?.login ?? gt("Unknown author")}</Var>
+                  <Var>{actorDisplayName(comment.author, isGerrit ? "gerrit" : undefined) ?? gt("Unknown author")}</Var>
                 </Text>
                 <Text className="text-foreground-muted"> approved</Text>
               </T>
             ) : changes ? (
               <T>
                 <Text className="font-t3-medium">
-                  <Var>{comment.author?.login ?? gt("Unknown author")}</Var>
+                  <Var>{actorDisplayName(comment.author, isGerrit ? "gerrit" : undefined) ?? gt("Unknown author")}</Var>
                 </Text>
                 <Text className="text-foreground-muted"> requested changes</Text>
               </T>
             ) : (
               <T>
                 <Text className="font-t3-medium">
-                  <Var>{comment.author?.login ?? gt("Unknown author")}</Var>
+                  <Var>{actorDisplayName(comment.author, isGerrit ? "gerrit" : undefined) ?? gt("Unknown author")}</Var>
                 </Text>
                 <Text className="text-foreground-muted"> commented</Text>
               </T>
             )}
           </Text>
         </View>
+        {comment.vote ? (
+          <View
+            className={
+              comment.vote.value > 0
+                ? "rounded-md bg-adaptive-emerald-500-a12-a16 px-1.5 py-0.5"
+                : "rounded-md bg-danger/10 px-1.5 py-0.5"
+            }
+          >
+            <Text
+              className={
+                comment.vote.value > 0
+                  ? "text-xs font-t3-medium text-adaptive-emerald-600-400"
+                  : "text-xs font-t3-medium text-danger-foreground"
+              }
+            >
+              {comment.vote.value > 0 ? "+" : "−"}
+              {Math.abs(comment.vote.value)}
+            </Text>
+          </View>
+        ) : null}
         <Text className="text-2xs text-foreground-tertiary">
           {relativeTime(comment.createdAt, undefined, messages)}
         </Text>
@@ -247,6 +271,7 @@ export function pullRequestTimelineRows(
   actions: CommentActions,
   newestFirst: boolean,
   resolve: MessageResolver,
+  isGerrit = false,
 ) {
   const linkTarget = parsePullRequestAnchor(params.navigationUrl);
   const threads = pullRequestConversationThreads(activity);
@@ -268,6 +293,7 @@ export function pullRequestTimelineRows(
                 : comment.id
             }
             comment={comment}
+            isGerrit={isGerrit}
             params={params}
             actions={actions}
           />
@@ -283,7 +309,7 @@ export function pullRequestTimelineRows(
             <Text className="flex-1 text-sm">
               <T>
                 <Text className="font-t3-medium">
-                  <Var>{thread.comments[0]?.author?.login ?? resolve(msg("Unknown author"))}</Var>
+                  <Var>{actorDisplayName(thread.comments[0]?.author, isGerrit ? "gerrit" : undefined) ?? resolve(msg("Unknown author"))}</Var>
                 </Text>
                 <Text className="text-foreground-muted"> started a discussion</Text>
               </T>
@@ -308,7 +334,11 @@ export function pullRequestTimelineRows(
             onPress={() =>
               navigation.navigate("PullRequestDiscussion", { ...params, discussionId: thread.id })
             }
-            className="gap-2 rounded-2xl bg-grouped-card p-3 active:opacity-70"
+            className={
+              thread.isResolved
+                ? "gap-2 rounded-2xl border-l-2 border-border-subtle bg-grouped-card p-3 active:opacity-70"
+                : "gap-2 rounded-2xl border-l-2 border-warning-border bg-grouped-card p-3 active:opacity-70"
+            }
           >
             <View className="flex-row items-center gap-2">
               {thread.path === null ? (
@@ -326,16 +356,13 @@ export function pullRequestTimelineRows(
               )}
               <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
             </View>
-            <Text className="text-xs text-foreground-muted">
-              {thread.isResolved
-                ? resolve(msg("Resolved", { $context: "review thread state" }))
-                : resolve(msg("Unresolved", { $context: "review thread state" }))}
-              {thread.isOutdated
-                ? ` · ${resolve(msg("Outdated", { $context: "review thread state" }))}`
-                : ""}{" "}
-              ·{" "}
-              {discussionCommentCountLabel(thread.commentCount ?? thread.comments.length, resolve)}
-            </Text>
+            <View className="flex-row flex-wrap items-center gap-2">
+              <PullRequestDiscussionStatus resolved={thread.isResolved} />
+              <Text className="text-xs text-foreground-muted">
+                {thread.isOutdated ? `${resolve(msg("Outdated", { $context: "review thread state" }))} · ` : ""}
+                {discussionCommentCountLabel(thread.commentCount ?? thread.comments.length, resolve)}
+              </Text>
+            </View>
           </Pressable>
         </TimelineEvent>
       ),
@@ -348,7 +375,7 @@ export function pullRequestTimelineRows(
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={resolve(
-              msg("View commit {sha}, {headline}", {
+              msg(isGerrit ? "View patch set {sha}, {headline}" : "View commit {sha}, {headline}", {
                 sha: commit.oid.slice(0, 7),
                 headline: commit.messageHeadline,
               }),
@@ -368,6 +395,12 @@ export function pullRequestTimelineRows(
               {commit.oid.slice(0, 7)}
             </Text>
           </Pressable>
+          {isGerrit ? (
+            <Text className="text-2xs text-foreground-tertiary">
+              {actorDisplayName(commit.authors?.[0], "gerrit") ?? "Unknown uploader"} ·{" "}
+              {relativeTime(commit.committedDate)}
+            </Text>
+          ) : null}
         </TimelineEvent>
       ),
     })),

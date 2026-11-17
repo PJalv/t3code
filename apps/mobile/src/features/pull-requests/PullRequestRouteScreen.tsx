@@ -146,8 +146,12 @@ import { PullRequestStackCard } from "./PullRequestStackCard";
 import { PullRequestGerritSection } from "./PullRequestGerritSection";
 import { usePullRequestStack, type PullRequestStackState } from "./usePullRequestStack";
 import { usePullRequestEnvironmentFallback } from "./usePullRequestEnvironmentFallback";
-import { subscribePullRequestFileJump } from "./pullRequestFileJump";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { pullRequestFileJumpScope, subscribePullRequestFileJump } from "./pullRequestFileJump";
+import {
+  actorDisplayName,
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../../lib/changeRequestTerm";
 import { WorkflowRunsAbout } from "../workflows/WorkflowRunsAbout";
 
@@ -174,6 +178,7 @@ function usePullRequestActivityRows(params: PullRequestParams, filter: ActivityF
       { permissions, onChanged: result.refresh },
       filter.newestFirst,
       messages,
+      detail.data?.provider === "gerrit",
     );
     if (!rows.length)
       rows.push({
@@ -268,7 +273,7 @@ function PullRequestIdentity(props: {
       <View className="flex-row items-center gap-2">
         <PullRequestAvatar actor={pr.author ?? null} size={20} />
         <Text className="min-w-0 flex-1 text-xs font-t3-medium" numberOfLines={1}>
-          {pr.author?.login ?? gt("Unknown author")}
+          {actorDisplayName(pr.author, pr.provider) ?? gt("Unknown author")}
         </Text>
         <Text className="shrink text-right text-2xs text-foreground-muted" numberOfLines={1}>
           <T>
@@ -908,6 +913,7 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
                               value={activityFilter}
                               onChange={activity.setFilter}
                               hiddenCount={tabContent.hiddenCount}
+                              isGerrit={identity?.provider === "gerrit"}
                             />
                           ) : null}
                           {tab === "activity" ? (
@@ -1100,6 +1106,7 @@ function PullRequestFileRouteContent({ route }: PullRequestFileRouteProps) {
   const activity = useEnvironmentQuery(composerPullRequests.activity(requestTarget(route.params)));
   const baseData = useMemo(() => getCachedNativeReviewDiffData({ parsedDiff: parsed }), [parsed]);
   const highlightFiles = usePullRequestDiffHighlightFiles(route.params, parsed, baseData.files);
+  const provider = (detail.data ?? route.params.initialSummary)?.provider;
   const data = useMemo(
     () =>
       annotatePullRequestDiff(
@@ -1108,6 +1115,7 @@ function PullRequestFileRouteContent({ route }: PullRequestFileRouteProps) {
         commit ? [] : reviewDraft.draft.comments,
         diffHead.sha ?? undefined,
         messages,
+        provider,
       ),
     [
       baseData,
@@ -1118,6 +1126,7 @@ function PullRequestFileRouteContent({ route }: PullRequestFileRouteProps) {
       reviewDraft.draft.comments,
       diffHead.sha,
       messages,
+      provider,
     ],
   );
   const viewedIds = data.files
