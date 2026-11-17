@@ -53,6 +53,8 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
       "change-id-mismatch",
       "credentials",
       "signing",
+      "commit-signing",
+      "fetch",
       "push",
       "no-new-changes",
     ]),
@@ -75,6 +77,10 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
         return "Could not read the saved signing passphrase.";
       case "signing":
         return "Could not prepare Gerrit push signing.";
+      case "commit-signing":
+        return "Could not sign the amended commit. No upload was attempted.";
+      case "fetch":
+        return "Could not fetch and verify the Gerrit patch set.";
       case "push":
         return "Gerrit upload failed.";
     }
@@ -87,6 +93,16 @@ export class GerritDirectUpload extends Context.Service<
     readonly upload: (
       input: GerritDirectUploadInput,
     ) => Effect.Effect<GerritDirectUploadResult, GerritDirectUploadError>;
+    readonly amendSigned: (input: {
+      readonly cwd: string;
+    }) => Effect.Effect<void, GerritDirectUploadError>;
+    readonly fetchPatchSet: (input: {
+      readonly cwd: string;
+      readonly remote: string;
+      readonly number: number;
+      readonly patchSet: number;
+      readonly commit: string;
+    }) => Effect.Effect<string, GerritDirectUploadError>;
   }
 >()("t3/sourceControl/GerritDirectUpload") {}
 
@@ -250,7 +266,123 @@ const make = Effect.gen(function* () {
       ...(patchSet !== undefined && Number.isSafeInteger(patchSet) ? { patchSet } : {}),
     };
   });
-  return GerritDirectUpload.of({ upload });
+  const amendSigned = Effect.fn("GerritDirectUpload.amendSigned")(function* (input: {
+    readonly cwd: string;
+  }) {
+    const passphrase = yield* secrets
+      .get("gerrit-gpg-signing-passphrase")
+      .pipe(
+        Effect.mapError((cause) => new GerritDirectUploadError({ reason: "credentials", cause })),
+      );
+    const env = { ...process.env, ...NON_INTERACTIVE_GIT_ENV };
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* fs
+          .makeTempDirectoryScoped({ prefix: "t3-gerrit-commit-sign-" })
+          .pipe(
+            Effect.mapError(
+              (cause) => new GerritDirectUploadError({ reason: "commit-signing", cause }),
+            ),
+          );
+        const signing = yield* preparePushSigning({
+          cwd: input.cwd,
+          directory,
+          env,
+          ...(Option.isSome(passphrase)
+            ? { passphrase: Redacted.make(new TextDecoder().decode(passphrase.value)) }
+            : {}),
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              Layer.succeed(SourceControlHost.SourceControlHost, host),
+              Layer.succeed(FileSystem.FileSystem, fs),
+            ),
+          ),
+          Effect.mapError(
+            (cause) => new GerritDirectUploadError({ reason: "commit-signing", cause }),
+          ),
+        );
+        const result = yield* host.process
+          .run({
+            operation: "GerritDirectUpload.amendSigned",
+            command: "git",
+            cwd: input.cwd,
+            args: ["--no-replace-objects", ...signing.args, "commit", "--amend", "--no-edit", "-S"],
+            env: { ...env, ...signing.env },
+            extendEnv: false,
+            allowNonZeroExit: true,
+            timeoutMs: 60_000,
+            maxOutputBytes: 1024 * 1024,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) => new GerritDirectUploadError({ reason: "commit-signing", cause }),
+            ),
+          );
+        if (result.exitCode !== 0)
+          return yield* new GerritDirectUploadError({ reason: "commit-signing" });
+      }),
+    );
+  });
+  const fetchPatchSet = Effect.fn("GerritDirectUpload.fetchPatchSet")(function* (input: {
+    readonly cwd: string;
+    readonly remote: string;
+    readonly number: number;
+    readonly patchSet: number;
+    readonly commit: string;
+  }) {
+    if (
+      !Number.isSafeInteger(input.number) ||
+      input.number <= 0 ||
+      !Number.isSafeInteger(input.patchSet) ||
+      input.patchSet <= 0 ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.commit)
+    )
+      return yield* new GerritDirectUploadError({ reason: "fetch" });
+    const baseEnv = { ...process.env, ...NON_INTERACTIVE_GIT_ENV };
+    const env = { ...baseEnv, ...(yield* gitHttpAuthEnv(baseEnv, platform, httpAuth)) };
+    const ref = `refs/t3/gerrit/${input.number}/${input.patchSet}`;
+    const remoteRef = `refs/changes/${String(input.number % 100).padStart(2, "0")}/${input.number}/${input.patchSet}`;
+    const run = (args: string[]) =>
+      host.process
+        .run({
+          operation: "GerritDirectUpload.fetchPatchSet",
+          command: "git",
+          cwd: input.cwd,
+          args,
+          env,
+          extendEnv: false,
+          allowNonZeroExit: true,
+          timeoutMs: 60_000,
+          maxOutputBytes: 1024 * 1024,
+        })
+        .pipe(Effect.mapError((cause) => new GerritDirectUploadError({ reason: "fetch", cause })));
+    const fetched = yield* run([
+      "fetch",
+      "--no-tags",
+      "--no-recurse-submodules",
+      "--",
+      input.remote,
+      remoteRef,
+    ]);
+    if (fetched.exitCode !== 0) return yield* new GerritDirectUploadError({ reason: "fetch" });
+    const resolved = yield* run([
+      "--no-replace-objects",
+      "rev-parse",
+      "--verify",
+      "FETCH_HEAD^{commit}",
+    ]);
+    if (
+      resolved.exitCode !== 0 ||
+      resolved.stdoutTruncated ||
+      resolved.stdout.trim() !== input.commit
+    )
+      return yield* new GerritDirectUploadError({ reason: "fetch" });
+    const updated = yield* run(["update-ref", ref, input.commit]);
+    if (updated.exitCode !== 0) return yield* new GerritDirectUploadError({ reason: "fetch" });
+    return ref;
+  });
+  return GerritDirectUpload.of({ upload, amendSigned, fetchPatchSet });
 });
 
 export const layer = Layer.effect(GerritDirectUpload, make);

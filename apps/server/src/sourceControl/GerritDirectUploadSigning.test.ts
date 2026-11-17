@@ -61,6 +61,8 @@ it.effect("uses the saved passphrase to sign a direct push certificate", () =>
     run("git", ["init", "--bare", "receiver"]);
     run("git", ["--git-dir=receiver", "config", "receive.certNonceSeed", "fixture"]);
     run("git", ["remote", "add", "origin", `${cwd}/receiver`]);
+    const patchCommit = run("git", ["rev-parse", "HEAD"]).trim();
+    run("git", ["push", "origin", `${patchCommit}:refs/changes/41/94741/7`]);
     yield* fs.writeFileString(
       `${cwd}/receiver/hooks/pre-receive`,
       '#!/bin/sh\ntest "$GIT_PUSH_CERT_STATUS" = G && test "$GIT_PUSH_CERT_NONCE_STATUS" = OK\n',
@@ -82,10 +84,55 @@ it.effect("uses the saved passphrase to sign a direct push certificate", () =>
         getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
       }),
     );
+    yield* fs.writeFileString(`${cwd}/staged.txt`, "staged\n");
+    run("git", ["add", "staged.txt"]);
+    const previous = run("git", ["rev-parse", "HEAD"]).trim();
+    const badSecrets = Layer.succeed(
+      ServerSecretStore.ServerSecretStore,
+      ServerSecretStore.ServerSecretStore.of({
+        get: () => Effect.succeedSome(new TextEncoder().encode("wrong passphrase")),
+        set: () => Effect.void,
+        create: () => Effect.void,
+        remove: () => Effect.void,
+        getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+      }),
+    );
+    run("gpgconf", ["--kill", "gpg-agent"]);
+    const failure = yield* Effect.gen(function* () {
+      const service = yield* Direct.GerritDirectUpload;
+      return yield* Effect.flip(service.amendSigned({ cwd }));
+    }).pipe(Effect.provide(Direct.layer.pipe(Layer.provide(Layer.merge(host, badSecrets)))));
+    expect(failure.reason).toBe("commit-signing");
+    expect(run("git", ["rev-parse", "HEAD"]).trim()).toBe(previous);
+    expect(run("git", ["diff", "--cached", "--name-only"]).trim()).toBe("staged.txt");
+    run("gpgconf", ["--kill", "gpg-agent"]);
     const result = yield* Effect.gen(function* () {
       const service = yield* Direct.GerritDirectUpload;
+      const ref = yield* service.fetchPatchSet({
+        cwd,
+        remote: "origin",
+        number: 94741,
+        patchSet: 7,
+        commit: patchCommit,
+      });
+      expect(ref).toBe("refs/t3/gerrit/94741/7");
+      const mismatch = yield* Effect.flip(
+        service.fetchPatchSet({
+          cwd,
+          remote: "origin",
+          number: 94741,
+          patchSet: 7,
+          commit: "0".repeat(40),
+        }),
+      );
+      expect(mismatch.reason).toBe("fetch");
+      expect(run("git", ["rev-parse", ref]).trim()).toBe(patchCommit);
+      yield* service.amendSigned({ cwd });
       return yield* service.upload({ cwd, kind: "new", branch: "main", topic: "signed" });
     }).pipe(Effect.provide(Direct.layer.pipe(Layer.provide(Layer.merge(host, secrets)))));
+    expect(run("git", ["rev-parse", "HEAD"]).trim()).not.toBe(previous);
+    run("git", ["verify-commit", "HEAD"]);
+    expect(run("git", ["show", "HEAD:staged.txt"])).toBe("staged\n");
     expect(result.pushed).toBe(true);
     expect(
       run("git", [

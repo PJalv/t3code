@@ -173,10 +173,13 @@ export function isSourceControlProviderOffered(
 export function sortAddProjectProviderSources(
   readiness: AddProjectRemoteSourceReadiness,
   offered: OfferedSourceControlProviders | undefined,
+  gerritConfigured = false,
 ): ReadonlyArray<SourceControlProviderKind> {
   return Arr.sort(
     ADD_PROJECT_REMOTE_PROVIDER_SOURCES.filter((source) =>
-      isSourceControlProviderOffered(offered, source),
+      source === "gerrit" && offered?.[source] === undefined
+        ? gerritConfigured
+        : isSourceControlProviderOffered(offered, source),
     ),
     Order.mapInput(
       Order.Struct({

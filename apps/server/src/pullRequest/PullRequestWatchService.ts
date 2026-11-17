@@ -69,6 +69,7 @@ export class PullRequestWatchService extends Context.Service<
         readonly state?: "merged" | "closed";
         /** CI as the start read saw it. Checks that already passed never wake the watch. */
         readonly checksState?: PullRequestChecksState;
+        readonly ownAccountCommentsIgnored: boolean;
       },
       | PullRequestWatchFailedError
       | PullRequestWatchFromSubagentError
@@ -182,6 +183,7 @@ const make = Effect.gen(function* () {
       watching: watchedLink(after)?.watch !== undefined,
       wasWatching,
       ...(checksStateAtStart !== undefined && { checksState: checksStateAtStart }),
+      ownAccountCommentsIgnored: true,
     };
   });
 

@@ -129,6 +129,7 @@ interface EnvironmentOption {
   readonly connectionErrorTraceId: string | null;
   readonly ghqCloneLayout: boolean;
   readonly offeredSourceControlProviders: OfferedSourceControlProviders | undefined;
+  readonly gerritConfigured: boolean;
 }
 
 const environmentOptionOrder = Order.mapInput(
@@ -478,6 +479,7 @@ function useEnvironmentOptions(
         connectionErrorTraceId: runtime?.connectionErrorTraceId ?? null,
         ghqCloneLayout: config?.settings.ghqCloneLayout === true,
         offeredSourceControlProviders: config?.settings.offeredSourceControlProviders,
+        gerritConfigured: Object.keys(config?.settings.gerritConnections ?? {}).length > 0,
       };
     });
     return Arr.sort(
@@ -724,6 +726,7 @@ export function AddProjectSourceScreen(props: { readonly environmentId?: string 
                 ...sortAddProjectProviderSources(
                   readiness,
                   selectedEnvironment.offeredSourceControlProviders,
+                  selectedEnvironment.gerritConfigured,
                 ),
               ] as AddProjectRemoteSource[]
             ).map((candidate) => (
