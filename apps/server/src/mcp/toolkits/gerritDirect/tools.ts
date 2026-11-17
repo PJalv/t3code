@@ -26,7 +26,7 @@ const actInput = Schema.Struct({
 // MCP needs an object root, so read and upload expose flat parameters; the handlers decode them
 // into the strict per-mode unions and reject fields that do not belong to the chosen mode.
 const readParameters = Schema.Struct({
-  mode: Schema.Literals(["change", "diff", "reviewers", "search"]),
+  mode: Schema.Literals(["change", "comments", "diff", "reviewers", "search"]),
   target: Schema.optionalKey(GerritDirectTarget).annotate({
     description: "Change number or URL. Required unless mode is search.",
   }),
@@ -34,15 +34,20 @@ const readParameters = Schema.Struct({
     description: "Patch set number or commit for change and diff. Defaults to the current one.",
   }),
   includeDrafts: Schema.optionalKey(Schema.Boolean),
-  path: Schema.optionalKey(Schema.String).annotate({ description: "File path, for diff." }),
+  path: Schema.optionalKey(Schema.String).annotate({
+    description: "Required when mode is diff. Use a path returned by mode change.",
+  }),
   base: Schema.optionalKey(Schema.String).annotate({
     description: "Patch set to diff against, for diff.",
   }),
   query: Schema.optionalKey(Schema.String).annotate({
-    description: "Gerrit search query for search, or name or email for reviewers.",
+    description:
+      "Required when mode is reviewers: name or email. Optional Gerrit query for search.",
   }),
   limit: Schema.optionalKey(Schema.Int),
-  cursor: Schema.optionalKey(Schema.String),
+  cursor: Schema.optionalKey(Schema.String).annotate({
+    description: "For comments, pass nextCursor to continue through comments and long bodies.",
+  }),
 });
 const uploadParameters = Schema.Struct({
   kind: Schema.Literals(["new", "patch-set"]),
@@ -63,6 +68,30 @@ const uploadParameters = Schema.Struct({
   private: Schema.optionalKey(Schema.Boolean),
 });
 export const GerritDirectToolkit = Toolkit.make(
+  Tool.make("fetch_gerrit_patch_set", {
+    description:
+      "Fetch and verify the current Gerrit patch set into a local ref without changing the checkout. Use the returned ref as baseRef for a thread worktree handoff or launch.",
+    parameters: Schema.Struct({ target: GerritDirectTarget }),
+    success: Schema.Unknown,
+    failure: OrchestratorMcpFailure,
+    dependencies,
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.Strict, true)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients),
+  Tool.make("amend_gerrit_signed", {
+    description:
+      "Amend HEAD with already staged files and sign it using the saved GPG passphrase. Operates in this thread's bound checkout; never disables signing.",
+    parameters: Schema.Struct({ confirm: Schema.Literal(true) }),
+    success: Schema.Unknown,
+    failure: OrchestratorMcpFailure,
+    dependencies,
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, true)
+    .annotate(Tool.Strict, true)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients),
   Tool.make("read_gerrit", {
     description:
       "Read or search Gerrit changes, review details, diffs, and reviewer candidates. The server comes from the current checkout or change URL.",
