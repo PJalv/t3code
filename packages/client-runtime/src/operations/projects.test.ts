@@ -34,6 +34,12 @@ describe("add project shared logic", () => {
     expect(sortAddProjectProviderSources(ready, { gitlab: true, github: false })).toEqual([
       "gitlab",
     ]);
+    expect(sortAddProjectProviderSources(ready, {}, true)).toEqual(["gerrit", "github"]);
+    expect(sortAddProjectProviderSources(ready, { gerrit: false }, true)).toEqual(["github"]);
+    expect(sortAddProjectProviderSources(ready, { gerrit: true }, false)).toEqual([
+      "gerrit",
+      "github",
+    ]);
   });
 
   it("asks for a repository name when GitHub input is only an owner path", () => {

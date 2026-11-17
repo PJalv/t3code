@@ -1,3 +1,5 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Cursors bind pagination to the exact visible comment snapshot.
+import * as NodeCrypto from "node:crypto";
 import {
   GerritChangeNumber,
   GerritDirectReadRequest,
@@ -20,6 +22,16 @@ const bounded = <T>(items: ReadonlyArray<T>) => ({
   truncated: items.length > cap,
 });
 const decode = Schema.decodeUnknownEffect(GerritDirectReadRequest, gerritDirectDecodeOptions);
+const commentCursor = Schema.fromJsonString(
+  Schema.Struct({
+    snapshot: Schema.String,
+    index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
+);
+const decodeCommentCursor = Schema.decodeUnknownEffect(commentCursor);
+const encodeCommentCursor = Schema.encodeEffect(commentCursor);
+const encodeSnapshot = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const target = yield* GerritTarget.GerritTarget;
@@ -112,24 +124,95 @@ const make = Effect.gen(function* () {
       return { mode: "diff" as const, ...renderGerritUnifiedDiff([{ ...file, diff }]) };
     }
     const detail = yield* http.review.readReview(reviewInput);
+    const activity = mapGerritActivity({
+      ...detail,
+      drafts: request.includeDrafts ? detail.drafts : [],
+    });
+    if (request.mode === "comments") {
+      const comments = activity.gerritThreads.flatMap((thread) =>
+        thread.comments.map((comment) => ({ ...comment, threadId: thread.id })),
+      );
+      const snapshot = NodeCrypto.createHash("sha256")
+        .update(
+          yield* encodeSnapshot({ revision: selected.commit, comments }).pipe(
+            Effect.mapError(() => new GerritReadError({ reason: "invalid-input" })),
+          ),
+        )
+        .digest("hex");
+      const cursor =
+        request.cursor === undefined
+          ? { snapshot, index: 0, offset: 0 }
+          : yield* Effect.try({
+              try: () => Buffer.from(request.cursor!, "base64url").toString("utf8"),
+              catch: () => new GerritReadError({ reason: "invalid-input" }),
+            }).pipe(
+              Effect.flatMap(decodeCommentCursor),
+              Effect.mapError(() => new GerritReadError({ reason: "invalid-input" })),
+            );
+      if (
+        cursor.snapshot !== snapshot ||
+        cursor.index > comments.length ||
+        (cursor.index === comments.length && cursor.offset !== 0)
+      )
+        return yield* new GerritReadError({ reason: "invalid-input" });
+      const items = [];
+      let { index, offset } = cursor;
+      while (index < comments.length && items.length < Math.min(request.limit ?? 25, cap)) {
+        const comment = comments[index]!;
+        const body = comment.message ?? "";
+        if (offset > body.length) return yield* new GerritReadError({ reason: "invalid-input" });
+        let end = Math.min(body.length, offset + 4000);
+        const last = body.charCodeAt(end - 1);
+        if (end < body.length && last >= 0xd800 && last <= 0xdbff) end--;
+        items.push({
+          ...comment,
+          message: comment.message === null ? null : body.slice(offset, end),
+          bodyOffset: offset,
+          messageTruncated: end < body.length,
+        });
+        if (end < body.length) {
+          offset = end;
+          break;
+        }
+        index++;
+        offset = 0;
+      }
+      return {
+        mode: "comments" as const,
+        revision: selected.commit,
+        comments: { items, truncated: index < comments.length },
+        nextCursor:
+          index < comments.length
+            ? Buffer.from(
+                yield* encodeCommentCursor({ snapshot, index, offset }).pipe(
+                  Effect.mapError(() => new GerritReadError({ reason: "invalid-input" })),
+                ),
+              ).toString("base64url")
+            : null,
+      };
+    }
     const files = yield* http.review.readFiles({ ...reviewInput, comparison });
     const related = yield* http.getRelatedChanges({
       ...reviewInput,
       key: { ...change.key, installation },
     });
-    const activity = mapGerritActivity({
-      ...detail,
-      ...(request.includeDrafts ? { drafts: detail.drafts } : { drafts: [] }),
-    });
+    let remainingComments = cap;
     const threads = activity.gerritThreads.map((thread) => {
       const published = thread.comments.filter((c) => c.visibility === "published");
       const root = thread.comments.find((c) => c.id === thread.rootCommentId) ?? thread.comments[0];
+      const comments = thread.comments.slice(0, remainingComments).map((comment) => ({
+        ...comment,
+        message: comment.message?.slice(0, 4000) ?? null,
+        messageTruncated: (comment.message?.length ?? 0) > 4000,
+      }));
+      remainingComments -= comments.length;
       return {
         id: thread.id,
         path: root?.anchor.path ?? null,
         line: root?.anchor.line ?? null,
         unresolved: thread.resolution === "unknown" ? null : thread.resolution === "unresolved",
         latestCommentId: published.at(-1)?.id ?? null,
+        comments: { items: comments, truncated: comments.length < thread.comments.length },
       };
     });
     return {

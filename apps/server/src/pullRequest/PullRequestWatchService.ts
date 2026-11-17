@@ -72,7 +72,11 @@ export class PullRequestWatchService extends Context.Service<
       readonly watching: boolean;
       readonly until?: PullRequestWatchUntil | undefined;
     }) => Effect.Effect<
-      ResolvedTarget & { readonly watching: boolean; readonly wasWatching: boolean },
+      ResolvedTarget & {
+        readonly watching: boolean;
+        readonly wasWatching: boolean;
+        readonly ownAccountCommentsIgnored: boolean;
+      },
       | PullRequestWatchFailedError
       | PullRequestNotOpenError
       | PullRequestWatchFromSubagentError
@@ -181,6 +185,7 @@ const make = Effect.gen(function* () {
       ...target,
       watching: watchedLink(after)?.watch !== undefined,
       wasWatching: before?.watch !== undefined,
+      ownAccountCommentsIgnored: true,
     };
   });
 
