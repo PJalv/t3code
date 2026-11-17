@@ -7,10 +7,19 @@ import type {
 } from "@t3tools/contracts";
 import type { ProviderChangeRequestActivity } from "@t3tools/source-control-core/server/PullRequestProvider";
 
+import { gerritAccountActor } from "./gerritAccount.ts";
+
 type ActivityInput = Pick<GerritReviewDetail, "messages" | "comments" | "portedComments"> &
   Partial<Pick<GerritReviewDetail, "messageAccounts">> & {
     /** Only pass drafts belonging to the viewer. They are never exposed as published comments. */
     readonly drafts?: ReadonlyArray<GerritComment>;
+    readonly patchSets?: ReadonlyArray<{
+      readonly number: number;
+      readonly commit: string;
+      readonly created?: string | undefined;
+      readonly fallbackDate?: string | undefined;
+      readonly uploader?: GerritComment["author"] | undefined;
+    }>;
   };
 
 export interface GerritActivityThread {
@@ -37,21 +46,8 @@ export function messageWithAccounts(
 }
 
 function actor(account: GerritComment["author"] | undefined): PullRequestActor | null {
-  if (!account) return null;
-  const login = [
-    account.username,
-    account.email,
-    account.name,
-    account.display_name,
-    account._account_id?.toString(),
-  ].find((value) => value?.trim());
-  if (!login) return null;
-  return {
-    login: login.trim(),
-    name: account.name ?? account.display_name ?? null,
-    avatarUrl: null,
-    isBot: account.tags?.includes("SERVICE_USER") ?? false,
-  };
+  const mapped = account ? gerritAccountActor(account) : null;
+  return mapped ? { ...mapped, isBot: account?.tags?.includes("SERVICE_USER") ?? false } : null;
 }
 
 function gerritAnchor(comment: GerritComment) {
@@ -167,18 +163,63 @@ export function mapGerritActivity(input: ActivityInput): GerritActivity {
       })),
     });
   }
-  const messages = input.messages.map((message) => ({
-    id: message.id,
-    kind: "issue-comment" as const,
-    author: actor(message.author),
-    body: messageWithAccounts(message.message, input.messageAccounts),
-    createdAt: date(message.date),
-    url: null,
-    path: null,
-    reviewState: null,
-  }));
-  const comments = messages.sort(
+  const linkedCounts = new Map<string, number>();
+  for (const comment of byId.values()) {
+    if (comment.visibility === "published" && comment.changeMessageId)
+      linkedCounts.set(
+        comment.changeMessageId,
+        (linkedCounts.get(comment.changeMessageId) ?? 0) + 1,
+      );
+  }
+  const messages = input.messages.flatMap((message) => {
+    let body = messageWithAccounts(message.message, input.messageAccounts);
+    const summary = /\n\n\((\d+) comments?\)\s*$/.exec(body);
+    // Remove the receipt only when every comment it refers to is available as a discussion.
+    if (summary && (linkedCounts.get(message.id) ?? 0) >= Number(summary[1])) {
+      body = body.slice(0, summary.index).trimEnd();
+      if (/^Patch Set \d+:\s*$/.test(body)) return [];
+    }
+    const vote = /^Patch Set \d+:[^\n]*\bCode-Review([+-][12])(?=\s|$)/.exec(body)?.[1];
+    const reset =
+      /^Patch Set \d+:[^\n]*(?:^|\s)(?:-Code-Review|Code-Review(?:\+0|\s*0))(?=\s|$)/.test(body);
+    return [
+      {
+        id: message.id,
+        kind: vote || reset ? ("review" as const) : ("issue-comment" as const),
+        ...(vote ? { vote: { label: "Code-Review", value: Number(vote) } } : {}),
+        author: actor(message.author),
+        body,
+        createdAt: date(message.date),
+        url: null,
+        path: null,
+        // Only the extreme Code-Review values approve or block in Gerrit; ±1 is advisory.
+        reviewState:
+          vote === "+2"
+            ? "APPROVED"
+            : vote === "-2"
+              ? "CHANGES_REQUESTED"
+              : vote || reset
+                ? "COMMENTED"
+                : null,
+      },
+    ];
+  });
+  const sorted = messages.sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  );
+  // A later Code-Review vote replaces the author's earlier one, so only their latest verdict stands.
+  const latestVote = new Map<string, string>();
+  for (const message of sorted) {
+    if (message.kind === "review" && message.author)
+      latestVote.set(message.author.login, message.id);
+  }
+  const comments = sorted.map((message) =>
+    message.kind === "review" &&
+    message.author &&
+    latestVote.get(message.author.login) !== message.id &&
+    message.reviewState !== "COMMENTED"
+      ? { ...message, reviewState: "DISMISSED" }
+      : message,
   );
   return {
     comments,
@@ -186,7 +227,22 @@ export function mapGerritActivity(input: ActivityInput): GerritActivity {
     commentsTruncated: false,
     reviewThreadsTruncated: false,
     reviewThreads,
-    commits: [],
+    commits: [...(input.patchSets ?? [])]
+      .sort((a, b) => a.number - b.number)
+      .map((patchSet) => {
+        const upload = input.messages.find((message) =>
+          new RegExp(`^Uploaded patch set ${patchSet.number}(?:\\D|$)`, "i").test(message.message),
+        );
+        const uploader = actor(patchSet.uploader ?? upload?.author);
+        return {
+          oid: patchSet.commit,
+          messageHeadline: `Patch set ${patchSet.number}`,
+          committedDate: date(
+            patchSet.created ?? upload?.date ?? patchSet.fallbackDate ?? "1970-01-01T00:00:00Z",
+          ),
+          authors: uploader ? [uploader] : [],
+        };
+      }),
     gerritThreads,
   };
 }

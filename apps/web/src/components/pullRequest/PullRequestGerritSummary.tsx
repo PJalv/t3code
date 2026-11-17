@@ -23,10 +23,17 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../ui/select";
 import { toastManager } from "../ui/toast";
 
-export function gerritVoteOptions(values: readonly number[]) {
+export function gerritVoteOptions(
+  values: readonly number[],
+  descriptions: Readonly<Record<string, string>> = {},
+) {
   return [...new Set(values)]
     .sort((a, b) => b - a)
-    .map((value) => ({ value: String(value), label: value > 0 ? `+${value}` : String(value) }));
+    .map((value) => {
+      const score = value > 0 ? `+${value}` : String(value);
+      const description = descriptions[score] ?? descriptions[String(value)];
+      return { value: String(value), label: description ? `${score} ${description}` : score };
+    });
 }
 
 export function gerritRequirementStatus(status: string | null) {
@@ -63,32 +70,7 @@ export function gerritRequirementTone(status: string | null) {
   }
 }
 
-/**
- * Splits a Gerrit commit message into the body shown as the description and its trailer
- * block. The subject is already the change title, and trailers such as Change-Id and
- * Signed-off-by would collapse into one line when rendered as Markdown.
- */
-export function gerritCommitMessageParts(message: string): {
-  readonly body: string;
-  readonly footers: ReadonlyArray<{ readonly key: string; readonly value: string }>;
-} {
-  const paragraphs = message
-    .replaceAll("\r\n", "\n")
-    .trim()
-    .split(/\n{2,}/);
-  const trailer = /^([A-Za-z][A-Za-z0-9-]*):\s+(.+)$/;
-  const last = paragraphs.length > 1 ? paragraphs.at(-1) : undefined;
-  const lines = last?.split("\n") ?? [];
-  const footers =
-    lines.length > 0 && lines.every((line) => trailer.test(line))
-      ? lines.map((line) => {
-          const [, key = "", value = ""] = trailer.exec(line) ?? [];
-          return { key, value };
-        })
-      : [];
-  const rest = footers.length > 0 ? paragraphs.slice(0, -1) : paragraphs;
-  return { body: rest.slice(1).join("\n\n"), footers };
-}
+export { gerritCommitMessageParts } from "@t3tools/client-runtime/pull-request-editing";
 
 export function gerritSummaryControls(
   canWrite: boolean,
@@ -115,7 +97,7 @@ export function GerritVotePicker({
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
-  const options = gerritVoteOptions(label.permittedValues);
+  const options = gerritVoteOptions(label.permittedValues, label.valueDescriptions);
   if (options.length === 0) return null;
   return (
     <Select

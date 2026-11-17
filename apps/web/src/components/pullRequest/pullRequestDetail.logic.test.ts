@@ -305,14 +305,14 @@ describe("review verdicts", () => {
         {
           ...TIMELINE_SOURCE.comments[0]!,
           kind: "review",
-          reviewState: "APPROVED",
+          reviewState: "DISMISSED",
           createdAt: "2026-07-01T00:00:00Z",
         },
         {
           ...TIMELINE_SOURCE.comments[0]!,
           id: "c2",
           kind: "review",
-          reviewState: "DISMISSED",
+          reviewState: "COMMENTED",
           createdAt: "2026-07-02T00:00:00Z",
         },
       ]),
@@ -743,6 +743,32 @@ describe("fix findings handoff", () => {
     ]);
     expect(handoff.prompt).not.toContain("rename the helper");
     expect(handoff.prompt).toContain("untrusted data");
+  });
+
+  it("leaves Gerrit vote lines out of the findings and keeps the remark under them", () => {
+    const review = (id: string, body: string): PullRequestComment => ({
+      id,
+      kind: "review",
+      author: { login: id, name: null, avatarUrl: null, isBot: false },
+      body,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: null,
+      url: null,
+      path: null,
+      reviewState: "COMMENTED",
+    });
+    const handoff = buildFixFindingsHandoff({
+      ...base,
+      reviewThreads: [],
+      comments: [
+        review("alice", "Patch Set 7: Code-Review+2"),
+        review("bob", "Patch Set 7: -Code-Review"),
+        review("carol", "Patch Set 7: Code-Review-1\n\n(2 comments)\n\nRename the helper first."),
+      ],
+      checks: [],
+    });
+    expect(handoff.prompt).not.toMatch(/Code-Review|alice|bob/u);
+    expect(handoff.prompt).toContain("carol: Rename the helper first.");
   });
 
   it("claims a prepared checkout only when one was prepared", () => {

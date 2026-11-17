@@ -14,10 +14,22 @@ vi.mock("~/speech/useTextFieldSpeech", () => ({
   useTextFieldSpeech: () => ({ blocksSubmission: true, submitAfterDictation: mocks.queue }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => mocks.submit }));
-vi.mock(import("~/state/pullRequests"), async (original) => ({
+vi.mock(import("~/state/query"), async (original) => ({
   ...(await original()),
-  pullRequestEnvironment: { submitReview: {} } as never,
+  useEnvironmentQuery: (() => ({ data: undefined })) as never,
 }));
+vi.mock(import("~/state/pullRequests"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  const denied = Atom.make(false);
+  return {
+    ...(await original()),
+    pullRequestEnvironment: {
+      submitReview: {},
+      detail: () => ({}),
+      gerritCommand: { permissionAtom: () => denied },
+    } as never,
+  };
+});
 
 it("submits only the line comments still in the draft when dictation finishes", async () => {
   mocks.submit.mockClear();

@@ -11,6 +11,7 @@ import {
   canEditPullRequestChangeRequest,
   canEditPullRequestComment,
   canResolvePullRequestThread,
+  canResolveWithReply,
   descriptionDraftInForce,
   settleDescriptionSave,
   startDescriptionSave,
@@ -204,6 +205,32 @@ describe("canResolvePullRequestThread", () => {
         canResolve: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("canResolveWithReply", () => {
+  const supported = {
+    capabilities: {
+      ...capabilities(),
+      review: { ...capabilities().review, resolveWithReply: true },
+    },
+  };
+
+  it("offers resolving with a reply only on an open thread the reader may resolve", () => {
+    expect(canResolveWithReply(supported, { isResolved: false }, true)).toBe(true);
+    expect(canResolveWithReply(supported, { isResolved: true }, true)).toBe(false);
+    expect(canResolveWithReply(supported, { isResolved: false, canResolve: false }, true)).toBe(
+      false,
+    );
+    expect(canResolveWithReply(supported, { isResolved: false }, false)).toBe(false);
+  });
+
+  it("never sends the flag to a host that resolves separately or before the thread loads", () => {
+    expect(canResolveWithReply({ capabilities: capabilities() }, { isResolved: false }, true)).toBe(
+      false,
+    );
+    expect(canResolveWithReply(undefined, { isResolved: false }, true)).toBe(false);
+    expect(canResolveWithReply(supported, undefined, true)).toBe(false);
   });
 });
 

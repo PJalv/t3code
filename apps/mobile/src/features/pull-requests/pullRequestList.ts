@@ -198,6 +198,8 @@ export function pullRequestListRowsAreEqual(
       previous.deletions === next.deletions &&
       previous.checksState === next.checksState &&
       previous.reviewDecision === next.reviewDecision &&
+      previous.gerritSubmittable === next.gerritSubmittable &&
+      previous.author?.name === next.author?.name &&
       previous.viewerReviewRequested === next.viewerReviewRequested &&
       previous.author?.login === next.author?.login &&
       previous.author?.avatarUrl === next.author?.avatarUrl &&

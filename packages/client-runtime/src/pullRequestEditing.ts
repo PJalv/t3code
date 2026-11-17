@@ -4,6 +4,31 @@ import type {
   PullRequestReviewThread,
 } from "@t3tools/contracts";
 
+export function gerritCommitMessageParts(message: string): {
+  readonly body: string;
+  readonly footers: ReadonlyArray<{ readonly key: string; readonly value: string }>;
+} {
+  const paragraphs = message
+    .replaceAll("\r\n", "\n")
+    .trim()
+    .split(/\n{2,}/);
+  const trailer = /^([A-Za-z][A-Za-z0-9-]*):\s+(.+)$/;
+  const last = paragraphs.length > 1 ? paragraphs.at(-1) : undefined;
+  const lines = last?.split("\n") ?? [];
+  const footers =
+    lines.length > 0 && lines.every((line) => trailer.test(line))
+      ? lines.map((line) => {
+          const [, key = "", value = ""] = trailer.exec(line) ?? [];
+          return { key, value };
+        })
+      : [];
+  const rest = footers.length > 0 ? paragraphs.slice(0, -1) : paragraphs;
+  return {
+    body: rest.slice(1).join("\n\n"),
+    footers: footers.filter((footer) => footer.key.toLowerCase() !== "change-id"),
+  };
+}
+
 type EditingSubject = Pick<
   PullRequestDetail,
   "author" | "capabilities" | "viewer" | "viewerPermissions"
@@ -117,4 +142,19 @@ export function canResolvePullRequestThread(
   thread: Pick<PullRequestReviewThread, "canResolve">,
 ): boolean {
   return detail.viewerPermissions.resolve && thread.canResolve !== false;
+}
+
+/** Whether a reply may also resolve its conversation, both to offer the option and to send it. */
+export function canResolveWithReply(
+  detail: Pick<PullRequestDetail, "capabilities"> | undefined,
+  thread: { readonly isResolved: boolean; readonly canResolve?: boolean } | undefined,
+  allowed: boolean,
+): boolean {
+  return (
+    allowed &&
+    thread !== undefined &&
+    !thread.isResolved &&
+    thread.canResolve !== false &&
+    detail?.capabilities.review.resolveWithReply === true
+  );
 }

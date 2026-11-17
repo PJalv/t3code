@@ -1,3 +1,4 @@
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
 import type {
   PullRequestActivity,
   PullRequestCheck,
@@ -204,7 +205,7 @@ export function normalizedReviewState(reviewState: string | null) {
 }
 
 export function pullRequestReviewSummary(
-  pr: Pick<PullRequestDetail, "reviewers">,
+  pr: Pick<PullRequestDetail, "reviewers"> & Partial<Pick<PullRequestDetail, "provider">>,
   activity: Pick<PullRequestActivity, "comments" | "commits"> | null,
   resolve: MessageResolver = m,
 ) {
@@ -227,7 +228,16 @@ export function pullRequestReviewSummary(
   }
   const reviews = [
     ...[...latest.values()].filter((review) => review.reviewState !== "DISMISSED"),
-    ...[...comments.entries()].filter(([key]) => !latest.has(key)).map(([, review]) => review),
+    ...[...comments.entries()]
+      .filter(([key, review]) => {
+        const verdict = latest.get(key);
+        return (
+          !verdict ||
+          (verdict.reviewState === "DISMISSED" &&
+            Date.parse(review.createdAt) > Date.parse(verdict.createdAt))
+        );
+      })
+      .map(([, review]) => review),
   ];
   const requested = reviews.filter((review) => review.reviewState === "CHANGES_REQUESTED");
   const newestCommit = Math.max(
@@ -253,7 +263,7 @@ export function pullRequestReviewSummary(
     return {
       title:
         approved.length === 1 && approved[0]?.author
-          ? resolve(msg("Approved by {login}", { login: approved[0].author.login }))
+          ? resolve(msg("Approved by {login}", { login: actorDisplayName(approved[0].author, pr.provider) }))
           : resolve(msg("Reviews approved")),
       count: resolve(
         msg("{count, plural, one {{count} approved} other {{count} approved}}", {

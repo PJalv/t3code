@@ -121,6 +121,9 @@ export const GerritAccount = Schema.Struct({
   email: Schema.optionalKey(Schema.String),
   username: Schema.optionalKey(Schema.String),
   display_name: Schema.optionalKey(Schema.String),
+  avatars: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ url: Schema.String, height: Schema.optionalKey(Schema.Int) })),
+  ),
   /** Gerrit marks bot accounts, for example `SERVICE_USER`, so their notices can stay quiet. */
   tags: Schema.optionalKey(Schema.Array(Schema.String)),
 });
@@ -148,6 +151,10 @@ export const GerritReadChange = Schema.Struct({
   status: Schema.Literals(["NEW", "MERGED", "ABANDONED"]),
   workInProgress: Schema.Boolean,
   topic: Schema.optionalKey(Schema.String),
+  submittable: Schema.optionalKey(Schema.Boolean),
+  reviewStatus: Schema.optionalKey(
+    Schema.Literals(["approved", "changes-requested", "review-required"]),
+  ),
   owner: GerritAccount,
   currentRevision: GitCommitOid,
   currentPatchSet: GerritPatchSetNumber,
@@ -358,6 +365,10 @@ export const GerritChangesSearchResult = Schema.Struct({
       status: GerritReadChange.fields.status,
       owner: GerritAccount,
       topic: Schema.optionalKey(Schema.String),
+      submittable: Schema.optionalKey(Schema.Boolean),
+      reviewStatus: Schema.optionalKey(
+        Schema.Literals(["approved", "changes-requested", "review-required"]),
+      ),
       updated: Schema.String,
       workInProgress: Schema.Boolean,
     }),

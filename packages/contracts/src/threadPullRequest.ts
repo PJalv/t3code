@@ -49,6 +49,7 @@ export const ThreadPullRequestSnapshot = Schema.Struct({
   deletions: Schema.optional(NonNegativeInt),
   changedFiles: Schema.optional(NonNegativeInt),
   reviewDecision: Schema.optional(Schema.NullOr(PullRequestReviewDecision)),
+  gerritSubmittable: Schema.optional(Schema.Boolean),
   checksState: Schema.optional(Schema.NullOr(PullRequestChecksState)),
   mergeability: Schema.optional(PullRequestMergeability),
   rebaseRequired: Schema.optional(Schema.Boolean),

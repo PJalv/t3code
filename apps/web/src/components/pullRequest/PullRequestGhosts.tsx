@@ -335,7 +335,12 @@ export function PullRequestDetailGhost({
           </div>
         </div>
 
-        <PullRequestDetailTabBar tabs={tabs} value={selectedTab} inert>
+        <PullRequestDetailTabBar
+          tabs={tabs}
+          value={selectedTab}
+          label={`${capitalizeTerm(terminology.singular)} tabs`}
+          inert
+        >
           {checksPresentation ? (
             <PullRequestChecksStatusLine
               className={checksPresentation.toneClassName}
