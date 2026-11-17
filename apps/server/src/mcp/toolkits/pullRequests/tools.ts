@@ -258,6 +258,7 @@ export const WatchPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
   watching: Schema.Boolean,
   wasWatching: Schema.Boolean,
+  ownAccountCommentsIgnored: Schema.Boolean,
 });
 export type WatchPullRequestResult = typeof WatchPullRequestResult.Type;
 

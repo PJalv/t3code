@@ -1161,7 +1161,14 @@ function OpenCommandPaletteDialog(props: {
 
     const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
       "url",
-      ...sortAddProjectProviderSources(readinessBySource, offeredProvidersFor(environmentId)),
+      ...sortAddProjectProviderSources(
+        readinessBySource,
+        offeredProvidersFor(environmentId),
+        Object.keys(
+          environments.find((environment) => environment.environmentId === environmentId)
+            ?.serverConfig?.settings.gerritConnections ?? {},
+        ).length > 0,
+      ),
     ];
 
     for (const source of orderedSources) {
