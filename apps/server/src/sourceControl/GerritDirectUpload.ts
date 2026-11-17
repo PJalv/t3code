@@ -59,6 +59,8 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
       "no-new-changes",
     ]),
     cause: Schema.optional(Schema.Defect()),
+    /** Gerrit's own rejection lines, so the agent can fix the upload instead of guessing. */
+    detail: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
@@ -82,7 +84,7 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
       case "fetch":
         return "Could not fetch and verify the Gerrit patch set.";
       case "push":
-        return "Gerrit upload failed.";
+        return this.detail ? `Gerrit rejected the upload: ${this.detail}` : "Gerrit upload failed.";
     }
   }
 }
@@ -107,6 +109,21 @@ export class GerritDirectUpload extends Context.Service<
 >()("t3/sourceControl/GerritDirectUpload") {}
 
 const isTargetBranch = Schema.is(GerritRemoteTargetBranch);
+
+// Git prints the remote URL in failures, and a remote URL can carry a password.
+export function pushRejection(output: string): string | undefined {
+  const lines = output
+    .split("\n")
+    .map((line) => line.replace(/:\/\/[^@/\s]+@/g, "://").trim())
+    .filter(
+      (line) =>
+        /^(?:remote:\s*\S|!|error:|fatal:)/.test(line) &&
+        !/^remote:\s*Processing changes/i.test(line),
+    )
+    .map((line) => line.replace(/^remote:\s*/, ""));
+  const text = lines.join(" ").replace(/\s+/g, " ").trim();
+  return text.length === 0 ? undefined : text.slice(0, 600);
+}
 const NON_INTERACTIVE_GIT_ENV = {
   GCM_INTERACTIVE: "never",
   GIT_ASKPASS: "",
@@ -247,12 +264,15 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError((cause) => new GerritDirectUploadError({ reason: "push", cause })));
       }),
     );
-    if (output.exitCode !== 0)
+    if (output.exitCode !== 0) {
+      const detail = pushRejection(`${output.stderr}\n${output.stdout}`);
       return yield* new GerritDirectUploadError({
         reason: /no new changes/i.test(`${output.stdout}\n${output.stderr}`)
           ? "no-new-changes"
           : "push",
+        ...(detail === undefined ? {} : { detail }),
       });
+    }
     const match = /https?:\/\/[^\s<>/]+\/(?:[^\s<>]*?\/\+\/)?(\d+)(?:\/(\d+))?(?=[\s<>]|$)/.exec(
       `${output.stderr}\n${output.stdout}`,
     );

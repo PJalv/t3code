@@ -109,3 +109,19 @@ it.effect("uploads a matching patch set and rejects a mismatched Change-Id befor
     ).toBe(f.run("rev-parse", "HEAD").trim());
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
+
+it("keeps Gerrit's rejection lines for the agent without the remote URL's password", () => {
+  const output = [
+    "To https://jane:hunter2@gerrit.example/a/project",
+    "remote: Processing changes: refs: 1, done",
+    "remote: ERROR: commit 7d583a9: missing Change-Id in message footer",
+    " ! [remote rejected] 7d583a9 -> refs/for/master (commit 7d583a9: missing Change-Id)",
+    "error: failed to push some refs to 'https://jane:hunter2@gerrit.example/a/project'",
+  ].join("\n");
+  const detail = Direct.pushRejection(output);
+  expect(detail).toContain("ERROR: commit 7d583a9: missing Change-Id in message footer");
+  expect(detail).toContain("! [remote rejected]");
+  expect(detail).not.toContain("hunter2");
+  expect(detail).not.toContain("Processing changes");
+  expect(Direct.pushRejection("Everything up-to-date\n")).toBeUndefined();
+});
