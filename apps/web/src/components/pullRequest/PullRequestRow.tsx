@@ -240,6 +240,7 @@ function PullRequestRowImpl({
               ) : null}
               <PullRequestRowAuthor
                 actor={entry.author}
+                provider={entry.provider}
                 className="min-w-3.5 max-w-40"
                 labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
               />

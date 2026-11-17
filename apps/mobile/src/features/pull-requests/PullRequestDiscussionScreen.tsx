@@ -1,4 +1,6 @@
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
+import { canResolveWithReply } from "@t3tools/client-runtime/pull-request-editing";
 import {
   parsePullRequestAnchor,
   pullRequestAnchorMatchesUrl,
@@ -23,12 +25,14 @@ import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/
 import { AppBar } from "../../components/ui/AppBar";
 import { Button } from "../../components/ui/Button";
 import { GlassSurface } from "../../components/ui/GlassSurface";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { compareTimestamps, relativeTime } from "../../lib/time";
 import { composerPullRequests } from "../../state/pull-requests";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironmentQuery } from "../../state/query";
 import { PullRequestMarkdown, PullRequestMarkdownRepository } from "./PullRequestMarkdown";
 import { PullRequestAvatar } from "./PullRequestPresentation";
+import { PullRequestDiscussionStatus } from "./PullRequestDiscussionStatus";
 import { PullRequestCommentFooter } from "./PullRequestReactions";
 import { pullRequestTarget, type PullRequestParams } from "./usePullRequestDiff";
 import { usePullRequestPermissions } from "./usePullRequestPermissions";
@@ -72,6 +76,12 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
     );
   const filePath = thread?.path === "/PATCHSET_LEVEL" ? null : (thread?.path ?? null);
   const [body, setBody] = useState("");
+  const [resolveWithReply, setResolveWithReply] = useState(false);
+  const offerResolve = canResolveWithReply(
+    detail.data ?? undefined,
+    thread || undefined,
+    permissions.canResolve,
+  );
   const completions = usePullRequestCompletions({
     environmentId: params.environmentId,
     projectId: params.projectId,
@@ -115,14 +125,20 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
   };
   const post = () =>
     operation(async () => {
-      if (!permissions.canReply || !body.trim() || !thread) return undefined;
+      if (!permissions.canReply || !body.trim() || !thread || thread.isDraft) return undefined;
       const submitted = body;
       const response = await reply({
         ...target,
-        input: { ...target.input, threadId: thread.id, body: submitted },
+        input: {
+          ...target.input,
+          threadId: thread.id,
+          body: submitted,
+          ...(resolveWithReply && offerResolve ? { resolve: true } : {}),
+        },
       });
       if (AsyncResult.isFailure(response)) return response;
       setBody((current) => (current === submitted ? "" : current));
+      setResolveWithReply(false);
       setNotice(gt("Reply posted."));
       refresh();
       return response;
@@ -163,7 +179,7 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
     location?.kind === "timeline"
       ? resolvePullRequestReviewAnchor(location.anchor, [], [{ comments }])
       : null;
-  const canReply = permissions.canReply && Boolean(thread);
+  const canReply = permissions.canReply && Boolean(thread) && !thread?.isDraft;
   const resolveLabel = thread?.isResolved
     ? gt("Unresolve", { $context: "review thread" })
     : gt("Resolve", { $context: "review thread" });
@@ -213,21 +229,25 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
           >
             {activity.isPending && !thread ? <AppActivityIndicator /> : null}
             {thread ? (
-              <View className="gap-2 pb-4">
+              <View
+                className={
+                  thread.isResolved
+                    ? "gap-2 border-l-2 border-border-subtle pl-3 pb-4"
+                    : "gap-2 border-l-2 border-warning-border pl-3 pb-4"
+                }
+              >
                 {thread.path === null ? null : (
                   <Text selectable className="font-mono text-xs text-foreground-muted">
                     {thread.path === "/PATCHSET_LEVEL" ? "Change-level discussion" : thread.path}
                     {thread.path !== "/PATCHSET_LEVEL" && thread.line ? `:${thread.line}` : ""}
                   </Text>
                 )}
-                <Text className="text-xs text-foreground-muted">
-                  {thread.isResolved
-                    ? gt("Resolved", { $context: "review thread state" })
-                    : gt("Unresolved", { $context: "review thread state" })}
-                  {thread.isOutdated
-                    ? ` · ${gt("Outdated", { $context: "review thread state" })}`
-                    : ""}
-                </Text>
+                <View className="flex-row items-center gap-2">
+                  <PullRequestDiscussionStatus resolved={thread.isResolved} />
+                  {thread.isOutdated ? (
+                    <Text className="text-xs text-foreground-muted">{gt("Outdated", { $context: "review thread state" })}</Text>
+                  ) : null}
+                </View>
                 {filePath === null ? null : (
                   <Button
                     label={gt("View file diff")}
@@ -265,7 +285,10 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
                 <View className="flex-row items-center gap-2">
                   <PullRequestAvatar actor={comment.author} size={28} />
                   <Text className="min-w-0 flex-1 text-sm font-t3-medium">
-                    {comment.author?.login ?? gt("Unknown author")}
+                    {actorDisplayName(
+                      comment.author,
+                      detail.data?.provider ?? params.initialSummary?.provider,
+                    ) ?? gt("Unknown author")}
                   </Text>
                   <Text className="text-2xs text-foreground-muted">
                     {relativeTime(comment.createdAt, undefined, messages)}
@@ -303,13 +326,21 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
           <View
             className="absolute inset-x-4 bottom-0 gap-2"
             style={{ paddingBottom: bottomInset }}
+            onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
           >
+            {offerResolve ? (
+              <View className="flex-row items-center justify-end gap-2">
+                <Text>Resolve conversation</Text>
+                <ThemedSwitch
+                  accessibilityLabel="Resolve conversation"
+                  value={resolveWithReply}
+                  onValueChange={setResolveWithReply}
+                  disabled={busy}
+                />
+              </View>
+            ) : null}
             <PullRequestCompletionSuggestions completions={completions} />
-            <GlassSurface
-              chrome="none"
-              onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
-              className="flex-row items-end gap-1 p-1"
-            >
+            <GlassSurface chrome="none" className="flex-row items-end gap-1 p-1">
               <TextInput
                 accessibilityLabel={gt("Discussion reply")}
                 selection={completions.selection}

@@ -12,6 +12,7 @@ import {
   type PullRequestConversationThread,
   type ScopedThreadRef,
   pullRequestConversationThreads,
+  GERRIT_CHANGE_LEVEL_PATH,
 } from "@t3tools/contracts";
 import {
   ArrowDownUpIcon,
@@ -39,6 +40,7 @@ import { formatFullTimestamp } from "~/timestampFormat";
 
 import { Button } from "../ui/button";
 import { PullRequestEditButton } from "./PullRequestEditButton";
+import { PullRequestDiscussionStatus } from "./PullRequestDiscussionStatus";
 import { gerritCommitMessageParts, PullRequestGerritSummary } from "./PullRequestGerritSummary";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -100,6 +102,7 @@ import {
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { canReactPullRequestComment } from "@t3tools/client-runtime/pull-request-reactions";
 import { PullRequestResolveThreadButton } from "./PullRequestResolveThreadButton";
+import { PullRequestThreadReply } from "./PullRequestThreadReply";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
 import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
 
@@ -124,7 +127,12 @@ function CommentIdentity({
     : null;
   return (
     <h2 className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-      <PullRequestActorLabel actor={actor} profileUrl={profileUrl} className="max-w-full" />
+      <PullRequestActorLabel
+        actor={actor}
+        provider={detail.provider}
+        profileUrl={profileUrl}
+        className="max-w-full"
+      />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -162,7 +170,10 @@ function CommentLocation({
 }) {
   const path = thread?.path ?? comment.path;
   if (!path) return null;
-  const label = `${path}${thread?.line ? `:${thread.line}` : ""}`;
+  const label =
+    path === GERRIT_CHANGE_LEVEL_PATH
+      ? "Change-level discussion"
+      : `${path}${thread?.line ? `:${thread.line}` : ""}`;
   return (
     <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
       <Tooltip>
@@ -291,6 +302,7 @@ function CollapsedComment({
   replyCount = 0,
   replies = null,
   moreReplies = null,
+  replyComposer = null,
   onAddToChat,
 }: {
   comment: PullRequestComment;
@@ -304,6 +316,7 @@ function CollapsedComment({
   replyCount?: number;
   replies?: ReactNode;
   moreReplies?: ReactNode;
+  replyComposer?: ReactNode;
   onAddToChat?: (() => void) | undefined;
 }) {
   const gt = useGT();
@@ -326,7 +339,7 @@ function CollapsedComment({
               ref={statusTriggerRef}
               className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
             >
-              {label}
+              {thread?.isResolved ? <PullRequestDiscussionStatus resolved /> : label}
               <ChevronDownIcon
                 aria-hidden
                 className={cn("size-3.5 transition-transform", open && "rotate-180")}
@@ -354,6 +367,7 @@ function CollapsedComment({
                 <CommentBody className="mt-2" comment={comment} editing={editing} />
               )}
               {replies ? <div className="mt-3">{replies}</div> : null}
+              {replyComposer}
             </div>
           ) : null}
         </CollapsiblePanel>
@@ -781,6 +795,7 @@ export function PullRequestSummaryTab({
         <div className="flex flex-wrap items-baseline gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
             <CommentIdentity comment={comment} detail={detail} />
+            {thread ? <PullRequestDiscussionStatus resolved={thread.isResolved} /> : null}
             {outcome ? (
               <PullRequestReviewOutcomeBadge outcome={outcome} />
             ) : comment.reviewState ? (
@@ -834,6 +849,15 @@ export function PullRequestSummaryTab({
       ) : null;
     const moreReplies =
       item.kind === "thread" && item.hasMoreReplies ? <PullRequestMoreReplies {...item} /> : null;
+    const replyComposer = thread ? (
+      <PullRequestThreadReply
+        environmentId={environmentId}
+        reference={reference}
+        detail={detail}
+        thread={thread}
+        onRefresh={onRefresh}
+      />
+    ) : null;
     if (isPullRequestCommentFinished(comment, thread)) {
       const chat = chatSubject(comment, thread);
       return (
@@ -852,6 +876,7 @@ export function PullRequestSummaryTab({
           replyCount={item.kind === "thread" ? item.replies.length + item.moreReplies : 0}
           replies={replies}
           moreReplies={moreReplies}
+          replyComposer={replyComposer}
           onAddToChat={onAddToChat && chat !== null ? () => onAddToChat(chat) : undefined}
           reactionBar={reactionBarFor(comment)}
           resolveButton={resolveButtonFor(thread)}
@@ -860,10 +885,17 @@ export function PullRequestSummaryTab({
     }
     if (item.kind === "comment") return renderCommentCard(comment, undefined);
     return (
-      <div key={`${detail.url}:thread:${item.id}`} className="space-y-2">
+      <div
+        key={`${detail.url}:thread:${item.id}`}
+        className={cn(
+          "space-y-2 rounded-lg border-l-2 pl-3",
+          thread?.isResolved ? "border-border/60" : "border-warning/70",
+        )}
+      >
         {renderCommentCard(comment, thread)}
         {replies}
         {moreReplies}
+        {replyComposer}
       </div>
     );
   };
@@ -915,6 +947,7 @@ export function PullRequestSummaryTab({
                         >
                           <PullRequestActorLabel
                             actor={entry.actor}
+                            provider={detail.provider}
                             tooltip={false}
                             variant="avatar"
                           />
@@ -950,6 +983,7 @@ export function PullRequestSummaryTab({
               {detail.capabilities.reviewers.request &&
               detail.capabilities.reviewers.listCandidates ? (
                 <PullRequestReviewerPicker
+                  provider={detail.provider}
                   searchable={detail.capabilities.reviewers.searchCandidates === true}
                   environmentId={environmentId}
                   reference={reference}

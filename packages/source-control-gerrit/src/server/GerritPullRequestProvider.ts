@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import { GerritHttp, type GerritHttpCredentials } from "./GerritHttp.ts";
 import { makeDirectActions } from "./GerritDirectActions.ts";
 import { mapGerritActivity } from "./gerritActivity.ts";
+import { gerritAccountActor as actor } from "./gerritAccount.ts";
 import { renderGerritUnifiedDiff } from "./gerritUnifiedDiff.ts";
 
 export type GerritCredentialResolver = (serverUrl: string) => Effect.Effect<
@@ -36,19 +37,28 @@ const error = (operation: string, detail: string) =>
   new PullRequestProviderError({ provider: kind, operation, reason: "failed", detail });
 const unsupported = (operation: string) =>
   Effect.fail(error(operation, "Gerrit operation is not yet supported."));
-const actor = (account: typeof GerritAccount.Type) => {
-  const login =
-    account.username || (account._account_id === undefined ? null : String(account._account_id));
-  return login === null
-    ? null
-    : { login, name: account.name ?? account.display_name ?? null, avatarUrl: null };
-};
 const state = (status: GerritReadChange["status"]) =>
   status === "NEW"
     ? ("open" as const)
     : status === "MERGED"
       ? ("merged" as const)
       : ("closed" as const);
+const mapChecks = (
+  checks: Extract<GerritReviewDetail["checks"], { kind: "available" }>["values"],
+) =>
+  checks.map((c) => ({
+    name: c.checker_name || c.checker_uuid,
+    status:
+      c.state === "SUCCESSFUL"
+        ? ("success" as const)
+        : c.state === "FAILED"
+          ? ("failure" as const)
+          : c.state === "NOT_RELEVANT"
+            ? ("skipped" as const)
+            : ("pending" as const),
+    description: c.message ?? null,
+    url: c.url ?? null,
+  }));
 const url = (server: string, project: string, number: number) =>
   `${server}c/${project.split("/").map(encodeURIComponent).join("/")}/+/${number}`;
 // Gerrit changes have no head branch; their fetchable ref is the closest equivalent. Older
@@ -73,6 +83,8 @@ const baseRow = (
     insertions?: number | undefined;
     deletions?: number | undefined;
     currentPatchSet?: number | null | undefined;
+    submittable?: boolean | undefined;
+    reviewStatus?: GerritReadChange["reviewStatus"] | undefined;
   },
   updated: string,
 ): ProviderChangeRequest => ({
@@ -91,6 +103,8 @@ const baseRow = (
   updatedAt: timestamp(updated),
   reviewRequestLogins: [],
   labels: [],
+  ...(c.submittable === undefined ? {} : { gerritSubmittable: c.submittable }),
+  ...(c.reviewStatus === undefined ? {} : { reviewDecision: c.reviewStatus }),
 });
 export const gerritDetailPermissions = (
   review: Pick<GerritReviewDetail, "actions" | "revisionActions">,
@@ -219,7 +233,7 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
     return {
       a,
       accountId: String(account._account_id),
-      viewer: account.username || String(account._account_id),
+      viewer: actor(account)?.login ?? String(account._account_id),
     };
   });
   const requireOpen = (change: Pick<GerritReadChange, "status">, operation: string) =>
@@ -312,6 +326,7 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
         inlineComment: true,
         reply: true,
         resolve: true,
+        resolveWithReply: true,
         verdicts: ["comment", "approve", "request-changes"],
       },
       reviewers: { request: true, listCandidates: true, searchCandidates: true },
@@ -389,6 +404,7 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
               account.value === undefined ? [] : [{ account, value: account.value }],
             ),
             permittedValues: reviewOpen(change) ? (detail.permittedLabels[name] ?? []) : [],
+            ...(label.values === undefined ? {} : { valueDescriptions: label.values }),
             required: !label.optional,
           })),
           submitRequirements: (detail.requirements ?? []).map((r) => {
@@ -419,7 +435,7 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
         reviewers: Object.values(detail.reviewers).flatMap((accounts) =>
           accounts.flatMap((a) => actor(a) ?? []),
         ),
-        checks: [],
+        checks: detail.checks.kind === "available" ? mapChecks(detail.checks.values) : [],
         mergeCapabilities: { merge: false, squash: false, rebase: false },
         viewerPermissions: permissions(detail, change),
       };
@@ -452,19 +468,7 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
           );
         return {
           state: state(change.status),
-          checks: detail.checks.values.map((c) => ({
-            name: c.checker_name || c.checker_uuid,
-            status:
-              c.state === "SUCCESSFUL"
-                ? ("success" as const)
-                : c.state === "FAILED"
-                  ? ("failure" as const)
-                  : c.state === "NOT_RELEVANT"
-                    ? ("skipped" as const)
-                    : ("pending" as const),
-            description: c.message ?? null,
-            url: c.url ?? null,
-          })),
+          checks: mapChecks(detail.checks.values),
         };
       },
     ),
@@ -600,8 +604,16 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
     }),
     getChangeRequestActivity: Effect.fn("GerritPullRequestProvider.getChangeRequestActivity")(
       function* (input) {
-        const { detail } = yield* review(input, "getChangeRequestActivity");
-        return mapGerritActivity(detail);
+        const { change, detail } = yield* review(input, "getChangeRequestActivity");
+        return mapGerritActivity({
+          ...detail,
+          patchSets: change.patchSetDetails.map((patchSet) => ({
+            ...patchSet,
+            fallbackDate:
+              change.revisions.find((revision) => revision.commit === patchSet.commit)?.committer
+                .date ?? change.created,
+          })),
+        });
       },
     ),
     // Gerrit only suggests accounts for a search, so the unsearched list is the current reviewers
@@ -704,7 +716,11 @@ export const make = Effect.fn("GerritPullRequestProvider.make")(function* (
               ...comment.anchor,
               inReplyTo: comment.id,
               message: input.body,
-              ...(comment.unresolved === null ? {} : { unresolved: comment.unresolved }),
+              ...(input.resolve
+                ? { unresolved: false }
+                : comment.unresolved === null
+                  ? {}
+                  : { unresolved: comment.unresolved }),
             },
           },
         )
