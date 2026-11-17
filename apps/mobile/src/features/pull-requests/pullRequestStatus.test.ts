@@ -61,6 +61,27 @@ describe("mobile overview review status", () => {
     expect(result.title).toBe("Awaiting review");
   });
 
+  it("shows a later comment after a dismissed verdict", () => {
+    const result = pullRequestReviewSummary(
+      { reviewers: [] },
+      activity([
+        review("DISMISSED", "2026-10-10T09:00:00Z"),
+        review("COMMENTED", "2026-10-10T10:00:00Z"),
+      ]),
+    );
+    expect(result.count).toBe("1 commented");
+    expect(result.reviews.map((entry) => entry.reviewState)).toEqual(["COMMENTED"]);
+    expect(
+      pullRequestReviewSummary(
+        { reviewers: [] },
+        activity([
+          review("COMMENTED", "2026-10-10T08:00:00Z"),
+          review("DISMISSED", "2026-10-10T09:00:00Z"),
+        ]),
+      ).reviews,
+    ).toEqual([]);
+  });
+
   it("keeps an approval when a later review only comments, and normalizes provider spelling", () => {
     const result = pullRequestReviewSummary(
       { reviewers: [] },

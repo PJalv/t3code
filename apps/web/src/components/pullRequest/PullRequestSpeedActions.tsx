@@ -23,7 +23,15 @@ import { changeRequestTermKind } from "./changeRequestTerm";
 
 type PullRequestSpeedActionEntry = Pick<
   EnvironmentPullRequestEntry,
-  "environmentId" | "projectId" | "host" | "repository" | "number" | "state" | "isDraft"
+  | "environmentId"
+  | "projectId"
+  | "host"
+  | "repository"
+  | "number"
+  | "state"
+  | "isDraft"
+  | "provider"
+  | "gerrit"
 > & { readonly stack?: object | undefined };
 
 export interface PullRequestSpeedActionResult<Entry = EnvironmentPullRequestEntry> {
@@ -99,7 +107,7 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
       )}
     >
       {actions.map((action) => {
-        const label = resolve(ACTIONS[action].label);
+        const label = terminology.verbs?.[action] ?? resolve(ACTIONS[action].label);
         const Icon = ACTIONS[action].Icon;
         return (
           <Tooltip key={action}>
@@ -129,8 +137,8 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
                     { term: changeRequestTermKind(terminology) },
                   )
                 : action === "close" && onCloseSweepStart
-                  ? gt("Close immediately, or drag across rows to close several")
-                  : resolve(ACTIONS[action].immediate)}
+                  ? gt("{action} immediately, or drag across rows to {verb} several", { action: label, verb: label.toLowerCase() })
+                  : gt("{action} immediately", { action: label })}
             </TooltipPopup>
           </Tooltip>
         );
