@@ -9,16 +9,18 @@ export function PullRequestActivityFilters({
   value,
   onChange,
   hiddenCount,
+  isGerrit = false,
 }: {
   readonly value: ActivityFilter;
   readonly onChange: (value: ActivityFilter) => void;
   readonly hiddenCount: number;
+  readonly isGerrit?: boolean;
 }) {
   const gt = useGT();
   const kinds = [
     { id: "all", title: gt("All activity") },
     { id: "comments", title: gt("Comments", { $context: "activity filter" }) },
-    { id: "commits", title: gt("Commits", { $context: "activity filter" }) },
+    { id: "commits", title: isGerrit ? gt("Patch sets") : gt("Commits", { $context: "activity filter" }) },
   ] as const;
   return (
     <View className="mb-4 flex-row items-center justify-between gap-3">

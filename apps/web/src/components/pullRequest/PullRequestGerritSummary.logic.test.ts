@@ -38,6 +38,10 @@ describe("Gerrit presentation", () => {
       { value: "0", label: "0" },
       { value: "-1", label: "-1" },
     ]);
+    expect(gerritVoteOptions([2, -1], { "+2": "Looks good to me, approved" })).toEqual([
+      { value: "2", label: "+2 Looks good to me, approved" },
+      { value: "-1", label: "-1" },
+    ]);
     expect(gerritVoteOptions([])).toEqual([]);
   });
   it("does not present unavailable requirements as satisfied", () => {
@@ -65,14 +69,11 @@ describe("Gerrit presentation", () => {
       ),
     ).toEqual({
       body: "Why it changed.",
-      footers: [
-        { key: "Change-Id", value: "I1" },
-        { key: "Signed-off-by", value: "A <a@example.com>" },
-      ],
+      footers: [{ key: "Signed-off-by", value: "A <a@example.com>" }],
     });
     expect(gerritCommitMessageParts("feat: subject\n\nChange-Id: I1")).toEqual({
       body: "",
-      footers: [{ key: "Change-Id", value: "I1" }],
+      footers: [],
     });
     // A last paragraph with prose is body text, not a trailer block.
     expect(gerritCommitMessageParts("s\n\nNote: this is prose\nand continues").footers).toEqual([]);

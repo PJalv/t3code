@@ -1,4 +1,8 @@
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import {
+  actorDisplayName,
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../../lib/changeRequestTerm";
 import { useGT, useMessages } from "gt-react-native";
 import { memo } from "react";
@@ -123,7 +127,7 @@ export const PullRequestListRow = memo(
               item.title,
               status.label,
               conflict ? conflict.label.toLowerCase() : null,
-              gt("by {author}", { author: item.author?.login ?? gt("unknown author") }),
+              gt("by {author}", { author: actorDisplayName(item.author, item.provider) ?? gt("unknown author") }),
               review ? review.accessibleLabel : null,
               checksSpoken,
               item.stack

@@ -1305,6 +1305,7 @@ function PullRequestCodeTab({
       // Host thread ids can collide across pull requests.
       key={`${reference.projectId}#${reference.number}:${thread.id}`}
       thread={thread}
+      provider={detail.provider}
       workspaceRoot={detail.workspaceRoot}
       canReply={review.reply}
       canResolve={review.resolve && canResolvePullRequestThread(detail, thread)}

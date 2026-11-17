@@ -26,6 +26,7 @@ export function PullRequestMarkdownEditor({
   placeholder,
   label,
   saving,
+  saveLabel = "Save",
   allowEmpty = false,
   className,
   onSave,
@@ -39,6 +40,7 @@ export function PullRequestMarkdownEditor({
   readonly placeholder?: string | undefined;
   readonly label: string;
   readonly saving: boolean;
+  readonly saveLabel?: string;
   readonly allowEmpty?: boolean;
   readonly className?: string | undefined;
   readonly onSave: (next: string) => void;
@@ -144,7 +146,7 @@ export function PullRequestMarkdownEditor({
             onSave(draft);
           }}
         >
-          {saving ? gt("Saving...") : gt("Save")}
+          {saving ? gt("Saving...") : saveLabel}
         </Button>
       </div>
     </div>

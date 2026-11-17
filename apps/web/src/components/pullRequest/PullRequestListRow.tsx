@@ -1,3 +1,4 @@
+import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
 import type {
   PullRequestActor,
   PullRequestMergeability,
@@ -105,10 +106,12 @@ export function PullRequestRowLines({
 
 export function PullRequestRowAuthor({
   actor,
+  provider,
   className,
   labelClassName,
 }: {
   actor: PullRequestActor | null;
+  provider?: string | undefined;
   className?: string;
   labelClassName?: string;
 }) {
@@ -119,7 +122,9 @@ export function PullRequestRowAuthor({
         render={<span className={cn("inline-flex min-w-0 items-center gap-1", className)} />}
       >
         <PullRequestActorAvatar actor={actor} className="size-3.5" />
-        <span className={cn("truncate", labelClassName)}>{login}</span>
+        <span className={cn("truncate", labelClassName)}>
+          {actorDisplayName(actor, provider) ?? "ghost"}
+        </span>
       </TooltipTrigger>
       <TooltipPopup side="top">
         {actor?.name && actor.name !== login ? `${actor.name} (@${login})` : login}

@@ -69,13 +69,13 @@ const openDetail: Detail = {
 function setup() {
   mocks.update.mockReset().mockResolvedValue({ _tag: "Success" });
   mocks.notify.mockReset();
-  return (detail: Detail = openDetail) => (
+  return (detail: Detail = openDetail, gerrit = false) => (
     <PullRequestActionsMenu
       environmentId={environmentId}
       reference={reference}
       pullRequestKey="owner/repo/7"
       detail={detail}
-      terminology={sourceControlClients.get("github").changeRequest}
+      terminology={sourceControlClients.get(gerrit ? "gerrit" : "github").changeRequest}
       threadRef={null}
       linkThreadRef={null}
       onThreadPickerOpenChange={() => {}}
@@ -95,10 +95,10 @@ function setup() {
       pickableEnvironments={[]}
       actingEnvironmentId={environmentId}
       onActingEnvironmentChange={() => {}}
-      can={() => false}
+      can={() => gerrit}
       autoMergeArmed={false}
-      showsDraftToggle={false}
-      showsMergeNow={false}
+      showsDraftToggle={gerrit}
+      showsMergeNow={gerrit}
       showsAutoMerge={false}
       showsMergeMethods={false}
       allowedMergeMethods={[]}
@@ -116,6 +116,17 @@ function setup() {
     />
   );
 }
+
+it("uses Gerrit action labels for both open and closed changes", async () => {
+  const control = setup();
+  await using screen = await render(control(openDetail, true));
+  await screen.getByRole("button", { name: "More change actions" }).click();
+  await expect.element(page.getByRole("menuitem", { name: "Mark work in progress" })).toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Submit now" })).toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Abandon change" })).toBeVisible();
+  await screen.rerender(control({ ...openDetail, state: "closed" }, true));
+  await expect.element(page.getByRole("menuitem", { name: "Restore change" })).toBeVisible();
+});
 
 it("saves maintainer edits, locks while saving, and restores the saved value when a save fails", async () => {
   const control = setup();

@@ -105,6 +105,8 @@ const WireChange = Schema.Struct({
   work_in_progress: Schema.optionalKey(Schema.Boolean),
   is_private: Schema.optionalKey(Schema.Boolean),
   topic: Schema.optionalKey(Schema.String),
+  submittable: Schema.optionalKey(Schema.Boolean),
+  labels: Schema.optionalKey(Schema.Record(Schema.String, GerritLabel)),
   owner: GerritAccount,
   current_revision: GitCommitOid,
   revisions: Schema.Record(
@@ -312,7 +314,14 @@ const decodeRelatedRevision = Schema.decodeUnknownEffect(GerritRelatedRevision);
 const isReadError = Schema.is(GerritReadError);
 
 const literal = (value: string) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-const options = ["ALL_REVISIONS", "ALL_COMMITS", "DETAILED_ACCOUNTS"];
+const options = ["ALL_REVISIONS", "ALL_COMMITS", "DETAILED_ACCOUNTS", "LABELS", "SUBMITTABLE"];
+const reviewStatus = (labels: Readonly<Record<string, typeof GerritLabel.Type>> | undefined) => {
+  const label = labels?.["Code-Review"];
+  if (!label) return undefined;
+  if (label.rejected) return "changes-requested" as const;
+  if (label.approved) return "approved" as const;
+  return "review-required" as const;
+};
 const invalidResponse = () => new GerritReadError({ reason: "invalid-response" });
 
 const normalizeChange = Effect.fn("GerritHttp.normalizeChange")(function* (
@@ -343,6 +352,8 @@ const normalizeChange = Effect.fn("GerritHttp.normalizeChange")(function* (
     status: wire.status,
     workInProgress: wire.work_in_progress ?? false,
     ...(wire.topic === undefined ? {} : { topic: wire.topic }),
+    ...(wire.submittable === undefined ? {} : { submittable: wire.submittable }),
+    ...(reviewStatus(wire.labels) === undefined ? {} : { reviewStatus: reviewStatus(wire.labels) }),
     owner: wire.owner,
     currentRevision: wire.current_revision,
     currentPatchSet: current._number,
@@ -600,6 +611,8 @@ const make = Effect.gen(function* () {
       status: GerritReadChange.fields.status,
       owner: GerritAccount,
       topic: Schema.optionalKey(Schema.String),
+      submittable: Schema.optionalKey(Schema.Boolean),
+      labels: Schema.optionalKey(Schema.Record(Schema.String, GerritLabel)),
       updated: Schema.String,
       created: Schema.optionalKey(Schema.String),
       insertions: Schema.optionalKey(NonNegativeInt),
@@ -611,6 +624,8 @@ const make = Effect.gen(function* () {
     const rows = yield* request(auth, "changes/", Schema.Array(rowSchema), [
       ["q", terms.join(" ")],
       ["o", "DETAILED_ACCOUNTS"],
+      ["o", "LABELS"],
+      ["o", "SUBMITTABLE"],
       ["n", String(query.limit)],
       ["S", String(query.offset)],
     ]);
@@ -633,25 +648,30 @@ const make = Effect.gen(function* () {
     const nextOffset = query.offset + rows.length;
     const completeness = !more ? "complete" : nextOffset <= 10000 ? "more" : "truncated";
     return {
-      changes: rows.map((row) => ({
-        installation: auth.installation,
-        project: row.project,
-        branch: row.branch,
-        changeId: row.change_id,
-        number: row._number,
-        subject: row.subject,
-        status: row.status,
-        owner: row.owner,
-        ...(row.topic === undefined ? {} : { topic: row.topic }),
-        updated: row.updated,
-        ...(row.created === undefined ? {} : { created: row.created }),
-        ...(row.insertions === undefined ? {} : { insertions: row.insertions }),
-        ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
-        ...(row.current_revision_number === undefined
-          ? {}
-          : { currentPatchSet: row.current_revision_number }),
-        workInProgress: row.work_in_progress ?? false,
-      })),
+      changes: rows.map((row) => {
+        const status = reviewStatus(row.labels);
+        return {
+          installation: auth.installation,
+          project: row.project,
+          branch: row.branch,
+          changeId: row.change_id,
+          number: row._number,
+          subject: row.subject,
+          status: row.status,
+          owner: row.owner,
+          ...(row.topic === undefined ? {} : { topic: row.topic }),
+          ...(row.submittable === undefined ? {} : { submittable: row.submittable }),
+          ...(status === undefined ? {} : { reviewStatus: status }),
+          updated: row.updated,
+          ...(row.created === undefined ? {} : { created: row.created }),
+          ...(row.insertions === undefined ? {} : { insertions: row.insertions }),
+          ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
+          ...(row.current_revision_number === undefined
+            ? {}
+            : { currentPatchSet: row.current_revision_number }),
+          workInProgress: row.work_in_progress ?? false,
+        };
+      }),
       nextOffset: completeness === "more" ? nextOffset : null,
       completeness,
     } satisfies GerritChangesSearchResult;

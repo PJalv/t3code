@@ -196,7 +196,7 @@ export function usePullRequestListActions(
             },
             {
               id: entry.isDraft ? "ready" : "draft",
-              title: entry.isDraft ? gt("Mark ready for review") : gt("Convert to draft"),
+              title: pullRequestActionLabel(entry.isDraft ? "ready" : "draft", terminology, messages),
               image: "pencil",
             },
             {

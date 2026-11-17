@@ -168,6 +168,8 @@ export function PullRequestActionsMenu({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const inlineConfirm = useInlineActionConfirm(pullRequestKey);
   const actionPending = pendingAction !== null;
+  const mergeLabel = terminology.verbs?.merge ?? "Merge";
+  const closeLabel = terminology.verbs?.close ?? "Close";
   const maintainerEditsHintId = useId();
   const updatePullRequest = useAtomCommand(pullRequestEnvironment.update, {
     reportFailure: false,
@@ -366,18 +368,26 @@ export function PullRequestActionsMenu({
                 ) : (
                   <PullRequestGlyph.draft className="size-3.5" />
                 )}
-                {detail.isDraft ? gt("Ready for review") : gt("Convert to draft")}
+                {detail.isDraft
+                  ? (terminology.verbs?.ready ?? gt("Ready for review"))
+                  : (terminology.verbs?.draft ?? gt("Convert to draft"))}
               </MenuItem>
             ) : null}
             {showsMergeNow ? (
               <MenuItem
                 closeOnClick={inlineConfirm.isArmed("merge")}
-                aria-label={inlineConfirm.isArmed("merge") ? gt("Confirm merge?") : gt("Merge now")}
+                aria-label={
+                  inlineConfirm.isArmed("merge")
+                    ? gt("Confirm {action}?", { action: mergeLabel.toLowerCase() })
+                    : gt("{action} now", { action: mergeLabel })
+                }
                 disabled={actionPending}
                 {...inlineConfirm.props("merge", () => void perform("merge", selectedMergeMethod))}
               >
                 <PullRequestGlyph.merged className="size-3.5" />
-                {inlineConfirm.isArmed("merge") ? gt("Confirm merge?") : gt("Merge now")}
+                {inlineConfirm.isArmed("merge")
+                  ? gt("Confirm {action}?", { action: mergeLabel.toLowerCase() })
+                  : gt("{action} now", { action: mergeLabel })}
               </MenuItem>
             ) : null}
             {autoMergeArmed && can("disable-auto-merge") ? (
@@ -491,11 +501,8 @@ export function PullRequestActionsMenu({
               closeOnClick={inlineConfirm.isArmed("close")}
               aria-label={
                 inlineConfirm.isArmed("close")
-                  ? gt("Confirm close?")
-                  : gt(
-                      "Close {term, select, mr {merge request} cr {change request} other {pull request}}",
-                      { term: changeRequestTermKind(terminology) },
-                    )
+                  ? gt("Confirm {action}?", { action: closeLabel.toLowerCase() })
+                  : `${closeLabel} ${terminology.singular}`
               }
               variant="destructive"
               disabled={actionPending}
@@ -503,11 +510,8 @@ export function PullRequestActionsMenu({
             >
               <PullRequestGlyph.closed className="size-3.5" />
               {inlineConfirm.isArmed("close")
-                ? gt("Confirm close?")
-                : gt(
-                    "Close {term, select, mr {merge request} cr {change request} other {pull request}}",
-                    { term: changeRequestTermKind(terminology) },
-                  )}
+                ? gt("Confirm {action}?", { action: closeLabel.toLowerCase() })
+                : `${closeLabel} ${terminology.singular}`}
             </MenuItem>
           </>
         ) : detail.state === "closed" && can("reopen") ? (
@@ -515,16 +519,7 @@ export function PullRequestActionsMenu({
             <MenuSeparator />
             <MenuItem disabled={actionPending} onClick={() => void perform("reopen")}>
               <PullRequestGlyph.reopen className="size-3.5" />
-              <T>
-                Reopen{" "}
-                <Branch
-                  branch={changeRequestTermKind(terminology)}
-                  mr="merge request"
-                  cr="change request"
-                >
-                  pull request
-                </Branch>
-              </T>
+              {terminology.verbs?.reopen ?? "Reopen"} {terminology.singular}
             </MenuItem>
           </>
         ) : detail.state === "merged" && can("revert") ? (
