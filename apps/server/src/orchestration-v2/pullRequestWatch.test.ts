@@ -820,6 +820,48 @@ describe("evaluatePullRequestWatch", () => {
     ]);
   });
 
+  it("tells the agent when another account uploads a newer Gerrit patch set", () => {
+    const gerrit = (uploader: string): NonNullable<Detail["gerrit"]> => ({
+      changeId: "I0123456789abcdef0123456789abcdef01234567",
+      topic: null,
+      isPrivate: false,
+      isWip: false,
+      currentPatchSet: 2,
+      patchSets: [
+        { number: 1, commit: "aaaaaaaaaa", createdAt: STARTED },
+        {
+          number: 2,
+          commit: "bbbbbbbbbb",
+          createdAt: STARTED,
+          uploader: { _account_id: 7, name: `${uploader} Name`, username: uploader },
+        },
+      ],
+      labels: [],
+      submitRequirements: [],
+      submittable: null,
+    });
+    const before = evaluatePullRequestWatch(watch(), detail({ checks: [] }), noRemarks).next;
+    const theirs = detail({ headSha: "bbbbbbbbbb", checks: [], gerrit: gerrit("coworker") });
+    const ours = detail({ headSha: "bbbbbbbbbb", checks: [], gerrit: gerrit("agent-user") });
+
+    const report = evaluatePullRequestWatch(before, theirs, noRemarks);
+    assert.deepEqual(report.changes, [
+      { kind: "new-patch-set", patchSet: 2, uploader: "coworker Name" },
+    ]);
+    assert.include(
+      pullRequestWatchMessage({
+        number: 1,
+        url: "https://gerrit.example/c/p/+/1",
+        baseBranch: "main",
+        headSha: report.next.headSha,
+        report,
+      }).text,
+      "coworker Name uploaded patch set 2 on bbbbbbb",
+    );
+    assert.deepEqual(evaluatePullRequestWatch(report.next, theirs, noRemarks).changes, []);
+    assert.deepEqual(evaluatePullRequestWatch(before, ours, noRemarks).changes, []);
+  });
+
   // regression: #16208 PR watches burned GitHub's rate limit and gave up
   it("does not report passed again for a new passed check where none is required", () => {
     const first = evaluatePullRequestWatch(
