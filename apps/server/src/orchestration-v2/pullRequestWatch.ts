@@ -27,6 +27,7 @@ export type PullRequestWatchChange =
   | { readonly kind: "no-checks"; readonly minutes: number }
   | { readonly kind: "conflicting" }
   | { readonly kind: "needs-rebase" }
+  | { readonly kind: "new-patch-set"; readonly patchSet: number; readonly uploader: string | null }
   | { readonly kind: "merge-queue-removed"; readonly reason: string | null };
 
 export interface PullRequestWatchReport {
@@ -63,6 +64,7 @@ export function evaluatePullRequestWatch(
     | "author"
     | "rebaseRequired"
     | "mergeQueueRemoval"
+    | "gerrit"
   >,
   remarks: ReadonlyArray<PullRequestComment> | null,
   now: number,
@@ -72,6 +74,8 @@ export function evaluatePullRequestWatch(
   const headSha = detail.headSha ?? watch.headSha;
   const headMoved = watch.headSha !== null && headSha !== watch.headSha;
   const checksBaseline = watch.awaitingBaseline !== undefined && !headMoved;
+  const upload = headMoved ? foreignPatchSet(detail, headSha) : null;
+  if (upload !== null) changes.push(upload);
 
   // Hosts can return no checks on read failure; preserve prior state.
   let failedChecks = headMoved ? [] : watch.failedChecks;
@@ -397,6 +401,26 @@ function listed<T>(items: ReadonlyArray<T>, line: (item: T) => string): Array<st
 const failedCheckLine = (check: PullRequestCheck) =>
   `  - ${check.name}${check.status === "failure" ? "" : ` (${check.status})`}${check.url ? ` ${check.url}` : ""}`;
 
+// Another account's patch set replaces the commit the agent works from, so it must refetch before
+// editing; the agent's own uploads move the head too and are not news.
+function foreignPatchSet(
+  detail: Pick<PullRequestDetail, "gerrit" | "viewer">,
+  headSha: string | null,
+): PullRequestWatchChange | null {
+  const patchSet = detail.gerrit?.patchSets.find((candidate) => candidate.commit === headSha);
+  if (patchSet === undefined) return null;
+  const uploader = patchSet.uploader;
+  const viewer = detail.viewer?.trim().toLowerCase();
+  const identities = [uploader?.username, uploader?.email, uploader?._account_id?.toString()]
+    .map((value) => value?.trim().toLowerCase())
+    .filter((value) => value !== undefined && value.length > 0);
+  if (viewer !== undefined && identities.includes(viewer)) return null;
+  const name = [uploader?.name, uploader?.username, uploader?.email]
+    .map((value) => value?.trim())
+    .find((value) => value !== undefined && value.length > 0);
+  return { kind: "new-patch-set", patchSet: patchSet.number, uploader: name ?? null };
+}
+
 function changeLines(
   change: PullRequestWatchChange,
   context: { readonly baseBranch: string; readonly commit: string },
@@ -436,6 +460,10 @@ function changeLines(
       return [`- The branch requires a rebase onto ${context.baseBranch}.`];
     case "conflicting":
       return [`- The branch now conflicts with ${context.baseBranch}.`];
+    case "new-patch-set":
+      return [
+        `- ${change.uploader ?? "Someone else"} uploaded patch set ${change.patchSet}${context.commit}. Fetch it with fetch_gerrit_patch_set and build on it before editing or uploading again, or your next upload replaces their work.`,
+      ];
     case "merge-queue-removed":
       return [
         `- It was removed from the merge queue without merging${change.reason === null ? "" : `: ${change.reason}`}.`,
@@ -452,6 +480,7 @@ const SUMMARY: Record<PullRequestWatchChange["kind"], string> = {
   "no-checks": "no checks reported",
   conflicting: "merge conflict",
   "needs-rebase": "rebase required",
+  "new-patch-set": "new patch set",
   "merge-queue-removed": "removed from merge queue",
 };
 
