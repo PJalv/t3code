@@ -62,7 +62,7 @@ function FileChangeInspector({
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >
-            {expanded ? "Hide diff" : "Show diff"}
+            {expanded ? <T>Hide diff</T> : <T>Show diff</T>}
           </Button>
         ) : null}
         {onOpenToolDiff ? (
@@ -77,7 +77,7 @@ function FileChangeInspector({
               })
             }
           >
-            Open diff
+            <T>Open diff</T>
           </Button>
         ) : null}
       </div>
@@ -85,7 +85,13 @@ function FileChangeInspector({
         <StructuredValue value={item.diffStr} />
       ) : null}
       {expanded && hasDiff ? (
-        <Suspense fallback={<div className="text-muted-foreground">Loading diff…</div>}>
+        <Suspense
+          fallback={
+            <div className="text-muted-foreground">
+              <T>Loading diff…</T>
+            </div>
+          }
+        >
           <V2FileChangeDiffView item={item} cacheKey={`v2:${item.id}:${item.fileName}`} />
         </Suspense>
       ) : null}

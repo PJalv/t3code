@@ -865,7 +865,7 @@ function ConnectionsSettingsContent({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not set the network interface",
+          title: gt("Could not set the network interface"),
           description: message,
         }),
       );
@@ -1271,12 +1271,14 @@ function ConnectionsSettingsContent({
           isPreferredLanInterfaceMissing ? (
             <span className="block">
               <span className="text-warning">
-                Interface {preferredLanInterfaceName} is no longer detected. Using automatic
-                selection until it comes back.
+                <T>
+                  Interface <Var>{preferredLanInterfaceName}</Var> is no longer detected. Using
+                  automatic selection until it comes back.
+                </T>
               </span>
             </span>
           ) : (
-            "Choose which network pairing links use when several interfaces are available."
+            gt("Choose which network pairing links use when several interfaces are available.")
           )
         }
         control={
@@ -1290,7 +1292,7 @@ function ConnectionsSettingsContent({
             <SelectTrigger
               size="sm"
               className="w-full sm:w-64"
-              aria-label="Local network interface"
+              aria-label={gt("Local network interface")}
               disabled={isUpdatingLanInterface}
             >
               <SelectValue>{selectValue === "auto" ? automaticLabel : selectValue}</SelectValue>

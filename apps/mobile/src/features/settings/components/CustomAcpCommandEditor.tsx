@@ -8,6 +8,7 @@ import { AcpRegistrySettings } from "@t3tools/provider-acp-registry/settings";
 import * as Schema from "effect/Schema";
 import { useState } from "react";
 import { TextInput, View } from "react-native";
+import { T, useGT } from "gt-react-native";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { serverEnvironment } from "../../../state/server";
 import { useAtomCommand } from "../../../state/use-atom-command";
@@ -83,6 +84,7 @@ const buildProviderInstanceMutation = (input: {
 };
 
 export function CustomAcpCommandEditor({ environment }: { readonly environment: SettingsTarget }) {
+  const gt = useGT();
   const instances = environment.serverConfig.settings.providerInstances;
   const save = useAtomCommand(serverEnvironment.mutateProviderInstance);
   const [id, setId] = useState("acpRegistry_custom");
@@ -111,10 +113,14 @@ export function CustomAcpCommandEditor({ environment }: { readonly environment: 
   }
   return (
     <View className="gap-3 p-4">
-      <Text className="text-lg font-semibold text-foreground">Custom ACP command</Text>
+      <Text className="text-lg font-semibold text-foreground">
+        <T>Custom ACP command</T>
+      </Text>
       <Text className="text-sm text-foreground-muted">
-        Runs on the selected environment. Arguments are a JSON array; environment overrides are a
-        JSON object. No shell is used.
+        <T>
+          Runs on the selected environment. Arguments are a JSON array; environment overrides are a
+          JSON object. No shell is used.
+        </T>
       </Text>
       {Object.entries(instances)
         .filter(([, instance]) => instance.driver === "acpRegistry")
@@ -122,7 +128,7 @@ export function CustomAcpCommandEditor({ environment }: { readonly environment: 
           <SettingsActionRow
             key={key}
             icon="pencil"
-            label={`Edit ${instance.displayName ?? key}`}
+            label={gt("Edit {name}", { name: instance.displayName ?? key })}
             disabled={pending}
             onPress={() => {
               const config = decodeSettings(instance.config ?? {});
@@ -141,7 +147,7 @@ export function CustomAcpCommandEditor({ environment }: { readonly environment: 
       {field("Display name", name, setName)}
       <SettingsActionRow
         icon="arrow.left.arrow.right"
-        label={`ACP source: ${source}. Tap to switch.`}
+        label={gt("ACP source: {source}. Tap to switch.", { source })}
         disabled={pending}
         onPress={() => setSource(source === "local" ? "registry" : "local")}
       />
@@ -151,13 +157,13 @@ export function CustomAcpCommandEditor({ environment }: { readonly environment: 
       {field("Environment JSON", env, setEnv)}
       <SettingsActionRow
         icon="plus"
-        label={existing ? "Save ACP configuration" : "Add ACP command"}
+        label={existing ? gt("Save ACP configuration") : gt("Add ACP command")}
         disabled={pending || (source === "local" ? !command.trim() : !agentId.trim())}
         onPress={() => {
           void (async () => {
             if (existing && existing.driver !== "acpRegistry") {
               // Same message the generic catch below produced for this branch.
-              setMessage("Check the instance ID, arguments array, and environment object.");
+              setMessage(gt("Check the instance ID, arguments array, and environment object."));
               return;
             }
             setMessage(null);
@@ -174,7 +180,7 @@ export function CustomAcpCommandEditor({ environment }: { readonly environment: 
               });
               setMessage(saveResultMessage(result));
             } catch {
-              setMessage("Check the instance ID, arguments array, and environment object.");
+              setMessage(gt("Check the instance ID, arguments array, and environment object."));
             }
             setPending(false);
           })();

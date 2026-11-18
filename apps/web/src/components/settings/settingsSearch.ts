@@ -1330,7 +1330,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "lan-interface",
-    title: "LAN interface",
+    title: msg("LAN interface"),
     to: "/settings/connections",
     targetId: "connections-environment",
     searchTerms: ["network interface lan ip address qr code pairing wifi ethernet multi homed"],
