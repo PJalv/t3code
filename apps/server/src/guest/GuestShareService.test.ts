@@ -355,7 +355,7 @@ it.effect("closes an open guest stream when T3 Connect stops serving the link's 
 
 it.effect("uses the configured origin without Connect and gives it precedence over Connect", () =>
   Effect.gen(function* () {
-    const { guestShares } = yield* shareThread;
+    const { guestShares, orchestrator } = yield* shareThread;
     const settings = yield* ServerSettings.ServerSettingsService;
     yield* settings.updateSettings({ guestLinkBaseUrl: "HTTPS://GUEST.example:8443/" });
     const { url, share } = yield* guestShares.create({ threadId });
@@ -393,6 +393,15 @@ it.effect("uses the configured origin without Connect and gives it precedence ov
       (yield* Effect.flip(guestShares.create({ threadId }))).reason,
       "connect_unavailable",
     );
+    // Upstream now refuses to replace a link while guest messages wait, so dismiss
+    // the message submitted above before the fallback create opens a new share.
+    const [pending] = yield* waitingMessages;
+    yield* orchestrator.dispatch({
+      type: "thread.guest-message.dismiss",
+      commandId: CommandId.make("dismiss-before-fallback-open"),
+      threadId,
+      guestMessageId: pending!.id,
+    });
     yield* Ref.set(hostname, "env.t3.test");
     const fallback = yield* guestShares.create({ threadId });
     assert.isTrue(fallback.url.startsWith("https://env.t3.test/guest#"));
