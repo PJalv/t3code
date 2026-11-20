@@ -7,8 +7,9 @@ until you send or dismiss it.
 ## Share a thread
 
 Guest links are a beta. Turn on **Settings → Labs → Guest links** for the machine that runs the
-thread. They also need [T3 Connect](./remote-access.md): sign in and link that machine, because the
-link points at its T3 Connect address. The machine must stay online while the guest uses it.
+thread. By default, links use [T3 Connect](./remote-access.md): sign in and link that machine.
+You can instead configure your own HTTPS endpoint below, without a T3 Connect account.
+The machine must stay online while the guest uses it.
 While the setting is off, every guest link on that machine stops working; links that have not
 expired work again when you turn it back on.
 
@@ -20,9 +21,33 @@ expired work again when you turn it back on.
    Choose **Send** to run it as a normal turn, or **Dismiss**. Files they attached show with the
    message, and **Send** includes them.
 
-Choose **Stop sharing** to end the link at once. Archiving the thread, creating a new link, or
-unlinking the machine from T3 Connect also ends it. The mobile app can send, dismiss, and stop
-sharing too.
+Choose **Stop sharing** to end the link at once. Archiving or deleting the thread, or creating a new
+link, also ends it. You can send or dismiss guest messages and stop sharing from the mobile app.
+
+## Use your own HTTPS endpoint
+
+Forward your HTTPS endpoint to the machine's T3 Code server, including streaming responses and
+attachment requests. Guests must be able to open `/guest` without owner pairing or a separate proxy
+login. Keep owner pairing enabled for the rest of T3 Code.
+
+Set `guestLinkBaseUrl` in that server's T3 home `userdata/settings.json`, preserving its other settings:
+
+```json
+{
+  "guestLinkBaseUrl": "https://guest.example.com"
+}
+```
+
+Use only an HTTPS origin, with an optional port such as `:8443`. Credentials, paths other than `/`,
+query strings, and fragments are not accepted. Host casing, port 443, and a trailing `/` normalize to
+the same endpoint. The custom endpoint takes precedence over T3 Connect; it does not configure a
+proxy or change owner pairing. Turn on **Settings → Labs → Guest links** after configuring it.
+
+Set `guestLinkBaseUrl` to `null`, or remove it, to use T3 Connect again. A link works only while its
+saved host and port match the selected endpoint. Changing the endpoint stops guest requests and closes
+open streams at their next access check, within 30 seconds. Restoring the same endpoint lets the same
+browser return until expiry, unless you stopped sharing or replaced the link. With no custom endpoint,
+disconnecting T3 Connect pauses access; reconnecting on the same hostname restores it.
 
 ## What the guest sees
 
