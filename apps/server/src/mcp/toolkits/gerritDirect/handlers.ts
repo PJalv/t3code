@@ -15,6 +15,7 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as GerritDirectRead from "../../../sourceControl/GerritDirectRead.ts";
 import * as GerritDirectService from "../../../sourceControl/GerritDirectService.ts";
 import * as GerritTarget from "../../../sourceControl/GerritTarget.ts";
+import * as GerritNativeAction from "../../../sourceControl/GerritNativeAction.ts";
 import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import { GerritDirectUploadError } from "../../../sourceControl/GerritDirectUpload.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -149,7 +150,7 @@ const make = Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
         return publicValue(
           yield* service.act({ cwd: checkout, ...request }).pipe(
-            Effect.provideService(GerritWatchCompletion.NativeAction, (action, write) =>
+            Effect.provideService(GerritNativeAction.NativeAction, (action, write) =>
               completion.action(scope.thread!.threadId, action, write),
             ),
             Effect.mapError(failed),

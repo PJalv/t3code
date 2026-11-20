@@ -1,37 +1,23 @@
 import { CommandId, type ThreadId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import type * as GerritNativeAction from "./GerritNativeAction.ts";
 import { threadPullRequestKeysEqual, visibleThreadPullRequests } from "./threadPullRequests.ts";
-
-interface Action {
-  readonly server: string;
-  readonly project: string;
-  readonly number: number;
-  readonly operation: "submit" | "abandon";
-}
-
-// The handler supplies the caller; the service supplies the resolved identity and successful write.
-export const NativeAction = Context.Reference<
-  <A, E, R>(
-    action: Action,
-    write: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | Orchestrator.OrchestratorV2Error, R>
->("t3/sourceControl/GerritWatchCompletion/NativeAction", {
-  defaultValue: () => (_, write) => write,
-});
 
 export class GerritWatchCompletion extends Context.Service<
   GerritWatchCompletion,
   {
     readonly action: <A, E, R>(
       threadId: ThreadId,
-      action: Action,
+      action: GerritNativeAction.Action,
       write: Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A, E | Orchestrator.OrchestratorV2Error, R>;
+    ) => Effect.Effect<A, E, R>;
     readonly completion: <A, E, R>(
       threadId: ThreadId,
       effect: Effect.Effect<A, E, R>,
@@ -58,54 +44,74 @@ const make = Effect.gen(function* () {
       );
     });
   const action = Effect.fn("GerritWatchCompletion.action")(
-    function* <A, E, R>(threadId: ThreadId, action: Action, write: Effect.Effect<A, E, R>) {
-      const key = {
-        host: new URL(action.server).host,
-        repository: action.project,
-        number: action.number,
-      };
-      const thread = yield* engine.getThreadShell(threadId);
+    function* <A, E, R>(
+      threadId: ThreadId,
+      action: GerritNativeAction.Action,
+      write: Effect.Effect<A, E, R>,
+    ) {
       const installation = new URL(action.server);
       const basePath = installation.pathname.replace(/\/$/u, "");
-      const link = visibleThreadPullRequests(thread?.pullRequests ?? []).find((link) => {
-        const url = URL.parse(link.url);
-        return (
-          threadPullRequestKeysEqual(link, key) &&
-          link.repository === action.project &&
-          url?.origin === installation.origin &&
-          url.pathname.startsWith(`${basePath}/c/`)
-        );
+      // Clearing watches is bookkeeping; an unreadable thread costs a duplicate wake, not the write.
+      const thread = yield* engine.getThreadShell(threadId).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Gerrit watches were not read before a native action", {
+            threadId,
+            operation: action.operation,
+            cause,
+          }).pipe(Effect.as(null)),
+        ),
+      );
+      const links = visibleThreadPullRequests(thread?.pullRequests ?? []);
+      const watches = [action, ...(action.together ?? [])].flatMap((change) => {
+        const key = { host: installation.host, repository: change.project, number: change.number };
+        const link = links.find((link) => {
+          const url = URL.parse(link.url);
+          return (
+            threadPullRequestKeysEqual(link, key) &&
+            link.repository === change.project &&
+            url?.origin === installation.origin &&
+            url.pathname.startsWith(`${basePath}/c/`)
+          );
+        });
+        // A watch restarted during the request belongs to the new observer, not this action.
+        return link?.watch === undefined ? [] : [{ key, startedAt: link.watch.startedAt }];
       });
-      // A watch restarted during the request belongs to the new observer, not this action.
-      const watch = link?.watch;
       // Record a confirmed write even if the caller disconnects before the detail reread.
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const result = yield* restore(write);
-          if (watch !== undefined) {
-            // Gerrit already applied the write; a watch stopped or restarted meanwhile only means
-            // there is nothing to clear, and the caller must still hear that the action succeeded.
-            yield* engine
-              .dispatch({
-                type: "thread.pull-request-watch.sync",
-                commandId: CommandId.make(
-                  `server:gerrit-${action.operation}:${yield* random.uuidV4()}`,
-                ),
-                threadId,
-                ...key,
-                startedAt: watch.startedAt,
-                watch: null,
-              })
-              .pipe(
+          yield* Effect.forEach(
+            watches,
+            ({ key, startedAt }) =>
+              Effect.gen(function* () {
+                yield* engine.dispatch({
+                  type: "thread.pull-request-watch.sync",
+                  commandId: CommandId.make(
+                    `server:gerrit-${action.operation}:${yield* random.uuidV4()}`,
+                  ),
+                  threadId,
+                  ...key,
+                  startedAt,
+                  watch: null,
+                });
+              }).pipe(
+                // Gerrit already applied the write; a watch stopped or restarted meanwhile only
+                // means there is nothing to clear, and the caller must still hear that it succeeded.
                 Effect.catchCause((cause) =>
-                  Effect.logWarning("Gerrit watch was not cleared after a native action", {
-                    threadId,
-                    operation: action.operation,
-                    cause,
-                  }),
+                  Option.exists(
+                    Cause.findErrorOption(cause),
+                    Orchestrator.isPullRequestWatchMovedError,
+                  )
+                    ? Effect.void
+                    : Effect.logWarning("Gerrit watch was not cleared after a native action", {
+                        threadId,
+                        operation: action.operation,
+                        cause,
+                      }),
                 ),
-              );
-          }
+              ),
+            { discard: true },
+          );
           return result;
         }),
       );

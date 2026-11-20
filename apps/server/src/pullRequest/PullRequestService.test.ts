@@ -22,12 +22,13 @@ import type {
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
 import type { ServerSettings } from "@t3tools/contracts";
 import * as ServerSettingsService from "../serverSettings.ts";
-import { PullRequestOperationError } from "@t3tools/contracts";
+import { GerritInstallationId, PullRequestOperationError } from "@t3tools/contracts";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as GerritNativeAction from "../sourceControl/GerritNativeAction.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { SourceControlProvider } from "@t3tools/source-control-core/server/SourceControlProvider";
 import { isSshRemoteUrl } from "@t3tools/shared/sourceControl";
@@ -2415,6 +2416,64 @@ it.effect("refuses an action this viewer may not take, and says what access it t
 
     yield* service.runAction({ ...reference, action: "close" });
     assert.strictEqual(ran, "close");
+  }),
+);
+
+it.effect("names a Gerrit abandon by its installation so the acting thread can own it", () =>
+  Effect.gen(function* () {
+    const installation = GerritInstallationId.make("https://review.example:8443/gerrit/");
+    const ran: Array<string> = [];
+    const service = yield* makeService({
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        gerritConnections: {
+          [installation]: { installation, authMode: "http-basic", bindings: [] },
+        },
+      },
+      projects: [
+        project({
+          id: "g",
+          title: "gerrit",
+          workspaceRoot: "/g",
+          repository: "platform/tools",
+          provider: "gerrit",
+          host: "review.example:8443",
+        }),
+        project({ id: "h", title: "web", workspaceRoot: "/h", repository: "acme/web" }),
+      ],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("gerrit"), {
+          runAction: (input) => Effect.sync(() => void ran.push(`gerrit:${input.action}`)),
+        }),
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          runAction: (input) => Effect.sync(() => void ran.push(`github:${input.action}`)),
+        }),
+      ],
+    });
+    const owned: Array<GerritNativeAction.Action> = [];
+    const owning = Effect.provideService(GerritNativeAction.NativeAction, (action, write) =>
+      Effect.sync(() => void owned.push(action)).pipe(Effect.andThen(write)),
+    );
+    const gerrit = {
+      projectId: "g" as ProjectId,
+      repository: "platform/tools",
+      host: "review.example:8443",
+      number: 7,
+    };
+    yield* service.runAction({ ...gerrit, action: "close" }).pipe(owning);
+    yield* service.runAction({ ...gerrit, action: "reopen" }).pipe(owning);
+    yield* service
+      .runAction({
+        projectId: "h" as ProjectId,
+        repository: "acme/web",
+        number: 1,
+        action: "close",
+      })
+      .pipe(owning);
+    assert.deepStrictEqual(ran, ["gerrit:close", "gerrit:reopen", "github:close"]);
+    assert.deepStrictEqual(owned, [
+      { server: installation, project: "platform/tools", number: 7, operation: "abandon" },
+    ]);
   }),
 );
 
