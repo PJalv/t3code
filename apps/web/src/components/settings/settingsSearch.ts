@@ -1376,6 +1376,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     localBackendManagementOnly: true,
   },
   {
+    id: "lan-interface",
+    title: msg("LAN interface"),
+    to: "/settings/connections",
+    targetId: "connections-environment",
+    searchTerms: ["network interface lan ip address qr code pairing wifi ethernet multi homed"],
+    localBackendManagementOnly: true,
+  },
+  {
     id: "tailscale-https",
     title: msg("Tailscale HTTPS"),
     to: "/settings/access",
