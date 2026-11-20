@@ -18,6 +18,7 @@ import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as GerritDirectRead from "../../../sourceControl/GerritDirectRead.ts";
 import * as GerritDirectService from "../../../sourceControl/GerritDirectService.ts";
+import * as GerritNativeAction from "../../../sourceControl/GerritNativeAction.ts";
 import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -95,7 +96,7 @@ const harness = Effect.fn("GerritDirectTest.harness")(function* (
     Layer.mock(GerritDirectService.GerritDirectService)({
       act: (input) =>
         Effect.gen(function* () {
-          const nativeAction = yield* GerritWatchCompletion.NativeAction;
+          const nativeAction = yield* GerritNativeAction.NativeAction;
           if (input.action.kind === "submit") {
             yield* nativeAction(
               {

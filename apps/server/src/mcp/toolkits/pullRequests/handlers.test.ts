@@ -38,6 +38,8 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
+import * as GerritNativeAction from "../../../sourceControl/GerritNativeAction.ts";
+import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
@@ -219,6 +221,7 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
   const toolkit = yield* PullRequestsToolkit.pipe(
     Effect.provide(
       McpToolAccess.HandlersLayer.layer(PullRequestsHandlers.layer).pipe(
+        Layer.provide(GerritWatchCompletion.layer),
         Layer.provide(layerDependencies),
       ),
     ),
@@ -1223,6 +1226,99 @@ describe("source control tools", () => {
         yield* harness.call("pull_request_update", { ready: false, state: "open" });
         expect(calls).toEqual(["reviewers", "ready", "close", "draft", "reopen"]);
       }),
+  );
+
+  it.effect.each([
+    { name: "own abandon", fails: false },
+    { name: "failed abandon", fails: true },
+  ])("records a generic Gerrit close as the caller's own ($name)", ({ fails }) =>
+    Effect.gen(function* () {
+      const startedAt = "2026-08-20T00:00:00.000Z";
+      const actions: Array<unknown> = [];
+      const harness = yield* makeHarness({
+        project: gerritProject,
+        thread: {
+          ...branchThread,
+          pullRequests: [
+            makeLink(42, {
+              host: "review.example",
+              repository: "acme/app",
+              url: "https://review.example/c/acme/app/+/42",
+              watch: {
+                startedAt,
+                headSha: "abc123",
+                failedChecks: [],
+                passed: false,
+                passedChecks: [],
+                remarksThrough: startedAt,
+                remarkIds: [],
+                conflicting: false,
+                wakes: 0,
+              },
+            }),
+          ],
+        },
+        pullRequests: {
+          detail: () =>
+            Effect.succeed({
+              ...detail,
+              gerrit,
+              capabilities: { ...detail.capabilities, actions: ["close"] },
+              viewerPermissions: { ...detail.viewerPermissions, actions: ["close"] },
+            }),
+          // The service names the change it abandons by its resolved Gerrit installation.
+          runAction: (input) =>
+            Effect.gen(function* () {
+              const action = {
+                server: "https://review.example/",
+                project: input.repository,
+                number: input.number,
+                operation: "abandon" as const,
+              };
+              actions.push(action);
+              return yield* (yield* GerritNativeAction.NativeAction)(
+                action,
+                fails
+                  ? Effect.fail(
+                      new PullRequestOperationError({ operation: "runAction", detail: "denied" }),
+                    )
+                  : Effect.undefined,
+              );
+            }),
+        },
+      });
+      const result = yield* harness
+        .call("pull_request_update", { number: 42, state: "closed" })
+        .pipe(Effect.result);
+      expect(result._tag).toBe(fails ? "Failure" : "Success");
+      expect(actions).toEqual([
+        {
+          server: "https://review.example/",
+          project: "acme/app",
+          number: 42,
+          operation: "abandon",
+        },
+      ]);
+      // A cleared watch sends no closed wake; a failed abandon leaves the watch to report the host.
+      expect(
+        (yield* Ref.get(harness.commands)).filter(
+          (command) => command.type === "thread.pull-request-watch.sync",
+        ),
+      ).toEqual(
+        fails
+          ? []
+          : [
+              expect.objectContaining({
+                threadId: THREAD_ID,
+                host: "review.example",
+                repository: "acme/app",
+                number: 42,
+                startedAt,
+                watch: null,
+              }),
+            ],
+      );
+    }),
   );
 
   it.effect("pages a long conversation and the PR list through the cursors they return", () =>
