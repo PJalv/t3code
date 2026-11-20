@@ -9,7 +9,10 @@ import { useOpenLink } from "~/browser/useOpenLink";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
-import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
+import {
+  openOnHostLabel,
+  showPullRequestLinkContextMenu,
+} from "./pullRequestLinkContextMenu";
 
 import { changeRequestTermKind } from "./changeRequestTerm";
 
@@ -21,7 +24,10 @@ interface CrumbsPullRequest {
   readonly title: string;
 }
 
-const openNumberContextMenu = (event: ReactMouseEvent, detail: CrumbsPullRequest): void => {
+const openNumberContextMenu = (
+  event: ReactMouseEvent,
+  detail: CrumbsPullRequest,
+): void => {
   event.preventDefault();
   event.stopPropagation();
   void showPullRequestLinkContextMenu({
@@ -35,7 +41,13 @@ const openNumberContextMenu = (event: ReactMouseEvent, detail: CrumbsPullRequest
 const ROW_CLASS_NAME =
   "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs";
 
-function BackButton({ onBack, focusable }: { onBack: () => void; focusable: boolean }) {
+function BackButton({
+  onBack,
+  focusable,
+}: {
+  onBack: () => void;
+  focusable: boolean;
+}) {
   const gt = useGT();
   return (
     <SharedTooltipTrigger
@@ -81,9 +93,12 @@ function NumberLink({
         <button
           type="button"
           {...(focusable ? {} : { tabIndex: -1 })}
-          onClick={(event) => void openLink(detail.url, { event }).catch(console.error)}
+          onClick={(event) =>
+            void openLink(detail.url, { event }).catch(console.error)
+          }
           onAuxClick={(event) => {
-            if (event.button === 1) void openLink(detail.url, { event }).catch(console.error);
+            if (event.button === 1)
+              void openLink(detail.url, { event }).catch(console.error);
           }}
           onContextMenu={(event) => openNumberContextMenu(event, detail)}
           className={cn(
@@ -91,9 +106,11 @@ function NumberLink({
             toneClassName,
           )}
           aria-label={gt(
-            "Open {term, select, mr {merge request} cr {change request} other {pull request}} #{number} on host",
+            "Open {term, select, mr {merge request} cr {change} other {pull request}} #{number} on host",
             {
-              term: changeRequestTermKind(sourceControlClients.get(detail.provider).changeRequest),
+              term: changeRequestTermKind(
+                sourceControlClients.get(detail.provider).changeRequest,
+              ),
               number: detail.number,
             },
           )}
@@ -153,11 +170,15 @@ export function PullRequestDetailCrumbs({
                   <button
                     type="button"
                     onClick={(event) =>
-                      void openLink(repositoryUrl, { event }).catch(console.error)
+                      void openLink(repositoryUrl, { event }).catch(
+                        console.error,
+                      )
                     }
                     onAuxClick={(event) => {
                       if (event.button === 1)
-                        void openLink(repositoryUrl, { event }).catch(console.error);
+                        void openLink(repositoryUrl, { event }).catch(
+                          console.error,
+                        );
                     }}
                     className="min-w-0 cursor-pointer truncate text-left font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                   >
@@ -171,7 +192,9 @@ export function PullRequestDetailCrumbs({
               }
               label={
                 repositoryUrl
-                  ? gt("Open {repository} repository", { repository: detail.repository })
+                  ? gt("Open {repository} repository", {
+                      repository: detail.repository,
+                    })
                   : detail.repository
               }
             />
@@ -198,7 +221,9 @@ export function PullRequestDetailCrumbs({
       >
         {ready ? (
           <>
-            {onBack ? <BackButton onBack={onBack} focusable={condensed} /> : null}
+            {onBack ? (
+              <BackButton onBack={onBack} focusable={condensed} />
+            ) : null}
             <NumberLink
               detail={detail}
               threadRef={threadRef}
@@ -208,7 +233,9 @@ export function PullRequestDetailCrumbs({
             />
             <SharedTooltipTrigger
               render={
-                <span className="min-w-0 truncate font-medium text-foreground">{detail.title}</span>
+                <span className="min-w-0 truncate font-medium text-foreground">
+                  {detail.title}
+                </span>
               }
               label={detail.title}
             />

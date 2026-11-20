@@ -23,7 +23,7 @@ export function PullRequestReadStatus(props: {
   ) : props.error ? (
     <EmptyState
       title={gt(
-        "Couldn't load this {term, select, mr {merge request} cr {change request} other {pull request}}",
+        "Couldn't load this {term, select, mr {merge request} cr {change} other {pull request}}",
         {
           term: changeRequestTermKind(props.terminology),
         },

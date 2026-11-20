@@ -127,7 +127,7 @@ export function PullRequestCommentForm({
         rows={3}
         placeholder={gt("Leave a comment")}
         aria-label={gt(
-          "Comment on this {term, select, mr {merge request} cr {change request} other {pull request}}",
+          "Comment on this {term, select, mr {merge request} cr {change} other {pull request}}",
           {
             term: changeRequestTermKind(sourceControlClients.get(detail.provider).changeRequest),
           },

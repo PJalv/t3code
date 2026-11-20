@@ -280,7 +280,7 @@ export function PullRequestReviewSheet({
       {reviewing && !canSubmitComments ? (
         <Text className="text-sm text-danger-foreground">
           {gt(
-            "You can no longer submit line comments on this {term, select, mr {merge request} cr {change request} other {pull request}}. Your drafts are kept here.",
+            "You can no longer submit line comments on this {term, select, mr {merge request} cr {change} other {pull request}}. Your drafts are kept here.",
             {
               term: changeRequestTermKind(
                 sourceControlClients.get(result.data?.provider).changeRequest,

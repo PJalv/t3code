@@ -144,10 +144,9 @@ import { PullRequestStackCard } from "./PullRequestStackCard";
 import { PullRequestGerritSection } from "./PullRequestGerritSection";
 import { usePullRequestStack, type PullRequestStackState } from "./usePullRequestStack";
 import { usePullRequestEnvironmentFallback } from "./usePullRequestEnvironmentFallback";
-import { pullRequestFileJumpScope, subscribePullRequestFileJump } from "./pullRequestFileJump";
+import { subscribePullRequestFileJump } from "./pullRequestFileJump";
 import {
   actorDisplayName,
-  capitalizeTerm,
   sourceControlClients,
 } from "@t3tools/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../../lib/changeRequestTerm";
@@ -629,10 +628,9 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
   };
   const verticalControls = usePullRequestVerticalControls();
   const pullRequestMenu: AppBarMenu = {
-    title: gt(
-      "{term, select, mr {Merge request} cr {Change request} other {Pull request}} actions",
-      { term: changeRequestTermKind(terminology) },
-    ),
+    title: gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} actions", {
+      term: changeRequestTermKind(terminology),
+    }),
     icon: "ellipsis",
     items: [
       ...(permissions.verdicts.length
@@ -1495,7 +1493,7 @@ function PullRequestFileRouteContent({ route }: PullRequestFileRouteProps) {
             <EmptyState
               title={gt("Diff unavailable")}
               detail={gt(
-                "Open this {term, select, mr {merge request} cr {change request} other {pull request}} on its provider to view the changes.",
+                "Open this {term, select, mr {merge request} cr {change} other {pull request}} on its provider to view the changes.",
                 {
                   term: changeRequestTermKind(terminology),
                 },

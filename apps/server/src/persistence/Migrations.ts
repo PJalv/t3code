@@ -10,6 +10,7 @@ import {
   DATABASE_MIGRATIONS_STARTED_MESSAGE,
 } from "@t3tools/shared/databaseMigrationLog";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
+import { assertLegacyGerritSchema, reconcileGerritMigration } from "./reconcileGerritMigration.ts";
 
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
 import Migration0002 from "./Migrations/002_OrchestrationCommandReceipts.ts";
@@ -256,12 +257,16 @@ export const migrationManifest = migrationEntries.map(
   ([id, name]) => [id, name] as const,
 );
 
-const makeMigrationLoader = (throughId?: number) =>
+const makeMigrationLoader = (throughId?: number, legacyGerrit = false) =>
   Migrator.fromRecord(
     Object.fromEntries(
       migrationEntries
         .filter(([id]) => throughId === undefined || id <= throughId)
-        .map(([id, name, migration]) => [`${id}_${name}`, migration]),
+        .map(([id, name, migration]) => [
+          `${id}_${name}`,
+          // Legacy 97 already created exactly 103's tables; validate instead of recreating them.
+          legacyGerrit && id === 103 ? assertLegacyGerritSchema() : migration,
+        ]),
     ),
   );
 
@@ -357,8 +362,16 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const hasPending = yield* hasPendingMigrations();
   if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
   const includesV2 =
+  const includesV2 =
     toMigrationInclusive === undefined ||
     toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
+  const gerritMigrations = hasPending
+    ? yield* reconcileGerritMigration(
+        migrationManifest,
+        run({ loader: makeMigrationLoader(103, true) }),
+        toMigrationInclusive,
+      )
+    : [];
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
   const previewMigrations =
     includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
@@ -385,6 +398,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   // restart then resumes after the last finished migration instead of rolling all of them back.
   const executedMigrations: Array<readonly [id: number, name: string]> = [
     ...previewMigrations,
+    ...gerritMigrations,
   ];
   yield* Effect.gen(function* () {
     for (const [index, [id, name]] of pending.entries()) {

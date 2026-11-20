@@ -439,7 +439,7 @@ export function ComposerContextSheet(props: {
               void openPullRequest(pullRequestUrl).catch(() =>
                 Dialog.alert(
                   gt(
-                    "Could not open {term, select, mr {merge request} cr {change request} other {pull request}}",
+                    "Could not open {term, select, mr {merge request} cr {change} other {pull request}}",
                     { term },
                   ),
                   gt("Try again when connected."),
@@ -449,10 +449,9 @@ export function ComposerContextSheet(props: {
             className="rounded-xl bg-subtle p-4"
           >
             <Text className="text-foreground">
-              {gt(
-                "Open {term, select, mr {merge request} cr {change request} other {pull request}}",
-                { term },
-              )}
+              {gt("Open {term, select, mr {merge request} cr {change} other {pull request}}", {
+                term,
+              })}
             </Text>
           </Pressable>
         ) : null}
@@ -466,10 +465,9 @@ export function ComposerContextSheet(props: {
         ) : null}
         {props.onOpenPullRequest && !pullRequestUrl ? (
           <Button
-            label={gt(
-              "Open {term, select, mr {merge request} cr {change request} other {pull request}}",
-              { term },
-            )}
+            label={gt("Open {term, select, mr {merge request} cr {change} other {pull request}}", {
+              term,
+            })}
             tone="secondary"
             onPress={props.onOpenPullRequest}
             fullWidth

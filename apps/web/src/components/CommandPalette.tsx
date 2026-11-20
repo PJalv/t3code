@@ -1580,7 +1580,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:upload-commit-for-review",
       searchTerms: ["gerrit", "upload", "commit", "review"],
-      title: "Upload commit for review",
+      title: gt("Upload commit for review"),
       disabled: !canWriteUploadSourceControl || uploadBusy || uploadStatus.data?.refName === null,
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
@@ -1613,7 +1613,16 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:open-thread-pull-requests",
-      searchTerms: ["pull requests", "issues", "linked", "stack", "prs", "gerrit", "changes", "reviews"],
+      searchTerms: [
+        "pull requests",
+        "issues",
+        "linked",
+        "stack",
+        "prs",
+        "gerrit",
+        "changes",
+        "reviews",
+      ],
       title: gt("Show linked items"),
       disabled: !canReadReviews && !activeThread.issues?.length,
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
@@ -2326,7 +2335,7 @@ function OpenCommandPaletteDialog(props: {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Gerrit project search failed",
+              title: gt("Gerrit project search failed"),
               description: errorMessage(squashAtomCommandFailure(searched)),
             }),
           );
@@ -3304,16 +3313,21 @@ function OpenCommandPaletteDialog(props: {
       ) : null}
       {addProjectCloneFlow?.step === "repository" && gerritProjectMatches !== null ? (
         <section
-          aria-label="Gerrit project search results"
+          aria-label={gt("Gerrit project search results")}
           className="mx-3 mb-2 max-h-48 overflow-y-auto rounded border p-2"
         >
-          <p className="px-2 pb-1 text-xs text-muted-foreground">Gerrit projects</p>
+          <p className="px-2 pb-1 text-xs text-muted-foreground">
+            <T>Gerrit projects</T>
+          </p>
           {gerritProjectMatches.results.map((match) => (
             <button
               key={`${match.installation}\0${match.project}`}
               type="button"
               className="flex w-full items-center gap-3 rounded-md border border-transparent px-3 py-2 text-start transition-colors hover:border-border hover:bg-accent focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              aria-label={`Clone ${match.project} from ${match.installation}`}
+              aria-label={gt("Clone {project} from {installation}", {
+                project: match.project,
+                installation: match.installation,
+              })}
               onClick={() => {
                 const repository = {
                   provider: SourceControlProviderKind.make("gerrit"),
@@ -3353,16 +3367,18 @@ function OpenCommandPaletteDialog(props: {
                   {match.installation}
                 </span>
               </span>
-              <span className="shrink-0 text-xs text-muted-foreground">Clone</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{gt("Clone")}</span>
             </button>
           ))}
           {gerritProjectMatches.configuredInstallations === 0 ? (
             <p className="px-2 py-1 text-xs text-destructive">
-              No Gerrit installations are configured.
+              <T>No Gerrit installations are configured.</T>
             </p>
           ) : gerritProjectMatches.results.length === 0 &&
             gerritProjectMatches.failures.length === 0 ? (
-            <p className="px-2 py-1 text-xs text-muted-foreground">No matching projects found.</p>
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              <T>No matching projects found.</T>
+            </p>
           ) : null}
           {gerritProjectMatches.failures.map((failure) => (
             <p
@@ -3374,7 +3390,9 @@ function OpenCommandPaletteDialog(props: {
             </p>
           ))}
           {gerritProjectMatches.results.length === 0 && gerritProjectMatches.failures.length > 0 ? (
-            <p className="px-2 py-1 text-xs">No successful installation returned a match.</p>
+            <p className="px-2 py-1 text-xs">
+              <T>No successful installation returned a match.</T>
+            </p>
           ) : null}
         </section>
       ) : null}

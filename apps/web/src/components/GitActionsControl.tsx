@@ -1291,7 +1291,7 @@ function CheckoutGitActionsControl({
     const createdPullRequest = actionResult.pr.status === "created";
     setInlineSuccess({
       title: createdPullRequest
-        ? gt("Created {term, select, mr {MR} cr {change request} other {PR}}", {
+        ? gt("Created {term, select, mr {MR} cr {change} other {PR}}", {
             term: changeRequestTermKind(changeRequestTerminology),
           })
         : actionResult.toast.title,
@@ -1572,7 +1572,7 @@ function CheckoutGitActionsControl({
       {isDetachedHead && (
         <p className="px-2 py-1.5 text-xs text-warning">
           {gt(
-            "Detached HEAD: create and check out a branch to enable push and {term, select, mr {merge request} cr {change request} other {pull request}} actions.",
+            "Detached HEAD: create and check out a branch to enable push and {term, select, mr {merge request} cr {change} other {pull request}} actions.",
             { term: changeRequestTermKind(changeRequestTerminology) },
           )}
         </p>

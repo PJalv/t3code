@@ -211,7 +211,7 @@ const actionFailureLabels = (
 ): Record<PullRequestAction, string> => ({
   merge: m(
     msg(
-      "Could not merge this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not merge this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -219,13 +219,13 @@ const actionFailureLabels = (
   draft: m(msg("Could not convert this to a draft")),
   close: m(
     msg(
-      "Could not close this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not close this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
   reopen: m(
     msg(
-      "Could not reopen this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not reopen this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -234,7 +234,7 @@ const actionFailureLabels = (
   "disable-auto-merge": m(msg("Could not turn off auto-merge")),
   revert: m(
     msg(
-      "Could not open a revert {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not open a revert {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -287,7 +287,7 @@ const actionFailureHints = (
   ),
   revert: m(
     msg(
-      "The host refused it. Check that you have write access and that this {term, select, mr {merge request} cr {change request} other {pull request}} was merged on the host.",
+      "The host refused it. Check that you have write access and that this {term, select, mr {merge request} cr {change} other {pull request}} was merged on the host.",
       { term },
     ),
   ),
@@ -714,11 +714,11 @@ export function PullRequestDetailPanel({
     target: {
       target: `${terminology.singular} reference`,
       unavailableMessage: msg(
-        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change request} other {pull request}} reference.",
+        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change} other {pull request}} reference.",
         { term: changeRequestTermKind(terminology) },
       ),
       failureMessage: msg(
-        "Failed to copy {term, select, mr {merge request} cr {change request} other {pull request}} reference to the clipboard.",
+        "Failed to copy {term, select, mr {merge request} cr {change} other {pull request}} reference to the clipboard.",
         { term: changeRequestTermKind(terminology) },
       ),
     },
@@ -743,7 +743,7 @@ export function PullRequestDetailPanel({
         `#${reference.number}`,
         m(
           msg(
-            "Failed to copy {term, select, mr {MR} cr {change request} other {PR}} number",
+            "Failed to copy {term, select, mr {MR} cr {change} other {PR}} number",
             {
               term: changeRequestTermKind(terminology),
             },
@@ -1071,7 +1071,7 @@ export function PullRequestDetailPanel({
         type: "success",
         title: m(
           msg(
-            "Revert {term, select, mr {merge request} cr {change request} other {pull request}} opened",
+            "Revert {term, select, mr {merge request} cr {change} other {pull request}} opened",
             { term: changeRequestTermKind(terminology) },
           ),
         ),
@@ -1185,7 +1185,7 @@ export function PullRequestDetailPanel({
               )
             : m(
                 msg(
-                  "The {term, select, mr {merge request} cr {change request} other {pull request}} is in the composer. Type your question, then send.",
+                  "The {term, select, mr {merge request} cr {change} other {pull request}} is in the composer. Type your question, then send.",
                   {
                     term: changeRequestTermKind(terminology),
                   },
@@ -1240,7 +1240,7 @@ export function PullRequestDetailPanel({
           ? m(msg("The question is in the composer. Read it over, then send."))
           : m(
               msg(
-                "The {term, select, mr {merge request} cr {change request} other {pull request}} is in the composer. Type your question, then send.",
+                "The {term, select, mr {merge request} cr {change} other {pull request}} is in the composer. Type your question, then send.",
                 {
                   term: changeRequestTermKind(terminology),
                 },
@@ -1287,7 +1287,7 @@ export function PullRequestDetailPanel({
       type: "loading",
       title: m(
         msg(
-          "Preparing the {term, select, mr {merge request} cr {change request} other {pull request}} checkout...",
+          "Preparing the {term, select, mr {merge request} cr {change} other {pull request}} checkout...",
           { term: changeRequestTermKind(terminology) },
         ),
       ),
@@ -1323,7 +1323,7 @@ export function PullRequestDetailPanel({
         type: "error",
         title: m(
           msg(
-            "Could not prepare the {term, select, mr {merge request} cr {change request} other {pull request}} checkout",
+            "Could not prepare the {term, select, mr {merge request} cr {change} other {pull request}} checkout",
             { term: changeRequestTermKind(terminology) },
           ),
         ),
@@ -1380,7 +1380,7 @@ export function PullRequestDetailPanel({
                 mode === "local"
                   ? m(
                       msg(
-                        "This repository is on the {term, select, mr {merge request} cr {change request} other {pull request}}'s branch, with a thread open on it.",
+                        "This repository is on the {term, select, mr {merge request} cr {change} other {pull request}}'s branch, with a thread open on it.",
                         {
                           term: changeRequestTermKind(terminology),
                         },
@@ -1388,7 +1388,7 @@ export function PullRequestDetailPanel({
                     )
                   : m(
                       msg(
-                        "The {term, select, mr {merge request} cr {change request} other {pull request}} is in its own worktree, with a thread open on it.",
+                        "The {term, select, mr {merge request} cr {change} other {pull request}} is in its own worktree, with a thread open on it.",
                         {
                           term: changeRequestTermKind(terminology),
                         },
@@ -1971,7 +1971,7 @@ export function PullRequestDetailPanel({
                 size="icon-xs"
                 variant="ghost"
                 aria-label={gt(
-                  "Collapse {term, select, mr {merge request} cr {change request} other {pull request}} panel",
+                  "Collapse {term, select, mr {merge request} cr {change} other {pull request}} panel",
                   { term: changeRequestTermKind(terminology) },
                 )}
                 onClick={onClose}
@@ -2141,11 +2141,11 @@ export function PullRequestDetailPanel({
                         target={{
                           target: `${terminology.singular} checkout command`,
                           unavailableMessage: msg(
-                            "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change request} other {pull request}} checkout command.",
+                            "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change} other {pull request}} checkout command.",
                             { term: changeRequestTermKind(terminology) },
                           ),
                           failureMessage: msg(
-                            "Failed to copy {term, select, mr {merge request} cr {change request} other {pull request}} checkout command to the clipboard.",
+                            "Failed to copy {term, select, mr {merge request} cr {change} other {pull request}} checkout command to the clipboard.",
                             { term: changeRequestTermKind(terminology) },
                           ),
                         }}
@@ -2183,7 +2183,7 @@ export function PullRequestDetailPanel({
                         ),
                       }}
                       copyLabel={gt(
-                        "Copy {term, select, mr {merge request} cr {change request} other {pull request}} branch",
+                        "Copy {term, select, mr {merge request} cr {change} other {pull request}} branch",
                         { term: changeRequestTermKind(terminology) },
                       )}
                       copiedLabel={gt("Branch name copied")}
@@ -2432,14 +2432,14 @@ export function PullRequestDetailPanel({
               {...(isPullRequestNotFound(detailQuery.failure)
                 ? {
                     title: gt(
-                      "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number} not found",
+                      "{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number} not found",
                       {
                         term: changeRequestTermKind(terminology),
                         number: reference.number,
                       },
                     ),
                     error: gt(
-                      "It may be an issue rather than a {term, select, mr {merge request} cr {change request} other {pull request}}, or this account can't see it.",
+                      "It may be an issue rather than a {term, select, mr {merge request} cr {change} other {pull request}}, or this account can't see it.",
                       { term: changeRequestTermKind(terminology) },
                     ),
                   }
@@ -2596,7 +2596,7 @@ export function PullRequestDetailPanel({
                       >
                         <DiffPanelLoadingState
                           label={gt(
-                            "Loading {term, select, mr {merge request} cr {change request} other {pull request}} diff...",
+                            "Loading {term, select, mr {merge request} cr {change} other {pull request}} diff...",
                             { term: changeRequestTermKind(terminology) },
                           )}
                         />

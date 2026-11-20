@@ -27,97 +27,110 @@ const seedPreview = Effect.gen(function* () {
 });
 
 describe("V2 preview upgrade", () => {
-  it.effect("upgrades a published preview without replaying V2 or losing import progress", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* seedPreview;
-      const imports = yield* sql`SELECT * FROM orchestration_v2_legacy_imports`;
-      assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
-        [59, "McpAppModelContext"],
-        [60, "ThreadSnapshotWindowIndexes"],
-        [61, "PullRequestReviewGuides"],
-        [62, "ThreadFailureLookupIndex"],
-        [63, "DropUnusedV1Projections"],
-        [64, "CanonicalizeThreadPullRequestLinks"],
-        [65, "CodexUsageNativeTurnIndex"],
-        [66, "RepairClientSettlementTimestamps"],
-        [67, "WebhookDedupe"],
-        [68, "ShellStopRequestIndex"],
-        [69, "ThreadMessageSearch"],
-        [70, "PeerLinks"],
-        [71, "PeerLinkFence"],
-        [72, "WaitingLinkRequestIndex"],
-        [73, "ActiveTurnItemIndexes"],
-        [74, "ExcludeAttachmentPlaceholdersFromSearch"],
-        [75, "SubagentDeliveryState"],
-        [76, "ProjectionProjectsPinArchive"],
-        [77, "RepairBooleanSettledOverride"],
-        [78, "DropOrchestrationEventCorrelationIndex"],
-        [79, "DelegatedRecoveryIndexes"],
-        [80, "ScheduledTaskThreadMode"],
-        [81, "ProjectionMessageSearchText"],
-        [82, "TurnItemConversationIndex"],
-        [83, "CommandReadIndexes"],
-        [84, "LastExecutedRunIndex"],
-        [85, "TurnItemCounts"],
-        [86, "QueuedTurnInputIndex"],
-        [87, "ProjectionProjectsCustomTitle"],
-        [88, "TurnItemTypeStatusIndex"],
-        [89, "ShellThreadReadIndexes"],
-        [90, "AuthConnectDevices"],
-        [91, "AuthConnectDeniedRequests"],
-        [92, "QueuedTurnInputIndexJsonValid"],
-        [93, "ProviderTurnAttemptIndex"],
-        [94, "TurnItemMessageOrdinalIndex"],
-        [95, "TurnItemInlineWorkOutput"],
-        [96, "RepairStaleTitleRegeneration"],
-        [97, "IssueTrackerBindings"],
-        [98, "ActiveShellIndexIndexes"],
-        [99, "BackgroundRecoveryIndexes"],
-        [100, "TurnStartReadIndexes"],
-        [101, "DelegatedTaskReadIndexes"],
-        [102, "ThreadItemCounts"],
-        [103, "IssueTrackerAdditionalScopes"],
-        [104, "ProjectionProjectsTrackedFolders"],
-        [105, "TaskFolders"],
-        [106, "WorktreePathKeyIndex"],
-        [107, "DeferredSlashCommandIndex"],
-        [108, "AgentFeedback"],
-        [109, "IssueTrackerAccounts"],
-        [110, "Workflows"],
-        [111, "SupersededRunAttemptIndex"],
-        [112, "LayoutCommandApprovals"],
-        [113, "WorkflowSkippedRuns"],
-        [114, "WorkflowRunIndexes"],
-        [115, "WorkflowRunTags"],
-        [116, "ForkHistoryMembership"],
-        [117, "WorkflowMailSender"],
-      ]);
-      assert.deepStrictEqual(yield* runMigrations(), []);
-      assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
-      const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+  it.effect(
+    "upgrades a published preview without replaying V2 or losing import progress",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedPreview;
+        const imports =
+          yield* sql`SELECT * FROM orchestration_v2_legacy_imports`;
+        assert.deepStrictEqual(yield* runMigrations(), [
+          [53, "PullRequestFilesViewed"],
+          [54, "ProjectionThreadsAutoSettleDisabledAt"],
+          [56, "RemoveRedundantProjectionIndexes"],
+          [57, "ScheduledTaskWebhooks"],
+          [58, "WebhookRelayDeliveries"],
+          [59, "McpAppModelContext"],
+          [60, "ThreadSnapshotWindowIndexes"],
+          [61, "PullRequestReviewGuides"],
+          [62, "ThreadFailureLookupIndex"],
+          [63, "DropUnusedV1Projections"],
+          [64, "CanonicalizeThreadPullRequestLinks"],
+          [65, "CodexUsageNativeTurnIndex"],
+          [66, "RepairClientSettlementTimestamps"],
+          [67, "WebhookDedupe"],
+          [68, "ShellStopRequestIndex"],
+          [69, "ThreadMessageSearch"],
+          [70, "PeerLinks"],
+          [71, "PeerLinkFence"],
+          [72, "WaitingLinkRequestIndex"],
+          [73, "ActiveTurnItemIndexes"],
+          [74, "ExcludeAttachmentPlaceholdersFromSearch"],
+          [75, "SubagentDeliveryState"],
+          [76, "ProjectionProjectsPinArchive"],
+          [77, "RepairBooleanSettledOverride"],
+          [78, "DropOrchestrationEventCorrelationIndex"],
+          [79, "DelegatedRecoveryIndexes"],
+          [80, "ScheduledTaskThreadMode"],
+          [81, "ProjectionMessageSearchText"],
+          [82, "TurnItemConversationIndex"],
+          [83, "CommandReadIndexes"],
+          [84, "LastExecutedRunIndex"],
+          [85, "TurnItemCounts"],
+          [86, "QueuedTurnInputIndex"],
+          [87, "ProjectionProjectsCustomTitle"],
+          [88, "TurnItemTypeStatusIndex"],
+          [89, "ShellThreadReadIndexes"],
+          [90, "AuthConnectDevices"],
+          [91, "AuthConnectDeniedRequests"],
+          [92, "QueuedTurnInputIndexJsonValid"],
+          [93, "ProviderTurnAttemptIndex"],
+          [94, "TurnItemMessageOrdinalIndex"],
+          [95, "TurnItemInlineWorkOutput"],
+          [96, "RepairStaleTitleRegeneration"],
+          [97, "IssueTrackerBindings"],
+          [98, "ActiveShellIndexIndexes"],
+          [99, "BackgroundRecoveryIndexes"],
+          [100, "TurnStartReadIndexes"],
+          [101, "DelegatedTaskReadIndexes"],
+          [102, "ThreadItemCounts"],
+          [103, "IssueTrackerAdditionalScopes"],
+          [104, "ProjectionProjectsTrackedFolders"],
+          [105, "TaskFolders"],
+          [106, "WorktreePathKeyIndex"],
+          [107, "DeferredSlashCommandIndex"],
+          [108, "AgentFeedback"],
+          [109, "IssueTrackerAccounts"],
+          [110, "Workflows"],
+          [111, "SupersededRunAttemptIndex"],
+          [112, "LayoutCommandApprovals"],
+          [113, "WorkflowSkippedRuns"],
+          [114, "WorkflowRunIndexes"],
+          [115, "WorkflowRunTags"],
+          [116, "ForkHistoryMembership"],
+          [117, "WorkflowMailSender"],
+          [118, "GerritPendingClones"],
+        ]);
+        assert.deepStrictEqual(yield* runMigrations(), []);
+        assert.deepStrictEqual(
+          yield* sql`SELECT * FROM orchestration_v2_legacy_imports`,
+          imports,
+        );
+        const history = yield* sql<{
+          readonly migration_id: number;
+          readonly name: string;
+        }>`
         SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
       `;
-      assert.deepStrictEqual(
-        history.map((row) => [row.migration_id, row.name] as const),
-        migrationManifest,
-      );
-      assert.deepStrictEqual(
-        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
-        [{ created_at: "2026-09-15 00:00:00" }],
-      );
-      yield* sql`
+        assert.deepStrictEqual(
+          history.map((row) => [row.migration_id, row.name] as const),
+          migrationManifest,
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
+          [{ created_at: "2026-09-15 00:00:00" }],
+        );
+        yield* sql`
         INSERT INTO pull_request_files_viewed
           (provider, host, repository, number, viewer, path, revision, viewed_at)
         VALUES ('github', 'github.com', 'owner/repo', 1, 'viewer', 'file.ts', 'revision', '2026-09-17')
       `;
-      assert.strictEqual((yield* sql`SELECT * FROM pull_request_files_viewed`).length, 1);
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+        assert.strictEqual(
+          (yield* sql`SELECT * FROM pull_request_files_viewed`).length,
+          1,
+        );
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect.each([false, true])(
@@ -131,7 +144,10 @@ describe("V2 preview upgrade", () => {
             "53_PullRequestFilesViewed": PullRequestFilesViewed,
             "54_OrchestrationV2": OrchestrationV2,
             ...(withIndexes
-              ? { "55_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
+              ? {
+                  "55_RemoveRedundantProjectionIndexes":
+                    RemoveRedundantProjectionIndexes,
+                }
               : {}),
           }),
         });
@@ -148,110 +164,121 @@ describe("V2 preview upgrade", () => {
         const columns = yield* sql<{
           readonly name: string;
         }>`PRAGMA table_info(projection_threads)`;
-        assert.ok(columns.some((column) => column.name === "auto_settle_disabled_at"));
+        assert.ok(
+          columns.some((column) => column.name === "auto_settle_disabled_at"),
+        );
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("rolls back schema and ledger together on failure and can retry", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* seedPreview;
-      yield* sql`
+  it.effect(
+    "rolls back schema and ledger together on failure and can retry",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedPreview;
+        yield* sql`
         CREATE TRIGGER fail_preview_upgrade BEFORE INSERT ON effect_sql_migrations
         WHEN NEW.name = 'PullRequestFilesViewed'
         BEGIN SELECT RAISE(ABORT, 'injected failure'); END
       `;
-      assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
-      assert.deepStrictEqual(
-        yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53`,
-        [{ migration_id: 53, name: "OrchestrationV2" }],
-      );
-      assert.deepStrictEqual(
-        yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_files_viewed'`,
-        [],
-      );
-      assert.strictEqual((yield* sql`SELECT * FROM orchestration_v2_legacy_imports`).length, 1);
-      yield* sql`DROP TRIGGER fail_preview_upgrade`;
-      assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
-        [59, "McpAppModelContext"],
-        [60, "ThreadSnapshotWindowIndexes"],
-        [61, "PullRequestReviewGuides"],
-        [62, "ThreadFailureLookupIndex"],
-        [63, "DropUnusedV1Projections"],
-        [64, "CanonicalizeThreadPullRequestLinks"],
-        [65, "CodexUsageNativeTurnIndex"],
-        [66, "RepairClientSettlementTimestamps"],
-        [67, "WebhookDedupe"],
-        [68, "ShellStopRequestIndex"],
-        [69, "ThreadMessageSearch"],
-        [70, "PeerLinks"],
-        [71, "PeerLinkFence"],
-        [72, "WaitingLinkRequestIndex"],
-        [73, "ActiveTurnItemIndexes"],
-        [74, "ExcludeAttachmentPlaceholdersFromSearch"],
-        [75, "SubagentDeliveryState"],
-        [76, "ProjectionProjectsPinArchive"],
-        [77, "RepairBooleanSettledOverride"],
-        [78, "DropOrchestrationEventCorrelationIndex"],
-        [79, "DelegatedRecoveryIndexes"],
-        [80, "ScheduledTaskThreadMode"],
-        [81, "ProjectionMessageSearchText"],
-        [82, "TurnItemConversationIndex"],
-        [83, "CommandReadIndexes"],
-        [84, "LastExecutedRunIndex"],
-        [85, "TurnItemCounts"],
-        [86, "QueuedTurnInputIndex"],
-        [87, "ProjectionProjectsCustomTitle"],
-        [88, "TurnItemTypeStatusIndex"],
-        [89, "ShellThreadReadIndexes"],
-        [90, "AuthConnectDevices"],
-        [91, "AuthConnectDeniedRequests"],
-        [92, "QueuedTurnInputIndexJsonValid"],
-        [93, "ProviderTurnAttemptIndex"],
-        [94, "TurnItemMessageOrdinalIndex"],
-        [95, "TurnItemInlineWorkOutput"],
-        [96, "RepairStaleTitleRegeneration"],
-        [97, "IssueTrackerBindings"],
-        [98, "ActiveShellIndexIndexes"],
-        [99, "BackgroundRecoveryIndexes"],
-        [100, "TurnStartReadIndexes"],
-        [101, "DelegatedTaskReadIndexes"],
-        [102, "ThreadItemCounts"],
-        [103, "IssueTrackerAdditionalScopes"],
-        [104, "ProjectionProjectsTrackedFolders"],
-        [105, "TaskFolders"],
-        [106, "WorktreePathKeyIndex"],
-        [107, "DeferredSlashCommandIndex"],
-        [108, "AgentFeedback"],
-        [109, "IssueTrackerAccounts"],
-        [110, "Workflows"],
-        [111, "SupersededRunAttemptIndex"],
-        [112, "LayoutCommandApprovals"],
-        [113, "WorkflowSkippedRuns"],
-        [114, "WorkflowRunIndexes"],
-        [115, "WorkflowRunTags"],
-        [116, "ForkHistoryMembership"],
-        [117, "WorkflowMailSender"],
-      ]);
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+        assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.deepStrictEqual(
+          yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53`,
+          [{ migration_id: 53, name: "OrchestrationV2" }],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_files_viewed'`,
+          [],
+        );
+        assert.strictEqual(
+          (yield* sql`SELECT * FROM orchestration_v2_legacy_imports`).length,
+          1,
+        );
+        yield* sql`DROP TRIGGER fail_preview_upgrade`;
+        assert.deepStrictEqual(yield* runMigrations(), [
+          [53, "PullRequestFilesViewed"],
+          [54, "ProjectionThreadsAutoSettleDisabledAt"],
+          [56, "RemoveRedundantProjectionIndexes"],
+          [57, "ScheduledTaskWebhooks"],
+          [58, "WebhookRelayDeliveries"],
+          [59, "McpAppModelContext"],
+          [60, "ThreadSnapshotWindowIndexes"],
+          [61, "PullRequestReviewGuides"],
+          [62, "ThreadFailureLookupIndex"],
+          [63, "DropUnusedV1Projections"],
+          [64, "CanonicalizeThreadPullRequestLinks"],
+          [65, "CodexUsageNativeTurnIndex"],
+          [66, "RepairClientSettlementTimestamps"],
+          [67, "WebhookDedupe"],
+          [68, "ShellStopRequestIndex"],
+          [69, "ThreadMessageSearch"],
+          [70, "PeerLinks"],
+          [71, "PeerLinkFence"],
+          [72, "WaitingLinkRequestIndex"],
+          [73, "ActiveTurnItemIndexes"],
+          [74, "ExcludeAttachmentPlaceholdersFromSearch"],
+          [75, "SubagentDeliveryState"],
+          [76, "ProjectionProjectsPinArchive"],
+          [77, "RepairBooleanSettledOverride"],
+          [78, "DropOrchestrationEventCorrelationIndex"],
+          [79, "DelegatedRecoveryIndexes"],
+          [80, "ScheduledTaskThreadMode"],
+          [81, "ProjectionMessageSearchText"],
+          [82, "TurnItemConversationIndex"],
+          [83, "CommandReadIndexes"],
+          [84, "LastExecutedRunIndex"],
+          [85, "TurnItemCounts"],
+          [86, "QueuedTurnInputIndex"],
+          [87, "ProjectionProjectsCustomTitle"],
+          [88, "TurnItemTypeStatusIndex"],
+          [89, "ShellThreadReadIndexes"],
+          [90, "AuthConnectDevices"],
+          [91, "AuthConnectDeniedRequests"],
+          [92, "QueuedTurnInputIndexJsonValid"],
+          [93, "ProviderTurnAttemptIndex"],
+          [94, "TurnItemMessageOrdinalIndex"],
+          [95, "TurnItemInlineWorkOutput"],
+          [96, "RepairStaleTitleRegeneration"],
+          [97, "IssueTrackerBindings"],
+          [98, "ActiveShellIndexIndexes"],
+          [99, "BackgroundRecoveryIndexes"],
+          [100, "TurnStartReadIndexes"],
+          [101, "DelegatedTaskReadIndexes"],
+          [102, "ThreadItemCounts"],
+          [103, "IssueTrackerAdditionalScopes"],
+          [104, "ProjectionProjectsTrackedFolders"],
+          [105, "TaskFolders"],
+          [106, "WorktreePathKeyIndex"],
+          [107, "DeferredSlashCommandIndex"],
+          [108, "AgentFeedback"],
+          [109, "IssueTrackerAccounts"],
+          [110, "Workflows"],
+          [111, "SupersededRunAttemptIndex"],
+          [112, "LayoutCommandApprovals"],
+          [113, "WorkflowSkippedRuns"],
+          [114, "WorkflowRunIndexes"],
+          [115, "WorkflowRunTags"],
+          [116, "ForkHistoryMembership"],
+          [117, "WorkflowMailSender"],
+          [118, "GerritPendingClones"],
+        ]);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("refuses unexpected later migrations without modifying their history", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* seedPreview;
-      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
-      const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-      assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
-      assert.deepStrictEqual(
-        yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
-        history,
-      );
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  it.effect(
+    "refuses unexpected later migrations without modifying their history",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedPreview;
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
+        const history =
+          yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+        assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.deepStrictEqual(
+          yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
+          history,
+        );
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

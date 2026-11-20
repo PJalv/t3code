@@ -44,7 +44,7 @@ export function usePullRequestAction(params: PullRequestParams, pr: PullRequestD
       const cause = squashAtomCommandFailure(response);
       Dialog.alert(
         gt(
-          "Couldn't update this {term, select, mr {merge request} cr {change request} other {pull request}}",
+          "Couldn't update this {term, select, mr {merge request} cr {change} other {pull request}}",
           {
             term: changeRequestTermKind(sourceControlClients.get(pr?.provider).changeRequest),
           },
@@ -72,7 +72,7 @@ export function usePullRequestAction(params: PullRequestParams, pr: PullRequestD
       "close",
       pullRequestActionLabel("close", terminology, m),
       gt(
-        "Close this {term, select, mr {merge request} cr {change request} other {pull request}} without merging its changes?",
+        "Close this {term, select, mr {merge request} cr {change} other {pull request}} without merging its changes?",
         {
           term: changeRequestTermKind(terminology),
         },

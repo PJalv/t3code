@@ -349,7 +349,7 @@ export function PullRequestStackMenu({
             {stale
               ? staleReason
               : gt(
-                  "{count, plural, one {Merge stack through '#'{number} into {base} ({count} {term, select, mr {merge request} cr {change request} other {pull request}})} other {Merge stack through '#'{number} into {base} ({count} {term, select, mr {merge requests} cr {change requests} other {pull requests}})}}",
+                  "{count, plural, one {Merge stack through '#'{number} into {base} ({count} {term, select, mr {merge request} cr {change} other {pull request}})} other {Merge stack through '#'{number} into {base} ({count} {term, select, mr {merge requests} cr {changes} other {pull requests}})}}",
                   {
                     count: mergeLayers.length,
                     number: reference.number,
@@ -371,7 +371,7 @@ export function PullRequestStackMenu({
             <DialogTitle>
               {confirmation === "merge"
                 ? gt(
-                    "{count, plural, one {Merge {count} {term, select, mr {merge request} cr {change request} other {pull request}}?} other {Merge {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}?}}",
+                    "{count, plural, one {Merge {count} {term, select, mr {merge request} cr {change} other {pull request}}?} other {Merge {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}?}}",
                     {
                       count: mergeLayers.length,
                       term: changeRequestTermKind(terminology),
@@ -379,14 +379,14 @@ export function PullRequestStackMenu({
                   )
                 : confirmation === "enable-auto-merge"
                   ? gt(
-                      "{count, plural, one {Auto-merge {count} {term, select, mr {merge request} cr {change request} other {pull request}}?} other {Auto-merge {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}?}}",
+                      "{count, plural, one {Auto-merge {count} {term, select, mr {merge request} cr {change} other {pull request}}?} other {Auto-merge {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}?}}",
                       {
                         count: mergeLayers.length,
                         term: changeRequestTermKind(terminology),
                       },
                     )
                   : gt(
-                      "{count, plural, one {Rebase {count} {term, select, mr {merge request} cr {change request} other {pull request}}?} other {Rebase {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}?}}",
+                      "{count, plural, one {Rebase {count} {term, select, mr {merge request} cr {change} other {pull request}}?} other {Rebase {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}?}}",
                       {
                         count: unmerged.length,
                         term: changeRequestTermKind(terminology),

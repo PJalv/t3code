@@ -119,7 +119,7 @@ it("uploads HEAD directly and refreshes status and reviews", async () => {
   });
   expect(state.status).toHaveBeenCalledWith({ environmentId, input: { cwd: "/repo" } });
   expect(state.invalidate).toHaveBeenCalledOnce();
-  expect(screen.container.textContent).toContain("Upload complete · Change #42 · Patch set 3");
+  expect(screen.container.textContent).toContain("Upload complete. Change #42 Patch set 3");
 });
 
 it("uploads a new change to the configured branch", async () => {

@@ -173,11 +173,11 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     const prUrl = gitStatus?.pr?.state === "open" ? gitStatus.pr.url : null;
     if (!prUrl) {
       Dialog.alert(
-        gt("{term, select, mr {No open MR} cr {No open change request} other {No open PR}}", {
+        gt("{term, select, mr {No open MR} cr {No open change} other {No open PR}}", {
           term,
         }),
         gt(
-          "{term, select, mr {This branch does not have an open merge request.} cr {This branch does not have an open change request.} other {This branch does not have an open pull request.}}",
+          "{term, select, mr {This branch does not have an open merge request.} cr {This branch does not have an open change.} other {This branch does not have an open pull request.}}",
           { term },
         ),
       );
@@ -186,11 +186,11 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     if (!(await openPullRequest(prUrl))) {
       Dialog.alert(
         gt(
-          "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+          "{term, select, mr {Unable to open MR} cr {Unable to open change} other {Unable to open PR}}",
           { term },
         ),
         gt(
-          "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+          "{term, select, mr {The merge request could not be opened.} cr {The change could not be opened.} other {The pull request could not be opened.}}",
           { term },
         ),
       );

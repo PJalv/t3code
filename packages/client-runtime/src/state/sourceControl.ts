@@ -1,4 +1,8 @@
-export { gerritConnectionConfigFromFields, gerritCredentialSaveMode } from "./gerritReview.ts";
+export {
+  gerritConnectionConfigFromFields,
+  gerritCredentialSaveMode,
+  gerritTerminalGitCommandTemplate,
+} from "./gerritReview.ts";
 import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import type * as AtomRegistry from "effect/reactivity/AtomRegistry";

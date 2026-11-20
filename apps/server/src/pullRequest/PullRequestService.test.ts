@@ -10,6 +10,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
@@ -519,6 +520,170 @@ it.effect(
         "github:github.com/org/repo",
       ]);
     }),
+);
+
+it.effect("observes only fresh changed Gerrit detail loads in their own identity scope", () =>
+  Effect.gen(function* () {
+    let headSha = "patch-1";
+    let updatedAt = "2026-07-02T00:00:00Z";
+    let state: "open" | "closed" = "open";
+    let fail = false;
+    let credential = "credential-a";
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "g",
+          title: "gerrit",
+          workspaceRoot: "/g",
+          repository: "platform/tools",
+          provider: "gerrit",
+          host: "review.example:8443",
+        }),
+      ],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("gerrit"), {
+          getChangeRequest: () =>
+            fail
+              ? Effect.fail(requestFailed)
+              : Effect.succeed({
+                  ...hostedChangeRequest("Body"),
+                  headSha,
+                  updatedAt,
+                  state,
+                  url: "https://review.example:8443/gerrit/c/platform/tools/+/1",
+                }),
+          withVerifiedCredential: (_, use) =>
+            Effect.suspend(() =>
+              use({ accountId: "101", viewer: "reviewer", credentialFingerprint: credential }),
+            ),
+        }),
+      ],
+    });
+    const ref = {
+      projectId: "g" as ProjectId,
+      repository: "platform/tools",
+      host: "review.example:8443",
+      number: 1,
+      allowStale: false,
+    };
+    const observations = yield* service.subscribeGerritDetailObservations;
+    const received = yield* Queue.unbounded<PullRequestService.GerritDetailObservation>();
+    yield* observations.pipe(
+      Stream.runForEach((value) => Queue.offer(received, value)),
+      Effect.forkScoped,
+    );
+    yield* service.detail(ref);
+    const first = yield* Queue.take(received);
+    assert.deepStrictEqual(first.reference, {
+      projectId: ref.projectId,
+      host: ref.host,
+      repository: ref.repository,
+      number: ref.number,
+    });
+    assert.strictEqual(first.url, "https://review.example:8443/gerrit/c/platform/tools/+/1");
+    assert.strictEqual(first.credentialFingerprint, null);
+    yield* service.detail(ref);
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    yield* service.reportState({ reference: ref, state: "closed" });
+    headSha = "patch-2";
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    assert.strictEqual((yield* Queue.take(received)).reference.number, 1);
+    updatedAt = "2026-07-03T00:00:00Z";
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    yield* Queue.take(received);
+    state = "closed";
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    yield* Queue.take(received);
+    assert.strictEqual(yield* Queue.size(received), 0);
+
+    const routed = { ...ref, expectedAccountId: "101" };
+    yield* service.withRoutingCredential(routed, service.detail(routed));
+    const account = yield* Queue.take(received);
+    assert.strictEqual(account.reference.expectedAccountId, "101");
+    assert.strictEqual(account.credentialFingerprint, "credential-a");
+    credential = "credential-b";
+    yield* service.withRoutingCredential(routed, service.detail(routed));
+    assert.strictEqual((yield* Queue.take(received)).credentialFingerprint, "credential-b");
+
+    headSha = "watch-read";
+    yield* service.invalidate({ reference: ref });
+    yield* service
+      .detail(ref)
+      .pipe(Effect.provideService(PullRequestService.ObserveGerritDetails, false));
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    fail = true;
+    yield* TestClock.adjust("61 seconds");
+    yield* service.detail(ref).pipe(Effect.exit);
+    const stale = yield* service.detail({ ...ref, allowStale: true });
+    assert.strictEqual(stale.headSha, "watch-read");
+    assert.strictEqual(yield* Queue.size(received), 0);
+  }),
+);
+
+it.effect("rejects invalidated and older Gerrit detail observations", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let calls = 0;
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "g",
+          title: "gerrit",
+          workspaceRoot: "/g",
+          repository: "platform/tools",
+          provider: "gerrit",
+          host: "review.example",
+        }),
+      ],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("gerrit"), {
+          getChangeRequest: () => {
+            const call = ++calls;
+            return (
+              call === 1
+                ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                : Effect.void
+            ).pipe(
+              Effect.as({
+                ...hostedChangeRequest("Body"),
+                headSha: String(call),
+                updatedAt: call === 2 ? "2026-07-03T00:00:00Z" : "2026-07-02T00:00:00Z",
+              }),
+            );
+          },
+        }),
+      ],
+    });
+    const ref = {
+      projectId: "g" as ProjectId,
+      repository: "platform/tools",
+      host: "review.example",
+      number: 1,
+      allowStale: false,
+    };
+    const observations = yield* service.subscribeGerritDetailObservations;
+    const received = yield* Queue.unbounded<PullRequestService.GerritDetailObservation>();
+    yield* observations.pipe(
+      Stream.runForEach((value) => Queue.offer(received, value)),
+      Effect.forkScoped,
+    );
+    const old = yield* service.detail(ref).pipe(Effect.forkScoped);
+    yield* Deferred.await(entered);
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    yield* Queue.take(received);
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(old);
+    yield* service.invalidate({ reference: ref });
+    yield* service.detail(ref);
+    assert.strictEqual(yield* Queue.size(received), 0);
+  }),
 );
 
 it.effect("reports an ambiguous Gerrit host alongside readable projects", () =>
@@ -1617,6 +1782,193 @@ it.effect(
         });
       }
       assert.deepStrictEqual(asked, [true, undefined]);
+    }),
+);
+
+it.effect.each(["gerrit", "gitlab"])(
+  "explains unsupported CI operations for %s without host calls and keeps check URLs readable",
+  (provider) =>
+    Effect.gen(function* () {
+      let reads = 0;
+      const check = {
+        name: "Build",
+        status: "failure" as const,
+        description: null,
+        url: "https://ci.example/jobs/42?attempt=3",
+      };
+      const service = yield* makeService({
+        projects: [
+          project({
+            id: "p1",
+            title: "web",
+            workspaceRoot: "/a",
+            repository: "platform/web",
+            provider,
+            host: "review.example:8443",
+          }),
+        ],
+        providers: [
+          fakePullRequestProvider(provider, {
+            getViewer: () => Effect.die("Unsupported CI must not read the viewer"),
+            getChangeRequest: () => Effect.die("Unsupported CI must not read change detail"),
+            getChangeRequestChecks: () =>
+              Effect.sync(() => {
+                reads += 1;
+                return { state: "open" as const, checks: [check] };
+              }),
+            runAction: () => Effect.die("Unsupported CI must not mutate the change"),
+          }),
+        ],
+      });
+      const ref = {
+        projectId: "p1" as ProjectId,
+        repository: "platform/web",
+        host: "review.example:8443",
+        number: 42,
+        check: "Build",
+      };
+      const logs = yield* service.checkLogs({ ...ref, tailLines: 50 }).pipe(Effect.flip);
+      const rerun = yield* service.rerunChecks(ref).pipe(Effect.flip);
+      for (const [error, operation] of [
+        [logs, "checkLogs"],
+        [rerun, "rerunChecks"],
+      ] as const) {
+        assert.strictEqual(error._tag, "PullRequestOperationError");
+        if (error._tag === "PullRequestOperationError") {
+          assert.strictEqual(error.operation, operation);
+          assert.include(error.detail, provider === "gerrit" ? "Gerrit" : provider);
+          assert.include(error.detail, "check URL");
+          assert.include(error.detail, "CI system");
+          if (provider === "gerrit") {
+            assert.include(error.detail, "when Checks is configured");
+          }
+        }
+      }
+      assert.strictEqual(reads, 0);
+      assert.deepStrictEqual((yield* service.checks(ref))?.checks, [check]);
+      assert.strictEqual(reads, 1);
+    }),
+);
+
+it.effect.each(["github", "gitcafe"])(
+  "routes supported CI operations to the exact %s repository and check URL",
+  (provider) =>
+    Effect.gen(function* () {
+      const selected: Array<unknown> = [];
+      const logs: Array<unknown> = [];
+      const reruns: Array<unknown> = [];
+      const target = {
+        cwd: "/checkout",
+        repository: "Team/Web",
+        host: "forge.example:8443",
+      };
+      const check = { name: "Build", url: "https://ci.example/jobs/42?attempt=3" };
+      const service = yield* makeService({
+        projects: [
+          project({
+            id: "p1",
+            title: "web",
+            workspaceRoot: target.cwd,
+            repository: target.repository,
+            provider,
+            host: target.host,
+          }),
+        ],
+        providers: [
+          fakePullRequestProvider(provider, {
+            getChangeRequestChecks: (input) =>
+              Effect.sync(() => {
+                selected.push(input);
+                return {
+                  state: "open" as const,
+                  checks: [{ ...check, status: "failure" as const, description: null }],
+                };
+              }),
+            getCheckLogs: (input) =>
+              Effect.sync(() => {
+                logs.push(input);
+                return [{ ...check, log: "build failed", truncated: false, detail: null }];
+              }),
+            rerunChecks: (input) =>
+              Effect.sync(() => {
+                reruns.push(input);
+                return [{ ...check, rerun: true, detail: null }];
+              }),
+          }),
+        ],
+      });
+      const ref = {
+        projectId: "p1" as ProjectId,
+        repository: target.repository,
+        host: target.host,
+        number: 42,
+        check: "build",
+      };
+      assert.strictEqual((yield* service.checkLogs({ ...ref, tailLines: 37 }))[0]?.url, check.url);
+      assert.strictEqual((yield* service.rerunChecks(ref))[0]?.rerun, true);
+      assert.deepStrictEqual(selected, [
+        { ...target, number: 42 },
+        { ...target, number: 42 },
+      ]);
+      assert.deepStrictEqual(logs, [{ ...target, checks: [check], tailLines: 37 }]);
+      assert.deepStrictEqual(reruns, [{ ...target, checks: [check] }]);
+    }),
+);
+
+it.effect.each(["forbidden", "unauthenticated"] as const)(
+  "preserves CI %s errors instead of reporting an unsupported capability",
+  (reason) =>
+    Effect.gen(function* () {
+      for (const stage of ["selection", "operation"] as const) {
+        const denied = new PullRequestProviderError({
+          provider: SourceControlProviderKind.make("github"),
+          operation: stage,
+          reason,
+          detail: "CI access denied by the host.",
+        });
+        let calls = 0;
+        const service = yield* makeService({
+          projects: [
+            project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+          ],
+          providers: [
+            fakePullRequestProvider("github", {
+              getChangeRequestChecks: () =>
+                stage === "selection"
+                  ? Effect.fail(denied)
+                  : Effect.succeed({
+                      state: "open",
+                      checks: [{ name: "Build", status: "failure", description: null, url: null }],
+                    }),
+              getCheckLogs: () => {
+                calls += 1;
+                return Effect.fail(denied);
+              },
+              rerunChecks: () => {
+                calls += 1;
+                return Effect.fail(denied);
+              },
+            }),
+          ],
+        });
+        const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+        const logs = yield* service.checkLogs({ ...ref, tailLines: 50 }).pipe(Effect.flip);
+        const rerun = yield* service.rerunChecks(ref).pipe(Effect.flip);
+        for (const error of [logs, rerun]) {
+          assert.strictEqual(error.cause, denied);
+          assert.strictEqual(
+            error._tag,
+            reason === "forbidden" ? "PullRequestOperationError" : "PullRequestUnavailableError",
+          );
+          if (error._tag === "PullRequestOperationError") {
+            assert.strictEqual(error.detail, denied.detail);
+          }
+          if (error._tag === "PullRequestUnavailableError") {
+            assert.strictEqual(error.reason, "cli-unauthenticated");
+          }
+        }
+        assert.strictEqual(calls, stage === "selection" ? 0 : 2);
+      }
     }),
 );
 
