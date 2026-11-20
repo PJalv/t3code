@@ -138,10 +138,9 @@
   "0cb7a36802fe8089": "Filter {number} needs a path under body, headers or query.",
   "1fa38fb049c6b56e": "Filter {number} needs a path under body, headers or query, and at least one value.",
   "31ec02bdcb3920d1": "Filter {number} needs a path under body, headers or query, and a value.",
+  "62ae4688ece05590": "Stored securely, never shown to the agent",
   "81f613bb68d85bb7": "Kept out of chat, in a private file this agent's commands can read for 24 hours",
   "07b56c0c12bd2de1": "Kept out of chat, in private files this agent's commands can read for 24 hours",
-  "6435447ce7656f13": "Show {label}",
-  "62ae4688ece05590": "Stored securely, never shown to the agent",
   "8c2d901183b4e219": "Paste the secret",
   "610aea624f895a78": "Saved securely and kept private",
   "329b7854b7e0546e": "Use a 1Password reference like {example}.",
@@ -648,6 +647,7 @@
   "ba273b237ed0e6c8": "Create {shortLabel}",
   "f936de5702861228": "Git action in progress.",
   "3c26d723568eb2bf": "Git status is unavailable.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Create and checkout a branch before pushing or opening a PR.} mr {Create and checkout a branch before pushing or opening an MR.} generic {Create and checkout a branch before pushing or opening a change request.} other {Create and checkout a branch before pushing or opening {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Commit & push",
   "c65e62ead20fb5f2": "Commit, push & {shortLabel}",
@@ -3932,6 +3932,7 @@
   "90062342f04966ff": "Update this environment's T3 Code server to browse pull requests.",
   "5e7157db126f1641": "Issues unavailable",
   "42ade0e14ff6af94": "Update this environment's T3 Code server to browse issues.",
+  "6435447ce7656f13": "Show {label}",
   "993dcd04611f9571": "Save securely",
   "ccbe48efc8e30c52": "Delete side chat \"{title}\"?",
   "3a859b690f41e899": "This permanently clears its conversation history.",
@@ -4466,6 +4467,9 @@
   "7f0f9b1ee42892db": "Output is no longer available.",
   "e470bb79fa74a6ae": "Tool output image",
   "e8c80b6d40c0944c": "Search result",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "exit ",
     {
@@ -4662,6 +4666,7 @@
   "82d82cdbe3b0f975": "{size} · Use {shortcut} to keep a large paste inline.",
   "247cd77b35ddb586": "''{name}'' could not be read as an image.",
   "7eccb44d5449e777": "''{name}'' is too large to attach, even after compression.",
+  "d07dd6dfd269680a": "{names} could not be restored: the composer is at its {limit}-attachment limit.",
   "1d4059658a0ab500": "Remove {name} from the message?\nIt is referenced in your text; removing it also removes every reference.",
   "86261d5bd0651358": "Remove this image from the message?\nIt is referenced in your text; removing it also removes every reference.",
   "f70c49e9f30807a3": "Pasted text is too large for this message",
@@ -4734,7 +4739,6 @@
   "c809a3c353e67a28": "Browser storage rejected the update, so this entry could still be there after a reload.",
   "1a4bc01f0ca772c2": "{names} exceeded the stash size limit when this prompt was saved.",
   "bb3b4ad32b596e11": "{names} could not be read when this prompt was saved.",
-  "d07dd6dfd269680a": "{names} could not be restored: the composer is at its {limit}-attachment limit.",
   "7e4a6a2c84d34a80": "{names}: stashed files are kept for 24 hours and this upload expired. Attach the file again.",
   "1e3ede33afee71ba": "Some attachments were not restored",
   "98c76143d9aae871": "Stash entry may come back",
@@ -5796,14 +5800,13 @@
   "b6a29fff7c7c0808": "None",
   "54420465784bb1bd": "Load older comments",
   "9d82ebf35bfb4043": "Nothing has happened here yet.",
-  "1cf216566c1ee064": "Unavailable project",
   "b5ddadeb0810688c": "State",
   "93c1fc19d9bf1db0": "Involvement",
   "d5a8b335d88b65bc": "{hidden} hidden",
   "2160067266a61dd8": "Any",
   "cd4ec4acf33c65b9": "{count, plural, one {{count} label} other {{count} labels}}",
   "bfd20acb8b7dee6b": "Anyone",
-  "ad208e3e32c85029": "Hide all",
+  "aead644e2cf1233f": "Show all",
   "77ce79d865716719": "No matching projects.",
   "af7eb4f9c7f0f575": "Filters",
   "08247dd39b0c85ff": "Assignee",
@@ -6521,7 +6524,6 @@
   "64d0189be492147c": "Unable to open check details",
   "600347ca50400a54": "Loading checks…",
   "1b381201aba745c2": "No checks reported",
-  "aead644e2cf1233f": "Show all",
   "a6d75a4380173c60": "Open checks: {summary}",
   "be3d1766bad18693": "Checks: {summary}",
   "425e4a3d6c5c2867": "{count, plural, one {{count} failed} other {{count} failed}}",
@@ -8120,6 +8122,7 @@
   "cba61c55d252ddd3": "Could not remove backend",
   "0df2f6de1bed9c0e": "Remove {environment} from this device?\nThis forgets its pairing, credentials, and cached threads here. Switch it off instead to keep it saved.",
   "1f293df910bc80a1": "Revoke all other clients?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Enable network access",
   "0d1a41cbf4fab7af": "Failed to update WSL backend.",
   "c0945ab375a2a3cd": "Could not change WSL backend",
@@ -8139,6 +8142,8 @@
   "035a3c35d77332ef": "Exposed on all interfaces. Pairing links use {host}.",
   "e4364c60111215a3": "Exposed on all interfaces.",
   "a847a3a44f2fd582": "Limited to this machine.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "This connection cannot view or change network exposure.",
   "d4b7ed99318074c4": "Remote access is already configured. Change network exposure where the server starts.",
   "9698cd05b10a3613": "Only this machine can connect. Restart with a non-loopback host for remote pairing.",
@@ -8192,6 +8197,15 @@
     }
   ],
   "2b382086196fdd96": "Default distro",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Network exposure changes restart the backend and must be controlled where the server process is launched.",
   "5efa21c55ba2ac54": "This connection can create access links but cannot view authorized clients.",
   "40335d08877bc746": "Applying…",
@@ -8812,16 +8826,30 @@
   "298c7150a7621c80": "Simlock device hosts",
   "67937aa49179285e": "On a Mac, clone new worktrees from a checkout cached in the T3 home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache.",
   "f9904f78d3003f58": "Fast worktree checkout",
-  "ec7623deed751c05": [
-    "Share a thread with a guest who watches it live in a browser and sends messages you approve. Needs T3 Connect: sign in and link this machine in",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
       "c": "Sharing & access"
     },
-    ". Turning it off stops every guest link."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Let agents here work on your other machines, and theirs here. Turn it on for each machine, then link them in",
     " ",
@@ -9932,6 +9960,7 @@
   "51497bd401292062": "Hold",
   "9d6cc6ac23312071": "Double press",
   "f001fa7b329c8fbf": "Hide successful",
+  "ad208e3e32c85029": "Hide all",
   "c80e4bb3201efd71": "Zen",
   "0cb9ffcd1fb46b0c": "Status only",
   "cf0f7fc3df26fa75": "Status and messages",
@@ -10141,6 +10170,7 @@
   "573ea5fdf293a9d6": "All checkouts",
   "470ad8c54049d1e1": "Search checkouts",
   "7e2dfdd9f97fc027": "Project scope",
+  "1cf216566c1ee064": "Unavailable project",
   "c1b8c351aa90f319": [
     {
       "t": "span",
@@ -11831,6 +11861,7 @@
   "8ac2984f4e732091": "turn off on disable enable local server agents remote only restart",
   "3a54b8d98911331a": "Network access",
   "1a31308f0884a68b": "expose backend remote pairing local machine interfaces host restart",
+  "2d1194abbbad89be": "LAN interface",
   "468d32c6b30df608": "Tailscale HTTPS",
   "92c2528040ca7442": "serve magicdns endpoint remote secure network",
   "ab23b9c923cc4e80": "windows subsystem linux distro second server projects stop windows backend restart wsl only",

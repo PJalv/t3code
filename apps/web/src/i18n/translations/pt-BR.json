@@ -138,10 +138,9 @@
   "0cb7a36802fe8089": "O filtro {number} precisa de um caminho em body, headers ou query.",
   "1fa38fb049c6b56e": "O filtro {number} precisa de um caminho em body, headers ou query e de pelo menos um valor.",
   "31ec02bdcb3920d1": "O filtro {number} precisa de um caminho em body, headers ou query e de um valor.",
+  "62ae4688ece05590": "Armazenado com segurança, nunca mostrado ao agente",
   "81f613bb68d85bb7": "Fora do chat, em um arquivo privado que os comandos deste agente podem ler por 24 horas",
   "07b56c0c12bd2de1": "Fora do chat, em arquivos privados que os comandos deste agente podem ler por 24 horas",
-  "6435447ce7656f13": "Mostrar {label}",
-  "62ae4688ece05590": "Armazenado com segurança, nunca mostrado ao agente",
   "8c2d901183b4e219": "Cole o segredo",
   "610aea624f895a78": "Salvo com segurança e mantido privado",
   "329b7854b7e0546e": "Use uma referência do 1Password como {example}.",
@@ -648,6 +647,7 @@
   "ba273b237ed0e6c8": "Criar {shortLabel}",
   "f936de5702861228": "Ação do Git em andamento.",
   "3c26d723568eb2bf": "O status do Git não está disponível.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Crie um branch e faça checkout dele antes de fazer push ou abrir um PR.} mr {Crie um branch e faça checkout dele antes de fazer push ou abrir um MR.} generic {Crie um branch e faça checkout dele antes de fazer push ou abrir uma solicitação de alteração.} other {Crie um branch e faça checkout dele antes de fazer push ou abrir {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Commit e push",
   "c65e62ead20fb5f2": "Commit, push e {shortLabel}",
@@ -3931,6 +3931,7 @@
   "90062342f04966ff": "Atualize o servidor do T3 Code deste ambiente para navegar pelos pull requests.",
   "5e7157db126f1641": "Issues indisponíveis",
   "42ade0e14ff6af94": "Atualize o servidor do T3 Code deste ambiente para navegar pelas issues.",
+  "6435447ce7656f13": "Mostrar {label}",
   "993dcd04611f9571": "Salvar com segurança",
   "ccbe48efc8e30c52": "Excluir o chat paralelo \"{title}\"?",
   "3a859b690f41e899": "Isso apaga permanentemente o histórico dele.",
@@ -4464,6 +4465,9 @@
   "7f0f9b1ee42892db": "A saída não está mais disponível.",
   "e470bb79fa74a6ae": "Imagem da saída da ferramenta",
   "e8c80b6d40c0944c": "Resultado da pesquisa",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "saída ",
     {
@@ -4660,6 +4664,7 @@
   "82d82cdbe3b0f975": "{size} · Use {shortcut} para manter uma colagem grande no texto.",
   "247cd77b35ddb586": "Não foi possível ler ''{name}'' como imagem.",
   "7eccb44d5449e777": "''{name}'' é grande demais para anexar, mesmo após a compressão.",
+  "d07dd6dfd269680a": "Não foi possível restaurar {names}: o editor de mensagens atingiu o limite de {limit} anexos.",
   "1d4059658a0ab500": "Remover {name} da mensagem?\nEle é referenciado no seu texto; removê-lo também remove todas as referências.",
   "86261d5bd0651358": "Remover esta imagem da mensagem?\nEla é referenciada no seu texto; removê-la também remove todas as referências.",
   "f70c49e9f30807a3": "O texto colado é grande demais para esta mensagem",
@@ -4732,7 +4737,6 @@
   "c809a3c353e67a28": "O armazenamento do navegador rejeitou a atualização, então este item ainda pode estar lá após recarregar.",
   "1a4bc01f0ca772c2": "{names} excedeu o limite de tamanho dos guardados quando este prompt foi salvo.",
   "bb3b4ad32b596e11": "Não foi possível ler {names} quando este prompt foi salvo.",
-  "d07dd6dfd269680a": "Não foi possível restaurar {names}: o editor de mensagens atingiu o limite de {limit} anexos.",
   "7e4a6a2c84d34a80": "{names}: os arquivos guardados são mantidos por 24 horas e este upload expirou. Anexe o arquivo novamente.",
   "1e3ede33afee71ba": "Alguns anexos não foram restaurados",
   "98c76143d9aae871": "O item guardado pode voltar",
@@ -5794,14 +5798,13 @@
   "b6a29fff7c7c0808": "Ninguém",
   "54420465784bb1bd": "Carregar comentários mais antigos",
   "9d82ebf35bfb4043": "Nada aconteceu aqui ainda.",
-  "1cf216566c1ee064": "Projeto indisponível",
   "b5ddadeb0810688c": "Estado",
   "93c1fc19d9bf1db0": "Envolvimento",
   "d5a8b335d88b65bc": "{hidden} ocultos",
   "2160067266a61dd8": "Qualquer",
   "cd4ec4acf33c65b9": "{count, plural, one {{count} rótulo} other {{count} rótulos}}",
   "bfd20acb8b7dee6b": "Qualquer pessoa",
-  "ad208e3e32c85029": "Ocultar todas",
+  "aead644e2cf1233f": "Mostrar tudo",
   "77ce79d865716719": "Nenhum projeto correspondente.",
   "af7eb4f9c7f0f575": "Filtros",
   "08247dd39b0c85ff": "Responsável",
@@ -6514,7 +6517,6 @@
   "64d0189be492147c": "Não foi possível abrir os detalhes da verificação",
   "600347ca50400a54": "Carregando as verificações…",
   "1b381201aba745c2": "Nenhuma verificação informada",
-  "aead644e2cf1233f": "Mostrar tudo",
   "a6d75a4380173c60": "Abrir verificações: {summary}",
   "be3d1766bad18693": "Verificações: {summary}",
   "425e4a3d6c5c2867": "{count, plural, one {{count} com falha} other {{count} com falha}}",
@@ -8112,6 +8114,7 @@
   "cba61c55d252ddd3": "Não foi possível remover o backend",
   "0df2f6de1bed9c0e": "Remover {environment} deste dispositivo?\nIsso esquece o pareamento, as credenciais e as threads em cache dele aqui. Desative-o em vez disso para mantê-lo salvo.",
   "1f293df910bc80a1": "Revogar todos os outros clientes?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Ativar o acesso à rede",
   "0d1a41cbf4fab7af": "Falha ao atualizar o backend do WSL.",
   "c0945ab375a2a3cd": "Não foi possível alterar o backend do WSL",
@@ -8131,6 +8134,8 @@
   "035a3c35d77332ef": "Exposto em todas as interfaces. Os links de pareamento usam {host}.",
   "e4364c60111215a3": "Exposto em todas as interfaces.",
   "a847a3a44f2fd582": "Limitado a esta máquina.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "Esta conexão não pode ver nem alterar a exposição na rede.",
   "d4b7ed99318074c4": "O acesso remoto já está configurado. Altere a exposição na rede onde o servidor é iniciado.",
   "9698cd05b10a3613": "Só esta máquina pode se conectar. Reinicie com um host que não seja loopback para o pareamento remoto.",
@@ -8184,6 +8189,15 @@
     }
   ],
   "2b382086196fdd96": "Distro padrão",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Mudanças na exposição na rede reiniciam o backend e precisam ser controladas onde o processo do servidor é iniciado.",
   "5efa21c55ba2ac54": "Esta conexão pode criar links de acesso, mas não pode ver os clientes autorizados.",
   "40335d08877bc746": "Aplicando…",
@@ -8802,16 +8816,30 @@
   "298c7150a7621c80": "Hosts de dispositivos Simlock",
   "67937aa49179285e": "No Mac, clona novos worktrees a partir de um checkout em cache na pasta T3 home em vez de gravar cada arquivo. Usa o checkout normal do Git quando não consegue. Desativar exclui o cache.",
   "f9904f78d3003f58": "Checkout rápido de worktree",
-  "ec7623deed751c05": [
-    "Compartilhe uma thread com um convidado que a acompanha ao vivo no navegador e envia mensagens que você aprova. Requer T3 Connect: entre e vincule esta máquina em",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "Compartilhamento"
+      "c": "Sharing & access"
     },
-    ". Desativar encerra todos os links de convidado."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Permite que os agentes daqui trabalhem nas suas outras máquinas, e os delas aqui. Ative em cada máquina e depois vincule-as em",
     " ",
@@ -9921,6 +9949,7 @@
   "51497bd401292062": "Manter pressionado",
   "9d6cc6ac23312071": "Pressionar duas vezes",
   "f001fa7b329c8fbf": "Ocultar bem-sucedidas",
+  "ad208e3e32c85029": "Ocultar todas",
   "c80e4bb3201efd71": "Zen",
   "0cb9ffcd1fb46b0c": "Só status",
   "cf0f7fc3df26fa75": "Status e mensagens",
@@ -10130,6 +10159,7 @@
   "573ea5fdf293a9d6": "Todos os checkouts",
   "470ad8c54049d1e1": "Pesquisar checkouts",
   "7e2dfdd9f97fc027": "Escopo de projeto",
+  "1cf216566c1ee064": "Projeto indisponível",
   "c1b8c351aa90f319": [
     {
       "t": "span",
@@ -11820,6 +11850,7 @@
   "8ac2984f4e732091": "desligar ligar desativar ativar servidor local agentes só remoto reiniciar",
   "3a54b8d98911331a": "Acesso à rede",
   "1a31308f0884a68b": "expor backend remoto pareamento máquina local interfaces host reiniciar",
+  "2d1194abbbad89be": "LAN interface",
   "468d32c6b30df608": "Tailscale HTTPS",
   "92c2528040ca7442": "serve magicdns endpoint remoto seguro rede",
   "ab23b9c923cc4e80": "windows subsystem linux distro segundo servidor projetos parar backend do windows reiniciar só wsl",
