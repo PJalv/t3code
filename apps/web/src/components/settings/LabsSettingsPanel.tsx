@@ -3,7 +3,7 @@ import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels
 import { useAuth } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { AgentFeedbackMode } from "@t3tools/contracts";
-import { T, useGT, useMessages } from "gt-react";
+import { T, Var, useGT, useMessages } from "gt-react";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
@@ -100,8 +100,9 @@ function GuestLinksRowWithSignIn() {
   const gt = useGT();
   const { isSignedIn } = useAuth();
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
+  const settings = useScopedSettings();
   // `isSignedIn` is undefined until Clerk loads.
-  if (isSignedIn !== false) return <GuestLinksRow />;
+  if (settings.guestLinkBaseUrl !== null || isSignedIn !== false) return <GuestLinksRow />;
   return (
     <SettingsRow
       {...searchableSetting("guest-links")}
@@ -140,14 +141,26 @@ function GuestLinksRow() {
       // Turning guest links off still works without T3 Connect.
       managed={settings.guestSharingEnabled ? undefined : connectDenial}
       description={
-        <T>
-          Share a thread with a guest who watches it live in a browser and sends messages you
-          approve. Needs T3 Connect: sign in and link this machine in{" "}
-          <Link to="/settings/access" className="underline underline-offset-2">
-            Sharing & access
-          </Link>
-          . Turning it off stops every guest link.
-        </T>
+        <>
+          <T>
+            Share a thread with a guest who watches it live in a browser and sends messages you
+            approve.{" "}
+          </T>
+          {settings.guestLinkBaseUrl !== null ? (
+            <T>
+              Uses this machine's configured guest endpoint: <Var>{settings.guestLinkBaseUrl}</Var>.
+            </T>
+          ) : (
+            <T>
+              Needs T3 Connect: sign in and link this machine in{" "}
+              <Link to="/settings/access" className="underline underline-offset-2">
+                Sharing & access
+              </Link>
+              .
+            </T>
+          )}{" "}
+          <T>Turning it off stops every guest link.</T>
+        </>
       }
       control={
         <ScopedSwitch
