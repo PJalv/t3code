@@ -188,6 +188,34 @@ it("runs a side chat's composer chords only from its composer, and never thread 
   expect(stops).toEqual([]);
 });
 
+function ChatWithDevice(props: { ran: string[] }) {
+  useChatShortcuts({
+    enabled: true,
+    keybindings: [ctrlShift("x", "thread.stop")],
+    scriptKeybindings: [],
+    getShortcutContext: () => shortcutContext,
+    threadFindActive: false,
+    composerRef: { current: null },
+    branchToolbarRef: { current: null },
+    closeThreadFind: () => {},
+    commands: { "thread.stop": () => void props.ran.push("stop") },
+    fallback: () => undefined,
+  });
+  return (
+    <div role="application" aria-label="Device" tabIndex={0}>
+      <span>Device screen</span>
+    </div>
+  );
+}
+
+it("leaves chat shortcuts to the focused device", async () => {
+  const ran: string[] = [];
+  await using screen = await render(<ChatWithDevice ran={ran} />, options);
+  await userEvent.click(screen.getByText("Device screen"));
+  await userEvent.keyboard("{Control>}{Shift>}X{/Shift}{/Control}");
+  expect(ran).toEqual([]);
+});
+
 const ctrlAlt = (key: string, command: KeybindingCommand) => ({
   command,
   shortcut: { key, metaKey: false, ctrlKey: true, shiftKey: false, altKey: true, modKey: false },
