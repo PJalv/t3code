@@ -668,6 +668,7 @@
   "ba273b237ed0e6c8": "创建 {shortLabel}",
   "f936de5702861228": "Git 操作进行中。",
   "3c26d723568eb2bf": "Git 状态不可用。",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {推送或打开 PR 前，请先创建并检出一个分支。} mr {推送或打开 MR 前，请先创建并检出一个分支。} generic {推送或打开 change request 前，请先创建并检出一个分支。} other {推送或打开 {changeRequest} 前，请先创建并检出一个分支。}}",
   "1ed6d76914e9e3ff": "提交并推送",
   "c65e62ead20fb5f2": "提交、推送并创建 {shortLabel}",
@@ -4576,6 +4577,9 @@
   "7f0f9b1ee42892db": "输出已不可用。",
   "e470bb79fa74a6ae": "工具输出图片",
   "e8c80b6d40c0944c": "搜索结果",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "退出码 ",
     {
@@ -8122,6 +8126,7 @@
   "cba61c55d252ddd3": "无法移除后端",
   "0df2f6de1bed9c0e": "从此设备移除 {environment}？\n这会删除这里保存的配对信息、凭据和缓存的会话。若要保留这些内容，请关闭连接。",
   "1f293df910bc80a1": "撤销其他所有客户端？",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "启用网络访问",
   "0d1a41cbf4fab7af": "无法更新 WSL 后端。",
   "c0945ab375a2a3cd": "无法更改 WSL 后端",
@@ -8141,6 +8146,8 @@
   "035a3c35d77332ef": "已向所有网络接口开放。配对链接使用 {host}。",
   "e4364c60111215a3": "已向所有网络接口开放。",
   "a847a3a44f2fd582": "仅限本机访问。",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "此连接无法查看或更改网络开放设置。",
   "d4b7ed99318074c4": "已配置远程访问。请在启动服务器的位置更改网络开放设置。",
   "9698cd05b10a3613": "仅本机可以连接。请使用非回环主机地址重启服务器，再远程配对。",
@@ -8197,6 +8204,15 @@
     }
   ],
   "2b382086196fdd96": "默认发行版",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "更改网络开放设置会重启后端，必须在启动服务器进程的位置操作。",
   "5efa21c55ba2ac54": "此连接可以创建访问链接，但无法查看已授权的客户端。",
   "40335d08877bc746": "正在应用…",
@@ -8866,16 +8882,30 @@
   "298c7150a7621c80": "Simlock 设备主机",
   "67937aa49179285e": "在 Mac 上，从缓存在 T3 主目录中的工作副本克隆新的工作树，无需逐个写入每个文件。无法使用时改为 Git 的常规检出。关闭后会删除缓存。",
   "f9904f78d3003f58": "快速创建工作树",
-  "ec7623deed751c05": [
-    "与访客共享会话，访客可在浏览器中实时观看并发送需经你批准的消息。需要 T3 Connect：请登录并在",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "共享与访问"
+      "c": "Sharing & access"
     },
-    "中关联此机器。关闭后会停止所有访客链接。"
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "让此处的智能体在你的其他机器上工作，也让其他机器的智能体在此处工作。请在每台机器上开启此功能，然后在",
     " ",

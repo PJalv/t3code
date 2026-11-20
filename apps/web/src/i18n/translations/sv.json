@@ -668,6 +668,7 @@
   "ba273b237ed0e6c8": "Skapa {shortLabel}",
   "f936de5702861228": "Git-åtgärd pågår.",
   "3c26d723568eb2bf": "Git-status är inte tillgänglig.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Skapa och checka ut en gren innan du pushar eller öppnar en PR.} mr {Skapa och checka ut en gren innan du pushar eller öppnar en MR.} generic {Skapa och checka ut en gren innan du pushar eller öppnar en ändringsbegäran.} other {Skapa och checka ut en gren innan du pushar eller öppnar {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Committa och pusha",
   "c65e62ead20fb5f2": "Committa, pusha och {shortLabel}",
@@ -4570,6 +4571,9 @@
   "7f0f9b1ee42892db": "Utdata är inte längre tillgängliga.",
   "e470bb79fa74a6ae": "Bild från verktygsutdata",
   "e8c80b6d40c0944c": "Sökresultat",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "avslutningskod ",
     {
@@ -8109,6 +8113,7 @@
   "cba61c55d252ddd3": "Kunde inte ta bort backenden",
   "0df2f6de1bed9c0e": "Ta bort {environment} från den här enheten?\nDet här glömmer dess parkoppling, autentiseringsuppgifter och cachade trådar här. Stäng av den i stället för att behålla den sparad.",
   "1f293df910bc80a1": "Återkalla alla andra klienter?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Aktivera nätverksåtkomst",
   "0d1a41cbf4fab7af": "Det gick inte att uppdatera WSL-backenden.",
   "c0945ab375a2a3cd": "Kunde inte ändra WSL-backenden",
@@ -8128,6 +8133,8 @@
   "035a3c35d77332ef": "Exponerad på alla gränssnitt. Parkopplingslänkar använder {host}.",
   "e4364c60111215a3": "Exponerad på alla gränssnitt.",
   "a847a3a44f2fd582": "Begränsad till den här datorn.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "Den här anslutningen kan inte visa eller ändra nätverksexponeringen.",
   "d4b7ed99318074c4": "Fjärråtkomst är redan konfigurerad. Ändra nätverksexponeringen där servern startas.",
   "9698cd05b10a3613": "Bara den här datorn kan ansluta. Starta om med en värd som inte är loopback för fjärrparkoppling.",
@@ -8184,6 +8191,15 @@
     }
   ],
   "2b382086196fdd96": "Standarddistribution",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Ändringar av nätverksexponering startar om backenden och måste styras där serverprocessen startas.",
   "5efa21c55ba2ac54": "Den här anslutningen kan skapa åtkomstlänkar men kan inte visa auktoriserade klienter.",
   "40335d08877bc746": "Tillämpar…",
@@ -8856,16 +8872,30 @@
   "298c7150a7621c80": "Simlock-enhetsvärdar",
   "67937aa49179285e": "På en Mac klonas nya worktrees från en utcheckning som cachas i T3-hemmappen i stället för att varje fil skrivs. Använder Gits vanliga utcheckning när det inte går. Om du stänger av det tas cachen bort.",
   "f9904f78d3003f58": "Snabb utcheckning av worktree",
-  "ec7623deed751c05": [
-    "Dela en tråd med en gäst som följer den live i en webbläsare och skickar meddelanden som du godkänner. Kräver T3 Connect: logga in och länka den här datorn under",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "Delning och åtkomst"
+      "c": "Sharing & access"
     },
-    ". Om du stänger av det stoppas alla gästlänkar."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Låt agenter här arbeta på dina andra datorer, och deras här. Aktivera det på varje dator och länka dem sedan under",
     " ",

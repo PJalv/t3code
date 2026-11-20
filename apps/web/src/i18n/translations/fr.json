@@ -668,6 +668,7 @@
   "ba273b237ed0e6c8": "Créer {shortLabel}",
   "f936de5702861228": "Action Git en cours.",
   "3c26d723568eb2bf": "Le statut Git est indisponible.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Créez une branche et basculez dessus avant de pousser ou d’ouvrir une PR.} mr {Créez une branche et basculez dessus avant de pousser ou d’ouvrir une MR.} generic {Créez une branche et basculez dessus avant de pousser ou d’ouvrir une demande de modification.} other {Créez une branche et basculez dessus avant de pousser ou d’ouvrir {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Commiter et pousser",
   "c65e62ead20fb5f2": "Commiter, pousser et {shortLabel}",
@@ -4570,6 +4571,9 @@
   "7f0f9b1ee42892db": "La sortie n’est plus disponible.",
   "e470bb79fa74a6ae": "Image de sortie de l’outil",
   "e8c80b6d40c0944c": "Résultat de recherche",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "code de sortie ",
     {
@@ -8104,6 +8108,7 @@
   "cba61c55d252ddd3": "Impossible de supprimer le backend",
   "0df2f6de1bed9c0e": "Retirer {environment} de cet appareil ?\nCela oublie ici son appairage, ses identifiants et ses fils en cache. Désactivez-le plutôt pour le garder enregistré.",
   "1f293df910bc80a1": "Révoquer tous les autres clients ?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Activer l’accès réseau",
   "0d1a41cbf4fab7af": "Échec de la mise à jour du backend WSL.",
   "c0945ab375a2a3cd": "Impossible de changer le backend WSL",
@@ -8123,6 +8128,8 @@
   "035a3c35d77332ef": "Exposé sur toutes les interfaces. Les liens d’appairage utilisent {host}.",
   "e4364c60111215a3": "Exposé sur toutes les interfaces.",
   "a847a3a44f2fd582": "Limité à cette machine.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "Cette connexion ne peut pas voir ni modifier l’exposition réseau.",
   "d4b7ed99318074c4": "L’accès à distance est déjà configuré. Modifiez l’exposition réseau là où le serveur démarre.",
   "9698cd05b10a3613": "Seule cette machine peut se connecter. Redémarrez avec un hôte autre que loopback pour l’appairage à distance.",
@@ -8179,6 +8186,15 @@
     }
   ],
   "2b382086196fdd96": "Distribution par défaut",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Les changements d’exposition réseau redémarrent le backend et doivent être gérés là où le processus serveur est lancé.",
   "5efa21c55ba2ac54": "Cette connexion peut créer des liens d’accès, mais ne peut pas voir les clients autorisés.",
   "40335d08877bc746": "Application…",
@@ -8849,16 +8865,30 @@
   "298c7150a7621c80": "Hôtes d’appareils Simlock",
   "67937aa49179285e": "Sur Mac, clone les nouveaux worktrees depuis une copie en cache dans le dossier T3 home au lieu d’écrire chaque fichier. Utilise le checkout Git normal quand ce n’est pas possible. La désactivation supprime le cache.",
   "f9904f78d3003f58": "Checkout rapide des worktrees",
-  "ec7623deed751c05": [
-    "Partagez un fil avec un invité qui le suit en direct dans un navigateur et envoie des messages que vous approuvez. Nécessite T3 Connect : connectez-vous et associez cette machine dans",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "Partage et accès"
+      "c": "Sharing & access"
     },
-    ". La désactivation arrête tous les liens invités."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Permet aux agents d’ici de travailler sur vos autres machines, et aux leurs de travailler ici. Activez l’option sur chaque machine, puis associez-les dans",
     " ",
