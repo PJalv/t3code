@@ -324,6 +324,7 @@ export function DeviceStreamView(props: {
         )}
         tabIndex={0}
         role="application"
+        data-keybinding-capture=""
         aria-label={
           props.platform === "ios" ? gt("iOS Simulator screen") : gt("Android Emulator screen")
         }
