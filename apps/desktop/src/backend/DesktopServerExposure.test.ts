@@ -43,6 +43,30 @@ const tailnetNetworkInterfaces: DesktopNetworkInterfaces.NetworkInterfaces = {
   ],
 };
 
+const multiHomedNetworkInterfaces: DesktopNetworkInterfaces.NetworkInterfaces = {
+  docker0: [
+    {
+      address: "172.17.0.1",
+      family: "IPv4",
+      internal: false,
+    },
+  ],
+  en0: [
+    {
+      address: "192.168.1.20",
+      family: "IPv4",
+      internal: false,
+    },
+  ],
+  en1: [
+    {
+      address: "192.168.1.21",
+      family: "IPv4",
+      internal: false,
+    },
+  ],
+};
+
 function layerMockSpawner(statusJson: string | (() => string) = "{}", onSpawn?: () => void) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -253,6 +277,7 @@ describe("DesktopServerExposure", () => {
           mode: "network-accessible",
           endpointUrl: "http://192.168.1.20:4173",
           advertisedHost: "192.168.1.20",
+          preferredLanInterfaceName: null,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
         });
@@ -312,6 +337,159 @@ describe("DesktopServerExposure", () => {
     );
   });
 
+  it.effect("advertises one endpoint per physical interface and skips virtual bridges", () =>
+    withHarness(
+      multiHomedNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const state = yield* serverExposure.getState;
+        assert.equal(state.advertisedHost, "192.168.1.20");
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.deepEqual(
+          endpoints
+            .filter((endpoint) => endpoint.id.startsWith("desktop-lan:"))
+            .map((endpoint) => [endpoint.label, endpoint.httpBaseUrl, endpoint.interfaceName]),
+          [
+            ["Local network", "http://192.168.1.20:4173/", "en0"],
+            ["Local network: en1 (192.168.1.21)", "http://192.168.1.21:4173/", "en1"],
+          ],
+        );
+      }),
+    ),
+  );
+
+  it.effect("treats Windows virtual adapters with parentheses as virtual", () =>
+    withHarness(
+      {
+        "vEthernet (Default Switch)": [{ address: "172.25.32.1", family: "IPv4", internal: false }],
+        ...multiHomedNetworkInterfaces,
+      },
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.isFalse(endpoints.some((endpoint) => endpoint.httpBaseUrl.includes("172.25.32.1")));
+      }),
+    ),
+  );
+
+  it.effect("advertises every physical interface without truncation", () =>
+    withHarness(
+      Object.fromEntries(
+        Array.from({ length: 10 }, (_, index) => [
+          `en${index}`,
+          [{ address: `10.0.0.${index + 2}`, family: "IPv4", internal: false }],
+        ]),
+      ),
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        const lanEndpoints = endpoints.filter((endpoint) => endpoint.id.startsWith("desktop-lan:"));
+        assert.equal(lanEndpoints.length, 10);
+      }),
+    ),
+  );
+
+  it.effect("re-resolves the default endpoint when interfaces change after startup", () => {
+    const interfaces: Record<string, DesktopNetworkInterfaces.NetworkInterfaces[string]> = {
+      ...multiHomedNetworkInterfaces,
+    };
+    return withHarness(
+      interfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const preferred = yield* serverExposure.setPreferredLanInterfaceName({ name: "en0" });
+        assert.equal(preferred.state.advertisedHost, "192.168.1.20");
+
+        // The harness network service returns the fixture object by
+        // reference, so removing en0 here simulates it disappearing after
+        // the exposure state was resolved at startup.
+        delete interfaces.en0;
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        const defaultEndpoint = endpoints.find(
+          (endpoint) => endpoint.id.startsWith("desktop-lan:") && endpoint.isDefault === true,
+        );
+        assert.equal(defaultEndpoint?.httpBaseUrl, "http://192.168.1.21:4173/");
+        assert.isFalse(endpoints.some((endpoint) => endpoint.httpBaseUrl.includes("192.168.1.20")));
+        const refreshed = yield* serverExposure.getState;
+        assert.equal(refreshed.advertisedHost, "192.168.1.21");
+      }),
+    );
+  });
+
+  it.effect("downgrades to loopback when only virtual interfaces exist", () =>
+    withHarness(
+      {
+        docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false }],
+      },
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const state = yield* serverExposure.getState;
+        assert.equal(state.mode, "local-only");
+        assert.equal(state.endpointUrl, null);
+      }),
+    ),
+  );
+
+  it.effect("honors a preferred LAN interface", () =>
+    withHarness(
+      multiHomedNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+        const change = yield* serverExposure.setPreferredLanInterfaceName({ name: "en1" });
+
+        assert.equal(change.state.advertisedHost, "192.168.1.21");
+        assert.equal(change.state.preferredLanInterfaceName, "en1");
+        assert.equal(change.requiresRelaunch, false);
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        const defaultEndpoint = endpoints.find(
+          (endpoint) => endpoint.id.startsWith("desktop-lan:") && endpoint.isDefault === true,
+        );
+        assert.equal(defaultEndpoint?.httpBaseUrl, "http://192.168.1.21:4173/");
+      }),
+    ),
+  );
+
+  it.effect("falls back to automatic when the preferred interface disappears", () =>
+    withHarness(
+      multiHomedNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+        const change = yield* serverExposure.setPreferredLanInterfaceName({ name: "en9" });
+
+        assert.equal(change.state.preferredLanInterfaceName, "en9");
+        assert.equal(change.state.advertisedHost, "192.168.1.20");
+      }),
+    ),
+  );
+
   it.effect("persists tailscale serve preferences atomically and reports no-op updates", () =>
     withHarness(
       emptyNetworkInterfaces,
@@ -343,6 +521,71 @@ describe("DesktopServerExposure", () => {
     ),
   );
 
+  it.effect("preserves persistence request context and the settings failure chain", () => {
+    const diskFailure = new Error("disk exploded");
+    const settingsFailure = new DesktopAppSettings.DesktopSettingsWriteError({
+      operation: "replace-settings-file",
+      path: "/tmp/desktop-settings.json",
+      cause: diskFailure,
+    });
+    const layerSettings = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
+      get: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
+      load: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
+      setMainWindowBounds: () => Effect.die("unexpected main window bounds update"),
+      setServerExposureMode: () => Effect.fail(settingsFailure),
+      setPreferredLanInterfaceName: () => Effect.fail(settingsFailure),
+      setTailscaleServe: () => Effect.fail(settingsFailure),
+      setUpdateChannel: () => Effect.die("unexpected update channel change"),
+      setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
+      setWslDistro: () => Effect.die("unexpected WSL distro change"),
+      setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
+      setLocalEnvironmentEnabled: () => Effect.die("unexpected local environment toggle"),
+      applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
+      applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
+    } satisfies DesktopAppSettings.DesktopAppSettings["Service"]);
+
+    return withHarness(
+      lanNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+
+        const modeError = yield* serverExposure.setMode("network-accessible").pipe(Effect.flip);
+        assert.instanceOf(
+          modeError,
+          DesktopServerExposure.DesktopServerExposureModePersistenceError,
+        );
+        assert.equal(modeError.mode, "network-accessible");
+        assert.strictEqual(modeError.cause, settingsFailure);
+        assert.strictEqual(modeError.cause.cause, diskFailure);
+        assert.equal(
+          modeError.message,
+          "Failed to persist desktop server exposure mode network-accessible.",
+        );
+        assert.notInclude(modeError.message, diskFailure.message);
+
+        const tailscaleError = yield* serverExposure
+          .setTailscaleServeEnabled({ enabled: true, port: 8443 })
+          .pipe(Effect.flip);
+        assert.instanceOf(
+          tailscaleError,
+          DesktopServerExposure.DesktopTailscaleServePersistenceError,
+        );
+        assert.equal(tailscaleError.enabled, true);
+        assert.equal(tailscaleError.port, 8443);
+        assert.strictEqual(tailscaleError.cause, settingsFailure);
+        assert.strictEqual(tailscaleError.cause.cause, diskFailure);
+        assert.equal(
+          tailscaleError.message,
+          "Failed to persist desktop Tailscale Serve settings (enabled: true, port: 8443).",
+        );
+        assert.notInclude(tailscaleError.message, diskFailure.message);
+      }),
+      {},
+      undefined,
+      layerSettings,
+    );
+  });
   it.effect("keeps a Tailscale Serve change made while a mode change is saving", () =>
     Effect.gen(function* () {
       const modeWriteStarted = yield* Deferred.make<void>();
@@ -514,6 +757,106 @@ describe("DesktopServerExposure", () => {
       {
         T3CODE_DESKTOP_LAN_HOST: "100.90.1.2",
         T3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
+      },
+    ),
+  );
+  it.effect("advertises loopback, LAN, and configured manual endpoints from runtime state", () =>
+    withHarness(
+      lanNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        yield* serverExposure.configureFromSettings({ port: 3773 });
+        yield* serverExposure.setMode("network-accessible");
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.deepEqual(endpoints, [
+          {
+            id: "desktop-loopback:3773",
+            label: "This machine",
+            provider: {
+              id: "desktop-core",
+              label: "Desktop",
+              kind: "core",
+              isAddon: false,
+            },
+            httpBaseUrl: "http://127.0.0.1:3773/",
+            wsBaseUrl: "ws://127.0.0.1:3773/",
+            reachability: "loopback",
+            compatibility: {
+              hostedHttpsApp: "mixed-content-blocked",
+              desktopApp: "compatible",
+            },
+            source: "desktop-core",
+            status: "available",
+            description: "Loopback endpoint for this desktop app.",
+          },
+          {
+            id: "desktop-lan:http://192.168.1.20:3773",
+            label: "Local network",
+            interfaceName: "en0",
+            provider: {
+              id: "desktop-core",
+              label: "Desktop",
+              kind: "core",
+              isAddon: false,
+            },
+            httpBaseUrl: "http://192.168.1.20:3773/",
+            wsBaseUrl: "ws://192.168.1.20:3773/",
+            reachability: "lan",
+            compatibility: {
+              hostedHttpsApp: "mixed-content-blocked",
+              desktopApp: "compatible",
+            },
+            source: "desktop-core",
+            status: "available",
+            isDefault: true,
+            description: "Reachable from devices on the same network.",
+          },
+          {
+            id: "manual:https://desktop.example.ts.net",
+            label: "Custom HTTPS",
+            provider: {
+              id: "manual",
+              label: "Manual",
+              kind: "manual",
+              isAddon: false,
+            },
+            httpBaseUrl: "https://desktop.example.ts.net/",
+            wsBaseUrl: "wss://desktop.example.ts.net/",
+            reachability: "public",
+            compatibility: {
+              hostedHttpsApp: "compatible",
+              desktopApp: "compatible",
+            },
+            source: "user",
+            status: "unknown",
+            description: "User-configured HTTPS endpoint for this desktop backend.",
+          },
+          {
+            id: "manual:http://desktop.example.test:3773",
+            label: "Custom endpoint",
+            provider: {
+              id: "manual",
+              label: "Manual",
+              kind: "manual",
+              isAddon: false,
+            },
+            httpBaseUrl: "http://desktop.example.test:3773/",
+            wsBaseUrl: "ws://desktop.example.test:3773/",
+            reachability: "public",
+            compatibility: {
+              hostedHttpsApp: "mixed-content-blocked",
+              desktopApp: "compatible",
+            },
+            source: "user",
+            status: "unknown",
+            description: "User-configured endpoint for this desktop backend.",
+          },
+        ]);
+      }),
+      {
+        T3CODE_DESKTOP_HTTPS_ENDPOINTS:
+          "https://desktop.example.ts.net,http://desktop.example.test:3773,not-a-url",
       },
     ),
   );
