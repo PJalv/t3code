@@ -42,6 +42,17 @@ export type GerritDirectUploadResult = {
   readonly url?: string;
   readonly patchSet?: number;
 };
+export type GerritDirectUploadPlan = {
+  readonly remote: string;
+  readonly branch: string;
+  readonly commits: ReadonlyArray<{
+    readonly sha: string;
+    readonly subject: string;
+    readonly changeId: string | null;
+  }>;
+  /** Why the upload would be refused, so a dry run shows every commit instead of failing. */
+  readonly refusal?: string;
+};
 
 export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUploadError>()(
   "GerritDirectUploadError",
@@ -51,6 +62,9 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
       "commit",
       "change-id",
       "change-id-mismatch",
+      "branch-required",
+      "base-missing",
+      "range",
       "credentials",
       "signing",
       "commit-signing",
@@ -66,9 +80,15 @@ export class GerritDirectUploadError extends Schema.TaggedError<GerritDirectUplo
   override get message(): string {
     switch (this.reason) {
       case "change-id":
-        return "The commit must contain exactly one valid Change-Id footer. Install the Gerrit commit-msg hook and create or amend the commit before uploading.";
+        return `Every uploaded commit must contain exactly one valid Change-Id footer${this.detail ? `; missing or invalid on ${this.detail}` : ""}. Install the Gerrit commit-msg hook and create or amend the commits before uploading.`;
       case "change-id-mismatch":
         return "The commit Change-Id does not match the target change. Use the target Change-Id and the Gerrit commit-msg hook before uploading.";
+      case "branch-required":
+        return "No target branch: the current branch does not track a Gerrit branch, or HEAD is detached. Pass branch explicitly.";
+      case "base-missing":
+        return `${this.detail ?? "The target branch"} is not available locally, so the commits to upload cannot be checked. Fetch it with fetch_gerrit_branch, then upload again.`;
+      case "range":
+        return this.detail ?? "The commits to upload could not be determined.";
       case "no-new-changes":
         return "Gerrit rejected the upload: no new changes.";
       case "invalid-input":
@@ -101,6 +121,9 @@ export class GerritDirectUpload extends Context.Service<
     readonly upload: (
       input: GerritDirectUploadInput,
     ) => Effect.Effect<GerritDirectUploadResult, GerritDirectUploadError>;
+    readonly plan: (
+      input: GerritDirectUploadInput,
+    ) => Effect.Effect<GerritDirectUploadPlan, GerritDirectUploadError>;
     readonly amendSigned: (input: {
       readonly cwd: string;
     }) => Effect.Effect<void, GerritDirectUploadError>;
@@ -120,6 +143,9 @@ export class GerritDirectUpload extends Context.Service<
 >()("t3/sourceControl/GerritDirectUpload") {}
 
 const isTargetBranch = Schema.is(GerritRemoteTargetBranch);
+// Pushing `<oid>:refs/for/<branch>` sends every unmerged ancestor too; past this many the base is
+// almost certainly wrong and the push would open a change per unrelated commit.
+const MAX_UPLOAD_COMMITS = 50;
 
 // Git prints the remote URL in failures, and a remote URL can carry a password.
 export function pushRejection(output: string): string | undefined {
@@ -149,13 +175,17 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const httpAuth = yield* Effect.serviceOption(GitHttpAuth.GitHttpAuth);
-  const upload = Effect.fn("GerritDirectUpload.upload")(function* (input: GerritDirectUploadInput) {
+  const prepare = Effect.fn("GerritDirectUpload.prepare")(function* (
+    input: GerritDirectUploadInput,
+  ) {
     const branch = input.kind === "new" ? input.branch : input.change.branch;
+    const remoteName = input.remote ?? "origin";
     const values = [input.topic, ...(input.reviewers ?? []), ...(input.cc ?? [])].filter(
       (v): v is string => v !== undefined,
     );
     if (
       !isTargetBranch(branch) ||
+      !/^[A-Za-z0-9._-]+$/.test(remoteName) ||
       values.some(
         (v) =>
           v.length === 0 ||
@@ -198,20 +228,95 @@ const make = Effect.gen(function* () {
       !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)
     )
       return yield* new GerritDirectUploadError({ reason: "commit" });
-    const object = yield* run(["--no-replace-objects", "cat-file", "commit", oid]);
-    const separator = object.stdout.indexOf("\n\n");
-    if (object.exitCode !== 0 || object.stdoutTruncated || separator < 0)
+    const base = `refs/remotes/${remoteName}/${branch}`;
+    const baseExists = yield* run([
+      "--no-replace-objects",
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "--end-of-options",
+      `${base}^{commit}`,
+    ]);
+    if (baseExists.exitCode !== 0)
+      return yield* new GerritDirectUploadError({
+        reason: "base-missing",
+        detail: `${remoteName}/${branch}`,
+      });
+    const log = yield* run([
+      "--no-replace-objects",
+      "log",
+      "--no-show-signature",
+      "--no-color",
+      `--max-count=${MAX_UPLOAD_COMMITS + 1}`,
+      "--format=%x00%H%n%B",
+      oid,
+      "--not",
+      base,
+      "--",
+    ]);
+    if (log.exitCode !== 0 || log.stdoutTruncated)
       return yield* new GerritDirectUploadError({ reason: "commit" });
-    const identity = commitIdentity(object.stdout.slice(separator + 2));
-    if (identity.kind !== "valid")
-      return yield* new GerritDirectUploadError({ reason: "change-id" });
-    if (input.kind === "patch-set" && identity.changeId !== input.change.changeId)
-      return yield* new GerritDirectUploadError({ reason: "change-id-mismatch" });
-    const remote = yield* run(["remote", "get-url", "--push", "--all", input.remote ?? "origin"]);
+    const commits = log.stdout
+      .split("\0")
+      .slice(1)
+      .map((record) => {
+        const newline = record.indexOf("\n");
+        const sha = record.slice(0, newline);
+        const message = record.slice(newline + 1);
+        const identity = commitIdentity(message);
+        return {
+          sha,
+          subject: message.split("\n", 1)[0]!.trim(),
+          changeId: identity.kind === "valid" ? identity.changeId : null,
+        };
+      });
+    if (commits.length === 0)
+      return yield* new GerritDirectUploadError({
+        reason: "range",
+        detail: `${oid.slice(0, 10)} is already in ${remoteName}/${branch}; there is nothing to upload.`,
+      });
+    if (commits.length > MAX_UPLOAD_COMMITS)
+      return yield* new GerritDirectUploadError({
+        reason: "range",
+        detail: `More than ${MAX_UPLOAD_COMMITS} commits are not in ${remoteName}/${branch}, so the upload would open a change for each. Fetch the branch with fetch_gerrit_branch and rebase onto ${remoteName}/${branch}, then upload again.`,
+      });
+    const missing = commits.filter((commit) => commit.changeId === null);
+    const tip = commits.find((commit) => commit.sha === oid);
+    const refusal =
+      missing.length > 0
+        ? new GerritDirectUploadError({
+            reason: "change-id",
+            detail: missing.map((commit) => commit.sha.slice(0, 10)).join(", "),
+          })
+        : input.kind === "patch-set" && tip?.changeId !== input.change.changeId
+          ? new GerritDirectUploadError({ reason: "change-id-mismatch" })
+          : undefined;
+    const remote = yield* run(["remote", "get-url", "--push", "--all", remoteName]);
     const destinations = remote.stdout.trim().split("\n").filter(Boolean);
     if (remote.exitCode !== 0 || remote.stdoutTruncated || destinations.length !== 1)
       return yield* new GerritDirectUploadError({ reason: "invalid-input" });
-    const destination = destinations[0]!;
+    return {
+      oid,
+      branch,
+      remoteName,
+      destination: destinations[0]!,
+      env,
+      commits,
+      refusal,
+    };
+  });
+  const plan = Effect.fn("GerritDirectUpload.plan")(function* (input: GerritDirectUploadInput) {
+    const prepared = yield* prepare(input);
+    return {
+      remote: prepared.remoteName,
+      branch: prepared.branch,
+      commits: prepared.commits.map((commit) => ({ ...commit, sha: commit.sha.slice(0, 10) })),
+      ...(prepared.refusal === undefined ? {} : { refusal: prepared.refusal.message }),
+    } satisfies GerritDirectUploadPlan;
+  });
+  const upload = Effect.fn("GerritDirectUpload.upload")(function* (input: GerritDirectUploadInput) {
+    const { oid, branch, destination, env, refusal } = yield* prepare(input);
+    if (refusal !== undefined) return yield* refusal;
     const passphrase = yield* secrets
       .get("gerrit-gpg-signing-passphrase")
       .pipe(
@@ -464,7 +569,7 @@ const make = Effect.gen(function* () {
       return yield* new GerritDirectUploadError({ reason: "fetch" });
     return { ref, commit };
   });
-  return GerritDirectUpload.of({ upload, amendSigned, fetchPatchSet, fetchBranch });
+  return GerritDirectUpload.of({ upload, plan, amendSigned, fetchPatchSet, fetchBranch });
 });
 
 export const layer = Layer.effect(GerritDirectUpload, make);

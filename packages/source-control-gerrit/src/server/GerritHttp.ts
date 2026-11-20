@@ -224,6 +224,8 @@ export class GerritHttp extends Context.Service<
       input: Auth &
         Omit<GerritChangesSearchInput, "status"> & {
           readonly status: GerritChangesSearchInput["status"] | "all";
+          /** Gerrit query operators passed verbatim and ANDed with the structured terms. */
+          readonly rawQuery?: string;
         },
     ) => Effect.Effect<
       GerritChangesSearchResult & {
@@ -301,6 +303,7 @@ const decodeSearch = Schema.decodeEffect(
   Schema.Struct({
     ...GerritChangesSearchInput.fields,
     status: Schema.Literals(["open", "merged", "abandoned", "all"]),
+    rawQuery: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty())),
   }),
 );
 const decodeAuth = Schema.decodeEffect(Auth);
@@ -580,6 +583,7 @@ const make = Effect.gen(function* () {
     input: Auth &
       Omit<GerritChangesSearchInput, "status"> & {
         readonly status: GerritChangesSearchInput["status"] | "all";
+        readonly rawQuery?: string;
       },
   ) {
     const auth = yield* decodeAuth(input).pipe(
@@ -602,6 +606,7 @@ const make = Effect.gen(function* () {
     ] as const) {
       if (value !== undefined) terms.push(`${operator}:${literal(value)}`);
     }
+    if (query.rawQuery !== undefined) terms.push(`(${query.rawQuery})`);
     const rowSchema = Schema.Struct({
       project: GerritProjectName,
       branch: GerritTargetBranch,
