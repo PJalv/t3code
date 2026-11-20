@@ -161,13 +161,16 @@ export function resolveQuickAction(
   const supportsBranchReviews = gitStatus.sourceControlProvider?.kind !== "gerrit";
 
   if (gitStatus.sourceControlProvider?.kind === "gerrit") {
+    const label = resolve(msg("Commit", { $context: "verb, git action" }));
     return hasChanges
-      ? { label: "Commit", disabled: false, kind: "run_action", action: "commit" }
+      ? { label, disabled: false, kind: "run_action", action: "commit" }
       : {
-          label: "Commit",
+          label,
           disabled: true,
           kind: "show_hint",
-          hint: "Gerrit patch sets require a review upload; ordinary push is not offered here.",
+          hint: resolve(
+            msg("Gerrit patch sets require a review upload; ordinary push is not offered here."),
+          ),
         };
   }
 
