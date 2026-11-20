@@ -544,6 +544,53 @@ describe("voice settings", () => {
   });
 });
 
+describe("ServerSettings guest endpoint", () => {
+  it("defaults to Connect and normalizes HTTPS origins in settings and patches", () => {
+    expect(decodeServerSettings({}).guestLinkBaseUrl).toBeNull();
+    expect(decodeServerSettingsPatch({ guestLinkBaseUrl: null }).guestLinkBaseUrl).toBeNull();
+    for (const [input, expected] of [
+      ["https://GUEST.example/", "https://guest.example"],
+      ["HTTPS://GUEST.example:443", "https://guest.example"],
+      ["https://guest.example:8443/", "https://guest.example:8443"],
+      ["https://[::1]:8443/", "https://[::1]:8443"],
+    ]) {
+      const settings = decodeServerSettings({ guestLinkBaseUrl: input });
+      expect(settings.guestLinkBaseUrl).toBe(expected);
+      expect(encodeServerSettings(settings).guestLinkBaseUrl).toBe(expected);
+      expect(decodeServerSettingsPatch({ guestLinkBaseUrl: input }).guestLinkBaseUrl).toBe(
+        expected,
+      );
+    }
+  });
+
+  it.each([
+    "",
+    "guest.example",
+    "http://guest.example",
+    "ftp://guest.example",
+    "https://user:password@guest.example",
+    "https://@guest.example",
+    "https://guest.example/guest",
+    "https://guest.example/.",
+    "https://guest.example//",
+    "https://guest.example?",
+    "https://guest.example?query",
+    "https://guest.example#",
+    "https://guest.example#fragment",
+    "https:///guest.example",
+    "https:guest.example",
+    " https://guest.example",
+    "https://guest.example\n",
+    "https://guest.example:99999",
+    "https://guest.example\\path",
+    "https://",
+    "https://%",
+  ])("rejects invalid guest endpoint %j at both settings boundaries", (guestLinkBaseUrl) => {
+    expect(() => decodeServerSettings({ guestLinkBaseUrl })).toThrow();
+    expect(() => decodeServerSettingsPatch({ guestLinkBaseUrl })).toThrow();
+  });
+});
+
 describe("server model preferences", () => {
   it("distinguishes unmigrated lists from deliberately cleared lists", () => {
     expect(decodeServerSettings({})).toMatchObject({
