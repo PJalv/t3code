@@ -188,7 +188,6 @@ import {
   collectWorkspaceBasenameCandidates,
 } from "../workspaceBasenameResolution";
 import {
-  claimWorkspaceBasenameLookup,
   findAgentDirectoryMatch,
   needsWorkspaceBasenameLookup,
   pickProjectLinkMatch,
