@@ -1269,11 +1269,11 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
               completionScope={completionScope}
               threadRef={threadRef}
               label={gt(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} description",
+                "{term, select, mr {Merge request} cr {Change} other {Pull request}} description",
                 { term: changeRequestTermKind(terminology) },
               )}
               placeholder={gt(
-                "Describe this {term, select, mr {merge request} cr {change request} other {pull request}}",
+                "Describe this {term, select, mr {merge request} cr {change} other {pull request}}",
                 { term: changeRequestTermKind(terminology) },
               )}
               saving={descriptionSaving}

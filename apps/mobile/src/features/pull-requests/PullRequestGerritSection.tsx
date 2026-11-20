@@ -1,3 +1,5 @@
+import { T, useGT, msg, useMessages } from "gt-react-native";
+import { m, type MessageResolver } from "../../i18n/messages";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { PullRequestDetail } from "@t3tools/contracts";
 import { useState } from "react";
@@ -37,20 +39,20 @@ export function gerritVoteOptions(
     });
 }
 
-export function gerritRequirementStatus(status: string | null) {
+export function gerritRequirementStatus(status: string | null, resolve: MessageResolver = m) {
   switch (status) {
     case "satisfied":
-      return "Satisfied";
+      return resolve(msg("Satisfied", { $context: "Gerrit submit requirement status" }));
     case "unsatisfied":
-      return "Unsatisfied";
+      return resolve(msg("Unsatisfied", { $context: "Gerrit submit requirement status" }));
     case "not-applicable":
-      return "Not applicable";
+      return resolve(msg("Not applicable", { $context: "Gerrit submit requirement status" }));
     case "override":
-      return "Overridden";
+      return resolve(msg("Overridden", { $context: "Gerrit submit requirement status" }));
     case "error":
-      return "Error";
+      return resolve(msg("Error", { $context: "Gerrit submit requirement status" }));
     default:
-      return "Unavailable";
+      return resolve(msg("Unavailable", { $context: "Gerrit submit requirement status" }));
   }
 }
 
@@ -61,6 +63,8 @@ export function PullRequestGerritSection({
   readonly params: PullRequestParams;
   readonly pr: PullRequestDetail;
 }) {
+  const gt = useGT();
+  const resolve = useMessages();
   const target = pullRequestTarget(params);
   const canWrite = useAtomValue(
     composerPullRequests.gerritCommand.permissionAtom(target.environmentId),
@@ -79,7 +83,7 @@ export function PullRequestGerritSection({
     const result = await command({ ...target, input });
     setBusy(false);
     if (result._tag === "Failure") {
-      setError("The provider could not complete this action.");
+      setError(gt("The provider could not complete this action."));
       return false;
     }
     setError(null);
@@ -88,22 +92,29 @@ export function PullRequestGerritSection({
   };
   return (
     <View className="gap-3 rounded-2xl bg-grouped-card p-4">
-      <Text className="font-t3-medium">Gerrit change</Text>
-      <Text selectable className="font-mono text-xs">
-        {gerrit.changeId} · Patch set {gerrit.currentPatchSet}
+      <Text className="font-t3-medium">
+        <T>Gerrit change</T>
       </Text>
-      <Text>Topic: {gerrit.topic ?? "None"}</Text>
+      <Text selectable className="font-mono text-xs">
+        {gt("{changeId} · Patch set {number}", {
+          changeId: gerrit.changeId,
+          number: gerrit.currentPatchSet,
+        })}
+      </Text>
+      <Text>
+        {gerrit.topic ? gt("Topic: {topic}", { topic: gerrit.topic }) : gt("Topic: None")}
+      </Text>
       {canWrite && gerrit.permissions?.setTopic ? (
         editing ? (
           <View className="gap-2">
             <TextInput
-              accessibilityLabel="Topic"
+              accessibilityLabel={gt("Topic", { $context: "Gerrit topic, noun" })}
               value={topic}
               onChangeText={setTopic}
               editable={!busy}
             />
             <Button
-              label="Save topic"
+              label={gt("Save topic")}
               disabled={busy}
               onPress={() =>
                 void run({
@@ -115,11 +126,11 @@ export function PullRequestGerritSection({
                 })
               }
             />
-            <Button label="Cancel" disabled={busy} onPress={() => setEditing(false)} />
+            <Button label={gt("Cancel")} disabled={busy} onPress={() => setEditing(false)} />
           </View>
         ) : (
           <Button
-            label="Edit topic"
+            label={gt("Edit topic")}
             disabled={busy}
             onPress={() => {
               setTopic(gerrit.topic ?? "");
@@ -129,11 +140,17 @@ export function PullRequestGerritSection({
         )
       ) : null}
       <Text>
-        {gerrit.isPrivate ? "Private" : "Public"} · {gerrit.isWip ? "Work in progress" : "Ready"}
+        {gerrit.isPrivate
+          ? gt("Private", { $context: "Gerrit change visibility" })
+          : gt("Public", { $context: "Gerrit change visibility" })}{" "}
+        ·{" "}
+        {gerrit.isWip
+          ? gt("Work in progress")
+          : gt("Ready", { $context: "Gerrit change ready for review" })}
       </Text>
       {canWrite && gerrit.permissions?.setPrivate ? (
         <Button
-          label={gerrit.isPrivate ? "Make public" : "Make private"}
+          label={gerrit.isPrivate ? gt("Make public") : gt("Make private")}
           disabled={busy}
           onPress={() =>
             void run({
@@ -144,9 +161,13 @@ export function PullRequestGerritSection({
           }
         />
       ) : null}
-      <Text className="font-t3-medium">Votes</Text>
+      <Text className="font-t3-medium">
+        <T>Votes</T>
+      </Text>
       {gerrit.labels.length === 0 ? (
-        <Text>No labels reported.</Text>
+        <Text>
+          <T>No labels reported.</T>
+        </Text>
       ) : (
         gerrit.labels.map((label) => {
           const options = gerritVoteOptions(label.permittedValues, label.valueDescriptions);
@@ -154,7 +175,9 @@ export function PullRequestGerritSection({
             <View key={label.name} className="gap-1">
               <Text className="font-t3-medium">{label.name}</Text>
               {label.votes.length === 0 ? (
-                <Text>No votes yet</Text>
+                <Text>
+                  <T>No votes yet</T>
+                </Text>
               ) : (
                 label.votes.map((vote, index) => (
                   <Text key={vote.account._account_id ?? index}>
@@ -162,7 +185,7 @@ export function PullRequestGerritSection({
                       vote.account.display_name ??
                       vote.account.username ??
                       vote.account.email ??
-                      "Unknown account"}
+                      gt("Unknown account")}
                     : {vote.value > 0 ? "+" : ""}
                     {vote.value}
                   </Text>
@@ -170,7 +193,7 @@ export function PullRequestGerritSection({
               )}
               {canWrite && options.length > 0 ? (
                 <Menu
-                  title={`Vote on ${label.name}`}
+                  title={gt("Vote on {label}", { label: label.name })}
                   actions={options.map((option) => ({ id: option.value, title: option.label }))}
                   onPressAction={({ nativeEvent }) => {
                     const value = options.find((option) => option.value === nativeEvent.event);
@@ -183,7 +206,11 @@ export function PullRequestGerritSection({
                   }}
                 >
                   <View pointerEvents="none">
-                    <Button label={`Vote on ${label.name}`} disabled={busy} onPress={() => {}} />
+                    <Button
+                      label={gt("Vote on {label}", { label: label.name })}
+                      disabled={busy}
+                      onPress={() => {}}
+                    />
                   </View>
                 </Menu>
               ) : null}
@@ -191,17 +218,24 @@ export function PullRequestGerritSection({
           );
         })
       )}
-      <Text className="font-t3-medium">Submit requirements</Text>
+      <Text className="font-t3-medium">
+        <T>Submit requirements</T>
+      </Text>
       <Text>
-        Submittable:{" "}
-        {gerrit.submittable === null ? "Unavailable" : gerrit.submittable ? "Yes" : "No"}
+        {gerrit.submittable === null
+          ? gt("Submit readiness unavailable")
+          : gerrit.submittable
+            ? gt("Ready to submit")
+            : gt("Not ready to submit")}
       </Text>
       {gerrit.submitRequirements.length === 0 ? (
-        <Text>No requirements reported.</Text>
+        <Text>
+          <T>No requirements reported.</T>
+        </Text>
       ) : (
         gerrit.submitRequirements.map((requirement) => (
           <Text key={requirement.name}>
-            {requirement.name}: {gerritRequirementStatus(requirement.status)}
+            {requirement.name}: {gerritRequirementStatus(requirement.status, resolve)}
             {requirement.description ? `: ${requirement.description}` : ""}
           </Text>
         ))

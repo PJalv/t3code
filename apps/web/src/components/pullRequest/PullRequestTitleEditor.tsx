@@ -94,7 +94,7 @@ export function PullRequestTitleEditor({
         disabled={titleSaving}
         value={titleDraft}
         aria-label={gt(
-          "{term, select, mr {Merge request} cr {Change request} other {Pull request}} title",
+          "{term, select, mr {Merge request} cr {Change} other {Pull request}} title",
           {
             term: changeRequestTermKind(sourceControlClients.get(detail.provider).changeRequest),
           },

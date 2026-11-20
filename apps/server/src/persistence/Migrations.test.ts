@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Ref from "effect/Ref";
@@ -41,7 +42,172 @@ const v2TableCount = Effect.gen(function* () {
   return rows.length;
 });
 
+// Frozen schema from the pre-rebase 097_GerritPendingClones migration.
+const legacyGerritDatabase = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* runMigrations({ toMigrationInclusive: 96 });
+  yield* sql`CREATE TABLE gerrit_pending_clones (
+    project_id TEXT PRIMARY KEY NOT NULL,
+    destination_path TEXT NOT NULL UNIQUE,
+    installation TEXT NOT NULL,
+    gerrit_project TEXT NOT NULL,
+    uncertain INTEGER NOT NULL DEFAULT 0 CHECK (uncertain IN (0, 1)),
+    snapshot TEXT NOT NULL,
+    gate_operation_id TEXT
+  )`;
+  yield* sql`CREATE TABLE gerrit_pending_clone_attempts (
+    project_id TEXT NOT NULL REFERENCES gerrit_pending_clones(project_id) ON DELETE CASCADE,
+    recovery_path TEXT NOT NULL,
+    PRIMARY KEY (project_id, recovery_path)
+  )`;
+  yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (97, 'GerritPendingClones')`;
+  yield* sql`INSERT INTO gerrit_pending_clones VALUES ('p', '/p', 'i', 'g', 1, '{"saved":true}', 'gate')`;
+  yield* sql`INSERT INTO gerrit_pending_clone_attempts VALUES ('p', '/recovery')`;
+});
+
+const temporaryDatabase = Layer.unwrap(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3-gerrit-migrations-",
+    });
+    return NodeSqliteClient.layer({
+      filename: path.join(directory, "statev2.sqlite"),
+    });
+  }),
+).pipe(Layer.provide(NodeServices.layer));
+
+const gerritData = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    clones: yield* sql`SELECT * FROM gerrit_pending_clones`,
+    attempts: yield* sql`SELECT * FROM gerrit_pending_clone_attempts`,
+  };
+});
+
+const schema = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql`SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name`;
+});
+
 describe("runMigrations", () => {
+  it.effect(
+    "replays the exact legacy Gerrit history without losing pending clones",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* legacyGerritDatabase;
+        const beforeData = yield* gerritData;
+        const earlierHistory =
+          yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id < 97 ORDER BY migration_id`;
+        assert.deepStrictEqual(
+          yield* runMigrations({ toMigrationInclusive: 96 }),
+          [],
+        );
+        assert.deepStrictEqual(
+          yield* runMigrations(),
+          migrationManifest.filter(([id]) => id >= 97),
+        );
+        assert.deepStrictEqual(yield* history, migrationManifest);
+        assert.deepStrictEqual(yield* gerritData, beforeData);
+        assert.deepStrictEqual(
+          yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id < 97 ORDER BY migration_id`,
+          earlierHistory,
+        );
+        const upgradedSchema = yield* schema;
+        const freshSchema = yield* runMigrations().pipe(
+          Effect.andThen(schema),
+          Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+        );
+        assert.deepStrictEqual(upgradedSchema, freshSchema);
+        yield* sql`PRAGMA query_only = ON`;
+        assert.deepStrictEqual(yield* runMigrations(), []);
+        assert.deepStrictEqual(yield* gerritData, beforeData);
+      }).pipe(Effect.provide(temporaryDatabase)),
+  );
+
+  it.effect.each([
+    "unrelated97",
+    "earlierDivergence",
+    "laterHistory",
+    "missingTable",
+    "changedConstraint",
+    "extraTrigger",
+    "partialUpgrade",
+  ])("rejects ambiguous legacy Gerrit state: %s", (variant) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* legacyGerritDatabase;
+      if (variant === "unrelated97")
+        yield* sql`UPDATE effect_sql_migrations SET name = 'Unrelated' WHERE migration_id = 97`;
+      if (variant === "earlierDivergence")
+        yield* sql`UPDATE effect_sql_migrations SET name = 'Unrelated' WHERE migration_id = 96`;
+      if (variant === "laterHistory")
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (98, 'Unexpected')`;
+      if (variant === "missingTable")
+        yield* sql`DROP TABLE gerrit_pending_clone_attempts`;
+      if (variant === "changedConstraint") {
+        yield* sql`DROP TABLE gerrit_pending_clone_attempts`;
+        yield* sql`CREATE TABLE gerrit_pending_clone_attempts (project_id TEXT NOT NULL, recovery_path TEXT NOT NULL, PRIMARY KEY (project_id, recovery_path))`;
+      }
+      if (variant === "extraTrigger")
+        yield* sql`CREATE TRIGGER unexpected AFTER DELETE ON gerrit_pending_clones BEGIN DELETE FROM gerrit_pending_clone_attempts; END`;
+      const beforeHistory = yield* history;
+      const beforeSchema = yield* schema;
+      const exit = yield* Effect.exit(
+        runMigrations(
+          variant === "partialUpgrade" ? { toMigrationInclusive: 102 } : {},
+        ),
+      );
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(String(exit), "MigrationError");
+      assert.deepStrictEqual(yield* history, beforeHistory);
+      assert.deepStrictEqual(yield* schema, beforeSchema);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect.each(["laterMigration", "ledgerConflict"])(
+    "rolls back the legacy repair after %s and can retry",
+    (failure) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* legacyGerritDatabase;
+        // 101 must fail after 97-100 have run, rather than fail the legacy schema check.
+        if (failure === "laterMigration") {
+          yield* sql`CREATE TABLE orchestration_v2_projection_runs_delegated_task_idx (blocked TEXT)`;
+        } else {
+          yield* sql`CREATE TRIGGER fail_gerrit_replay BEFORE INSERT ON effect_sql_migrations
+          WHEN NEW.migration_id = 103 BEGIN
+            INSERT INTO effect_sql_migrations (migration_id, name) VALUES (96, 'conflict');
+          END`;
+        }
+        const beforeHistory = yield* history;
+        const beforeSchema = yield* schema;
+        const beforeData = yield* gerritData;
+        const exit = yield* Effect.exit(runMigrations());
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(
+          String(exit),
+          failure === "laterMigration"
+            ? "101_DelegatedTaskReadIndexes"
+            : "Legacy Gerrit migration replay did not complete",
+        );
+        assert.deepStrictEqual(yield* history, beforeHistory);
+        assert.deepStrictEqual(yield* schema, beforeSchema);
+        assert.deepStrictEqual(yield* gerritData, beforeData);
+        if (failure === "laterMigration") {
+          yield* sql`DROP TABLE orchestration_v2_projection_runs_delegated_task_idx`;
+        } else {
+          yield* sql`DROP TRIGGER fail_gerrit_replay`;
+        }
+        assert.deepStrictEqual(
+          yield* runMigrations(),
+          migrationManifest.filter(([id]) => id >= 97),
+        );
+        assert.deepStrictEqual(yield* gerritData, beforeData);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
   it.effect("adds pending clone recovery tables", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

@@ -42,6 +42,8 @@ import {
   PullRequestProviderError,
 } from "@t3tools/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import * as GerritWatchCompletion from "../sourceControl/GerritWatchCompletion.ts";
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -248,6 +250,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const nativeCompletion = yield* GerritWatchCompletion.GerritWatchCompletion;
   const random = yield* SecureRandom.SecureRandom;
   const bootedAt = yield* Clock.currentTimeMillis;
   const lives = new Map<string, WatchLife>();
@@ -520,60 +523,67 @@ export const make = Effect.gen(function* () {
   const hold = (wake: HeldWake) => Effect.sync(() => void held.push(wake));
 
   const sendOne = (item: HeldWake) =>
-    record(item.target, item.next, item.wake, item.endedWatch).pipe(
-      Effect.tap(() => woke(item.target)),
-      Effect.tap(() => (item.reason === undefined ? Effect.void : ended(item.target, item.reason))),
-      Effect.catchCause((cause) => {
-        lastReads.delete(item.groupKey);
-        return logFailure("pull request watch update failed", {
-          threadId: item.target.thread.id,
-          pullRequest: item.groupKey,
-        })(cause);
-      }),
-    );
-
-  const sendTogether = Effect.fn("PullRequestWatchReactor.sendTogether")(function* (
-    items: readonly [HeldWake, ...ReadonlyArray<HeldWake>],
-  ) {
-    const [first, ...rest] = items;
-    const uuid = yield* random.uuidV4();
-    yield* engine.dispatch({
-      type: "thread.pull-request-watch.sync",
-      commandId: CommandId.make(`server:pr-watch:${first.target.thread.id}:${uuid}`),
-      threadId: first.target.thread.id,
-      ...identityOf(first.target.link),
-      startedAt: first.target.watch.startedAt,
-      watch: first.next,
-      ...checksPendingBeforeOf(first.target),
-      ...(first.endedWatch === undefined ? {} : { endedWatch: first.endedWatch }),
-      others: rest.map((item) => ({
-        ...identityOf(item.target.link),
-        startedAt: item.target.watch.startedAt,
-        watch: item.next,
-        ...checksPendingBeforeOf(item.target),
-        ...(item.endedWatch === undefined ? {} : { endedWatch: item.endedWatch }),
-        ...(item.wake.includesRemarks === true ? { includesRemarks: true } : {}),
-      })),
-      wake: {
-        ...combinePullRequestWatchWakes([first.wake, ...rest.map((item) => item.wake)]),
-        ...(first.wake.includesRemarks === true ? { includesRemarks: true } : {}),
-        sections: items.map(({ wake }) => ({
-          text: wake.text,
-          outcome: wake.notification.outcome,
-          summary: wake.notification.summary,
-        })),
-        messageId: MessageId.make(`message:pr-watch:${uuid}`),
-      },
-    });
-    yield* Effect.forEach(
-      items,
-      (item) =>
-        woke(item.target).pipe(
-          Effect.andThen(item.reason === undefined ? Effect.void : ended(item.target, item.reason)),
+    nativeCompletion
+      .completion(item.target.thread.id, record(item.target, item.next, item.wake, item.endedWatch))
+      .pipe(
+        Effect.tap(() => woke(item.target)),
+        Effect.tap(() =>
+          item.reason === undefined ? Effect.void : ended(item.target, item.reason),
         ),
-      { discard: true },
-    );
-  });
+        Effect.catchCause((cause) => {
+          lastReads.delete(item.groupKey);
+          return logFailure("pull request watch update failed", {
+            threadId: item.target.thread.id,
+            pullRequest: item.groupKey,
+          })(cause);
+        }),
+      );
+
+  const sendTogether = Effect.fn("PullRequestWatchReactor.sendTogether")(
+    function* (items: readonly [HeldWake, ...ReadonlyArray<HeldWake>]) {
+      const [first, ...rest] = items;
+      const uuid = yield* random.uuidV4();
+      yield* engine.dispatch({
+        type: "thread.pull-request-watch.sync",
+        commandId: CommandId.make(`server:pr-watch:${first.target.thread.id}:${uuid}`),
+        threadId: first.target.thread.id,
+        ...identityOf(first.target.link),
+        startedAt: first.target.watch.startedAt,
+        watch: first.next,
+        ...checksPendingBeforeOf(first.target),
+        ...(first.endedWatch === undefined ? {} : { endedWatch: first.endedWatch }),
+        others: rest.map((item) => ({
+          ...identityOf(item.target.link),
+          startedAt: item.target.watch.startedAt,
+          watch: item.next,
+          ...checksPendingBeforeOf(item.target),
+          ...(item.endedWatch === undefined ? {} : { endedWatch: item.endedWatch }),
+          ...(item.wake.includesRemarks === true ? { includesRemarks: true } : {}),
+        })),
+        wake: {
+          ...combinePullRequestWatchWakes([first.wake, ...rest.map((item) => item.wake)]),
+          ...(first.wake.includesRemarks === true ? { includesRemarks: true } : {}),
+          sections: items.map(({ wake }) => ({
+            text: wake.text,
+            outcome: wake.notification.outcome,
+            summary: wake.notification.summary,
+          })),
+          messageId: MessageId.make(`message:pr-watch:${uuid}`),
+        },
+      });
+      yield* Effect.forEach(
+        items,
+        (item) =>
+          woke(item.target).pipe(
+            Effect.andThen(
+              item.reason === undefined ? Effect.void : ended(item.target, item.reason),
+            ),
+          ),
+        { discard: true },
+      );
+    },
+    (effect, items) => nativeCompletion.completion(items[0].target.thread.id, effect),
+  );
 
   const sendHeld = Effect.suspend(() => {
     const byThread = new Map<string, Array<HeldWake>>();
@@ -594,7 +604,8 @@ export const make = Effect.gen(function* () {
                 () => Effect.forEach([first!, ...rest], sendOne, { discard: true }),
               ),
             ),
-      { discard: true },
+      // Each thread waits on its own gate, so one slow native action delays only its thread.
+      { concurrency: "unbounded", discard: true },
     );
   });
 
@@ -604,8 +615,13 @@ export const make = Effect.gen(function* () {
     detail: Pick<PullRequestDetail, "state" | "baseBranch" | "mergeCommitSha" | "mergedBy">,
   ) => {
     const reason = detail.state === "merged" ? "merged" : "closed";
+    // Only the record waits behind an in-flight native action; holding a wake is instant, and
+    // `sendOne` takes the thread's gate when it is sent.
     return endedByAgent(target)
-      ? record(target, null).pipe(Effect.tap(() => ended(target, reason)))
+      ? nativeCompletion.completion(
+          target.thread.id,
+          record(target, null).pipe(Effect.tap(() => ended(target, reason))),
+        )
       : hold({
           groupKey,
           target,
@@ -821,103 +837,161 @@ export const make = Effect.gen(function* () {
 
   /** Every watch, or with `changed`, only that pull request's after its host reported a change. */
   // The sweep and change reads each name their own span.
-  const pass = Effect.fnUntraced(function* (changed: string | undefined) {
-    held = [];
-    const threads = yield* projections.getThreadsWithPullRequests();
-    const targets = threads.flatMap((thread) =>
-      visibleThreadPullRequests(thread.pullRequests ?? []).flatMap((link) =>
-        link.watch === undefined ||
-        (changed !== undefined && threadPullRequestKeyOf(link) !== changed)
-          ? []
-          : [{ thread, link, watch: link.watch }],
-      ),
-    );
-    if (changed === undefined) {
-      const present = new Set(targets.map(lifeKey));
+  const pass = Effect.fnUntraced(
+    function* (
+      changed: string | ReadonlyArray<PullRequestService.GerritDetailObservation> | undefined,
+    ) {
+      held = [];
+      const threads = yield* projections.getThreadsWithPullRequests();
+      const targets = threads.flatMap((thread) =>
+        visibleThreadPullRequests(thread.pullRequests ?? []).flatMap((link) =>
+          link.watch === undefined ||
+          (typeof changed === "string" && threadPullRequestKeyOf(link) !== changed) ||
+          (Array.isArray(changed) &&
+            !changed.some(
+              ({ reference, url }) =>
+                threadPullRequestKeyOf(reference) === threadPullRequestKeyOf(link) &&
+                url === link.url,
+            ))
+            ? []
+            : [{ thread, link, watch: link.watch }],
+        ),
+      );
+      if (changed === undefined) {
+        const present = new Set(targets.map(lifeKey));
+        yield* Effect.forEach(
+          [...lives].filter(([key]) => !present.has(key)),
+          ([key, life]) => reportEnd(key, life, "stopped"),
+          { discard: true },
+        );
+      }
+      for (const target of targets) lifeOf(target);
+      const byPullRequest = new Map<string, Array<WatchTarget>>();
+      const ending: Array<readonly [WatchTarget, WatchEndReason]> = [];
+      for (const target of targets) {
+        const reason = endsWithoutRead(target);
+        if (reason !== undefined) {
+          ending.push([target, reason]);
+          continue;
+        }
+        // Group by project because checkout access differs; one failure must not end another project's watches.
+        const key = `${target.thread.projectId} ${threadPullRequestKeyOf(target.link)}`;
+        byPullRequest.set(key, [...(byPullRequest.get(key) ?? []), target]);
+      }
+      const candidates = [...byPullRequest].map(([key, members]): WatchGroup => ({
+        key,
+        targets: members,
+        fingerprint: [...new Set(members.map(snapshotFingerprint))].toSorted().join("\n"),
+      }));
+      // Inbox watches can read through another checkout; hints must match that resolved scope.
+      const groups = Array.isArray(changed)
+        ? yield* Effect.forEach(
+            candidates,
+            (group) =>
+              pullRequests.resolveReadReference(referenceOf(group)).pipe(
+                Effect.map((resolved) => {
+                  const matching = group.targets.filter((target) =>
+                    changed.some(
+                      ({ reference, url }) =>
+                        reference.projectId === resolved.projectId &&
+                        threadPullRequestKeyOf(reference) === threadPullRequestKeyOf(resolved) &&
+                        target.link.url === url,
+                    ),
+                  );
+                  return matching.length === 0
+                    ? []
+                    : [
+                        {
+                          ...group,
+                          targets: matching,
+                          fingerprint: [...new Set(matching.map(snapshotFingerprint))]
+                            .toSorted()
+                            .join("\n"),
+                        },
+                      ];
+                }),
+                Effect.catchCause((cause) =>
+                  logFailure("pull request watch observation routing failed", {
+                    pullRequest: group.key,
+                  })(cause).pipe(Effect.as([])),
+                ),
+              ),
+            { concurrency: GROUP_READS },
+          ).pipe(Effect.map((matched) => matched.flat()))
+        : candidates;
+      if (changed === undefined) {
+        currentGroups = groups;
+        for (const cache of [readFailures, lastReads, threadTails]) {
+          for (const key of cache.keys()) if (!byPullRequest.has(key)) cache.delete(key);
+        }
+      }
       yield* Effect.forEach(
-        [...lives].filter(([key]) => !present.has(key)),
-        ([key, life]) => reportEnd(key, life, "stopped"),
+        ending,
+        ([target, reason]) =>
+          record(target, null).pipe(
+            Effect.tap(() => ended(target, reason)),
+            Effect.catchCause(
+              logFailure("pull request watch stop failed", {
+                threadId: target.thread.id,
+                pullRequest: threadPullRequestKeyOf(target.link),
+              }),
+            ),
+          ),
         { discard: true },
       );
-    }
-    for (const target of targets) lifeOf(target);
-    const byPullRequest = new Map<string, Array<WatchTarget>>();
-    const ending: Array<readonly [WatchTarget, WatchEndReason]> = [];
-    for (const target of targets) {
-      const reason = endsWithoutRead(target);
-      if (reason !== undefined) {
-        ending.push([target, reason]);
-        continue;
-      }
-      // Group by project because checkout access differs; one failure must not end another project's watches.
-      const key = `${target.thread.projectId} ${threadPullRequestKeyOf(target.link)}`;
-      byPullRequest.set(key, [...(byPullRequest.get(key) ?? []), target]);
-    }
-    const groups = [...byPullRequest].map(([key, members]): WatchGroup => ({
-      key,
-      targets: members,
-      fingerprint: [...new Set(members.map(snapshotFingerprint))].toSorted().join("\n"),
-    }));
-    if (changed === undefined) {
-      currentGroups = groups;
-      for (const cache of [readFailures, lastReads, threadTails]) {
-        for (const key of cache.keys()) if (!byPullRequest.has(key)) cache.delete(key);
-      }
-    }
-    yield* Effect.forEach(
-      ending,
-      ([target, reason]) =>
-        record(target, null).pipe(
-          Effect.tap(() => ended(target, reason)),
-          Effect.catchCause(
-            logFailure("pull request watch stop failed", {
-              threadId: target.thread.id,
-              pullRequest: threadPullRequestKeyOf(target.link),
+      // Every fingerprint is asked for at once so the host can batch them, and each group reads
+      // as soon as its own answer lands rather than waiting on the slowest host.
+      const reads = yield* Semaphore.make(GROUP_READS);
+      yield* Effect.forEach(
+        groups,
+        (group) =>
+          // The host just reported a change, so a cached fingerprint may predate it.
+          (changed === undefined
+            ? Effect.void
+            : pullRequests.invalidate({ reference: referenceOf(group) })
+          ).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                // Local hints carry no complete watch snapshot, even when a fingerprint is unchanged.
+                if (Array.isArray(changed)) lastReads.delete(group.key);
+              }),
+            ),
+            Effect.andThen(fingerprintOf(group)),
+            Effect.tap((fingerprint) => {
+              const last = lastReads.get(group.key);
+              // Open pull request views refresh only when the host state moved.
+              return typeof changed === "string" &&
+                fingerprint !== null &&
+                fingerprint !== "paused" &&
+                (last === undefined ||
+                  last.status !== fingerprint.status ||
+                  last.remarks !== fingerprint.remarks)
+                ? pullRequests.invalidate(
+                    { reference: referenceOf(group) },
+                    { notifyReaders: true },
+                  )
+                : Effect.void;
             }),
-          ),
-        ),
-      { discard: true },
-    );
-    // Every fingerprint is asked for at once so the host can batch them, and each group reads
-    // as soon as its own answer lands rather than waiting on the slowest host.
-    const reads = yield* Semaphore.make(GROUP_READS);
-    yield* Effect.forEach(
-      groups,
-      (group) =>
-        // The host just reported a change, so a cached fingerprint may predate it.
-        (changed === undefined
-          ? Effect.void
-          : pullRequests.invalidate({ reference: referenceOf(group) })
-        ).pipe(
-          Effect.andThen(fingerprintOf(group)),
-          Effect.tap((fingerprint) => {
-            const last = lastReads.get(group.key);
-            // Open pull request views refresh only when the host state moved.
-            return changed !== undefined &&
-              fingerprint !== null &&
-              fingerprint !== "paused" &&
-              (last === undefined ||
-                last.status !== fingerprint.status ||
-                last.remarks !== fingerprint.remarks)
-              ? pullRequests.invalidate({ reference: referenceOf(group) }, { notifyReaders: true })
-              : Effect.void;
-          }),
-          Effect.flatMap((fingerprint) =>
-            fingerprint === "paused"
-              ? endMergedSnapshots(group).pipe(Effect.asVoid)
-              : reads.withPermit(
-                  readGroup(group, fingerprint).pipe(
-                    Effect.catchCause(
-                      logFailure("pull request watch check failed", { pullRequest: group.key }),
+            Effect.flatMap((fingerprint) =>
+              fingerprint === "paused"
+                ? endMergedSnapshots(group).pipe(Effect.asVoid)
+                : reads.withPermit(
+                    readGroup(group, fingerprint).pipe(
+                      Effect.catchCause(
+                        logFailure("pull request watch check failed", { pullRequest: group.key }),
+                      ),
                     ),
                   ),
-                ),
+            ),
           ),
-        ),
-      { concurrency: "unbounded", discard: true },
-    );
-    yield* sendHeld;
-  }, passes.withPermit);
+        { concurrency: "unbounded", discard: true },
+      );
+      yield* sendHeld;
+    },
+    passes.withPermit,
+    Effect.provideService(PullRequestService.ObserveGerritDetails, false),
+    Effect.provideService(SourceControlRateLimit.Interactive, false),
+  );
 
   const sweep = pass(undefined).pipe(
     Effect.catchCause(logFailure("pull request watch sweep failed", {})),
@@ -1001,6 +1075,19 @@ export const make = Effect.gen(function* () {
         );
       }).pipe(Effect.catchCause(logFailure("pull request watch command stream failed", {}))),
     );
+    const observations = yield* pullRequests.subscribeGerritDetailObservations;
+    yield* forkParked(
+      observations.pipe(
+        // PubSub bounds pending hints; one batch makes at most one read per watched group.
+        Stream.chunks,
+        Stream.runForEach((hints) =>
+          pass(hints).pipe(
+            Effect.catchCause(logFailure("pull request watch observation read failed", {})),
+            Effect.withSpan("PullRequestWatchReactor.readOnObservation"),
+          ),
+        ),
+      ),
+    );
     // One feed per pull request: the host keeps one subscription per pull request and account.
     const feeds = yield* FiberMap.make<string>();
     const follow = Effect.gen(function* () {
@@ -1047,4 +1134,6 @@ export const make = Effect.gen(function* () {
   return { start, sweep } satisfies PullRequestWatchReactor["Service"];
 });
 
-export const layer = Layer.effect(PullRequestWatchReactor, make);
+export const layer = Layer.effect(PullRequestWatchReactor, make).pipe(
+  Layer.provide(GerritWatchCompletion.layer),
+);

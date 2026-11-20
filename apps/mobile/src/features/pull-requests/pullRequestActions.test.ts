@@ -10,6 +10,7 @@ import {
 
 const GITHUB = sourceControlClients.get("github").changeRequest;
 const GITLAB = sourceControlClients.get("gitlab").changeRequest;
+const GERRIT = sourceControlClients.get("gerrit").changeRequest;
 
 import type { PullRequestAction } from "@t3tools/contracts";
 
@@ -89,5 +90,12 @@ describe("mobile pull request actions", () => {
     expect(mergeUnavailableReason(detail({ state: "merged" }), true, GITLAB)).toBe(
       "This merge request has been merged.",
     );
+  });
+
+  it("uses Gerrit's own verbs for a change", () => {
+    expect(pullRequestActionLabel("merge", GERRIT)).toBe("Submit change");
+    expect(pullRequestActionLabel("close", GERRIT)).toBe("Abandon change");
+    expect(pullRequestActionLabel("reopen", GERRIT)).toBe("Restore change");
+    expect(pullRequestActionLabel("revert", GERRIT)).toBe("Create revert change");
   });
 });

@@ -286,35 +286,32 @@ export function ThreadDetailsPrRow({
   const openAriaLabel =
     stateLabel && title
       ? gt(
-          "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}, {state}: {title}",
+          "{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}, {state}: {title}",
           { term, number, state: stateLabel, title },
         )
       : stateLabel
         ? gt(
-            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}, {state}",
+            "{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}, {state}",
             { term, number, state: stateLabel },
           )
         : title
           ? gt(
-              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}: {title}",
+              "{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}: {title}",
               { term, number, title },
             )
-          : gt(
-              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}",
-              { term, number },
-            );
+          : gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}", {
+              term,
+              number,
+            });
 
   const rowTooltip =
     detail === null || statePresentation === null ? (
       <TooltipPopup side="top">
         {status?.tooltip ??
-          gt(
-            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}",
-            {
-              term,
-              number,
-            },
-          )}
+          gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}", {
+            term,
+            number,
+          })}
       </TooltipPopup>
     ) : (
       <TooltipPopup
@@ -417,7 +414,7 @@ export function ThreadDetailsPrRow({
             destructive: false,
             suffix: null,
             tooltip: gt(
-              "Mark this {term, select, mr {merge request} cr {change request} other {pull request}} as ready for review",
+              "Mark this {term, select, mr {merge request} cr {change} other {pull request}} as ready for review",
               { term },
             ),
             onClick: () => void perform("ready"),
@@ -448,7 +445,7 @@ export function ThreadDetailsPrRow({
                 destructive: false,
                 suffix: null,
                 tooltip: gt(
-                  "Merge this {term, select, mr {merge request} cr {change request} other {pull request}} ({method, select, merge {merge} squash {squash} rebase {rebase} fastForward {fast-forward} other {merge}})",
+                  "Merge this {term, select, mr {merge request} cr {change} other {pull request}} ({method, select, merge {merge} squash {squash} rebase {rebase} fastForward {fast-forward} other {merge}})",
                   {
                     term,
                     method: mergeMethodKey,
@@ -590,10 +587,9 @@ export function ThreadDetailsPrRow({
           <AlertDialogPopup>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {gt(
-                  "Merge {term, select, mr {merge request} cr {change request} other {pull request}}?",
-                  { term },
-                )}
+                {gt("Merge {term, select, mr {merge request} cr {change} other {pull request}}?", {
+                  term,
+                })}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {gt(

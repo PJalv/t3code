@@ -219,28 +219,28 @@ function stackBadgeLabel(
     case "open":
       return resolve(
         msg(
-          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, open} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, open}}",
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, open} other {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, open}}",
           { count, term },
         ),
       );
     case "draft":
       return resolve(
         msg(
-          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, draft} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, draft}}",
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, draft} other {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, draft}}",
           { count, term },
         ),
       );
     case "closed":
       return resolve(
         msg(
-          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, closed} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, closed}}",
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, closed} other {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, closed}}",
           { count, term },
         ),
       );
     case "merged":
       return resolve(
         msg(
-          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, merged} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, merged}}",
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, merged} other {Stack of {count} {term, select, mr {merge requests} cr {changes} other {pull requests}}, merged}}",
           { count, term },
         ),
       );
@@ -294,11 +294,9 @@ function prStatusLabels(
   switch (state) {
     case "open":
       return {
-        label: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} open", { term }),
-        ),
+        label: resolve(msg("{term, select, mr {MR} cr {change} other {PR}} open", { term })),
         tooltipLead: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Open", {
+          msg("{term, select, mr {MR} cr {change} other {PR}} #{number} - Open", {
             term,
             number,
           }),
@@ -306,11 +304,9 @@ function prStatusLabels(
       };
     case "draft":
       return {
-        label: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} draft", { term }),
-        ),
+        label: resolve(msg("{term, select, mr {MR} cr {change} other {PR}} draft", { term })),
         tooltipLead: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Draft", {
+          msg("{term, select, mr {MR} cr {change} other {PR}} #{number} - Draft", {
             term,
             number,
           }),
@@ -318,11 +314,9 @@ function prStatusLabels(
       };
     case "closed":
       return {
-        label: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} closed", { term }),
-        ),
+        label: resolve(msg("{term, select, mr {MR} cr {change} other {PR}} closed", { term })),
         tooltipLead: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Closed", {
+          msg("{term, select, mr {MR} cr {change} other {PR}} #{number} - Closed", {
             term,
             number,
           }),
@@ -330,11 +324,9 @@ function prStatusLabels(
       };
     case "merged":
       return {
-        label: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} merged", { term }),
-        ),
+        label: resolve(msg("{term, select, mr {MR} cr {change} other {PR}} merged", { term })),
         tooltipLead: resolve(
-          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Merged", {
+          msg("{term, select, mr {MR} cr {change} other {PR}} #{number} - Merged", {
             term,
             number,
           }),
@@ -377,7 +369,7 @@ function resolveThreadPullRequestBadgePresentation(
   const tooltip =
     status?.tooltip ??
     resolve(
-      msg("{term, select, mr {MR} cr {change request} other {PR}} #{number}, status pending", {
+      msg("{term, select, mr {MR} cr {change} other {PR}} #{number}, status pending", {
         term: changeRequestTermKind(terminology),
         number,
       }),
@@ -946,7 +938,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
         <PullRequestGlyph.pullRequest
           className="size-3 text-muted-foreground"
           aria-label={gt(
-            "{term, select, mr {MR} cr {change request} other {PR}} #{number}, status pending",
+            "{term, select, mr {MR} cr {change} other {PR}} #{number}, status pending",
             {
               term: changeRequestTermKind(changeRequestTerminologyForUrl(pendingLink.url)),
               number: pendingLink.number,

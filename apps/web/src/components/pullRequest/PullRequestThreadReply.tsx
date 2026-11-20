@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, PullRequestDetailView, PullRequestRef } from "@t3tools/contracts";
 import { canResolveWithReply } from "@t3tools/client-runtime/pull-request-editing";
+import { T, useGT } from "gt-react";
 import { useState } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
@@ -27,6 +28,7 @@ export function PullRequestThreadReply({
   };
   onRefresh: () => void;
 }) {
+  const gt = useGT();
   const allowed = useAtomValue(pullRequestEnvironment.replyToThread.permissionAtom(environmentId));
   const canResolve = useAtomValue(
     pullRequestEnvironment.setThreadResolution.permissionAtom(environmentId),
@@ -79,7 +81,7 @@ export function PullRequestThreadReply({
       {offerResolve ? (
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={resolve} onCheckedChange={setResolve} disabled={pending} />
-          Resolve conversation
+          <T>Resolve conversation</T>
         </label>
       ) : null}
       <PullRequestMarkdownEditor
@@ -87,10 +89,10 @@ export function PullRequestThreadReply({
         cwd={detail.workspaceRoot}
         environmentId={environmentId}
         completionScope={pullRequestCompletionScope(detail, environmentId, reference)}
-        label="Reply to this conversation"
-        placeholder="Write a reply"
+        label={gt("Reply to this conversation")}
+        placeholder={gt("Write a reply")}
         saving={pending}
-        saveLabel="Post reply"
+        saveLabel={gt("Post reply")}
         onSave={(body) => void send(body)}
         onCancel={() => {
           setOpen(false);
@@ -99,7 +101,7 @@ export function PullRequestThreadReply({
       />
       {error ? (
         <p role="alert" className="text-xs text-destructive">
-          Reply could not be posted. Your text is preserved.
+          <T>Reply could not be posted. Your text is preserved.</T>
         </p>
       ) : null}
     </div>
@@ -112,7 +114,7 @@ export function PullRequestThreadReply({
         setOpen(true);
       }}
     >
-      Reply
+      <T context="verb, button">Reply</T>
     </Button>
   );
 }

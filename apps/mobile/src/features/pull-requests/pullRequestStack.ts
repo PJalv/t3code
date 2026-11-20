@@ -21,14 +21,14 @@ export function pullRequestStackMerge(
     position < 0
       ? resolve(
           msg(
-            "This {term, select, mr {merge request} cr {change request} other {pull request}} is no longer in the stack. Refresh it.",
+            "This {term, select, mr {merge request} cr {change} other {pull request}} is no longer in the stack. Refresh it.",
             { term },
           ),
         )
       : stack.layers[position]?.state !== "open" || layers.length === 0
         ? resolve(
             msg(
-              "There are no open layers to merge through this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+              "There are no open layers to merge through this {term, select, mr {merge request} cr {change} other {pull request}}.",
               { term },
             ),
           )

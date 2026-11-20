@@ -1,3 +1,5 @@
+import { vi } from "vite-plus/test";
+import * as BuildProfile from "../buildProfile.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -53,6 +55,15 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { root, runtimeDir, executable, link, provide } = yield* setup;
+
+      {
+        using _beta = vi.spyOn(BuildProfile, "isGerritBeta", "get").mockReturnValue(true);
+        assert.equal(
+          (yield* provide(installCli()).pipe(Effect.flip)).reason,
+          BuildProfile.gerritBetaRefusal,
+        );
+        assert.isFalse(yield* fs.exists(link));
+      }
 
       const older = path.join(runtimeDir, "versions/0.0.1/t3");
       yield* fs.makeDirectory(path.dirname(link), { recursive: true });

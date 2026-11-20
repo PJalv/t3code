@@ -26,7 +26,7 @@ export function PullRequestMarkdownEditor({
   placeholder,
   label,
   saving,
-  saveLabel = "Save",
+  saveLabel,
   allowEmpty = false,
   className,
   onSave,
@@ -146,7 +146,7 @@ export function PullRequestMarkdownEditor({
             onSave(draft);
           }}
         >
-          {saving ? gt("Saving...") : saveLabel}
+          {saving ? gt("Saving...") : (saveLabel ?? gt("Save"))}
         </Button>
       </div>
     </div>

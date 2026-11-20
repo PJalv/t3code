@@ -301,7 +301,7 @@ function LinkRowImpl({
                           size: stack.size,
                         })
                       : gt(
-                          "{size} {terms, select, mr {merge requests} cr {change requests} other {pull requests}} chained by base branch.",
+                          "{size} {terms, select, mr {merge requests} cr {changes} other {pull requests}} chained by base branch.",
                           {
                             size: stack.size,
                             terms: changeRequestTermKind(linkHost.changeRequest),

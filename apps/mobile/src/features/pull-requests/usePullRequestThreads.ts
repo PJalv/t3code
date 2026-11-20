@@ -110,7 +110,7 @@ export function usePullRequestThreads(
       if (connected && !thread && !canCheckout)
         throw new Error(
           gt(
-            "Starting work from this {term, select, mr {MR} cr {change request} other {PR}} requires source control write access.",
+            "Starting work from this {term, select, mr {MR} cr {change} other {PR}} requires source control write access.",
             {
               term: changeRequestTermKind(terminology),
             },

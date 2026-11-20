@@ -4,6 +4,7 @@ import * as NodeSea from "node:sea";
 import * as NodeURL from "node:url";
 
 import { isEntrypoint } from "./entrypoint.ts";
+import { isGerritBeta, gerritBetaRefusal } from "./buildProfile.ts";
 
 // Loads the CLI outside the launcher's module graph. Packaged builds embed it as a raw asset.
 async function loadCliMain(): Promise<typeof import("./binMain.ts")> {
@@ -48,6 +49,9 @@ if (
   // The launcher owns shutdown until its child exits, so it bypasses the Effect CLI runtime.
   // A service unit passes nothing, or on Windows the launcher's own flags; help and anything
   // else go through the full CLI.
+  if (isGerritBeta && process.argv[2] === "__service-launcher") {
+    throw new Error(gerritBetaRefusal);
+  }
   const launcher =
     process.argv[2] === "__service-launcher" ? await import("./cli/serviceLauncher.ts") : undefined;
   const launcherOptions = launcher?.parseServiceLauncherArgs(process.argv.slice(3));

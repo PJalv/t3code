@@ -112,7 +112,10 @@ export function PullRequestBaseBranch({
   const label = (
     <>
       {stacked ? (
-        <PullRequestGlyph.stack aria-label={gt("Stacked {term}", { term: terminology })} className="size-3 shrink-0" />
+        <PullRequestGlyph.stack
+          aria-label={gt("Stacked {term}", { term: terminology })}
+          className="size-3 shrink-0"
+        />
       ) : null}
       <code className="flex min-w-0">
         <MiddleTruncate value={baseBranch} showTitle={false} />

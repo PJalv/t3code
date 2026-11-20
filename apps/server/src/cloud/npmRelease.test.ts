@@ -1,3 +1,5 @@
+import { vi } from "vite-plus/test";
+import * as BuildProfile from "../buildProfile.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ServerNpmReleaseError } from "@t3tools/contracts";
@@ -15,6 +17,18 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as NpmRelease from "./npmRelease.ts";
+
+it.effect("refuses beta release discovery without querying npm or HTTP", () =>
+  Effect.gen(function* () {
+    using _beta = vi.spyOn(BuildProfile, "isGerritBeta", "get").mockReturnValue(true);
+    const service = yield* makeService(() => Effect.die("must not spawn npm"));
+    for (const spec of ["latest", "nightly", "9.0.0"]) {
+      expect((yield* service.get({ spec }).pipe(Effect.flip)).reason).toBe(
+        BuildProfile.gerritBetaRefusal,
+      );
+    }
+  }),
+);
 
 const version = "0.1.5-nightly.20261030.1";
 const output = (stdout: string, code = 0): ProcessRunner.ProcessRunOutput => ({

@@ -20,7 +20,10 @@ export function PullRequestActivityFilters({
   const kinds = [
     { id: "all", title: gt("All activity") },
     { id: "comments", title: gt("Comments", { $context: "activity filter" }) },
-    { id: "commits", title: isGerrit ? gt("Patch sets") : gt("Commits", { $context: "activity filter" }) },
+    {
+      id: "commits",
+      title: isGerrit ? gt("Patch sets") : gt("Commits", { $context: "activity filter" }),
+    },
   ] as const;
   return (
     <View className="mb-4 flex-row items-center justify-between gap-3">

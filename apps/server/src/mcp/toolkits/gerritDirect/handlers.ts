@@ -15,6 +15,7 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as GerritDirectRead from "../../../sourceControl/GerritDirectRead.ts";
 import * as GerritDirectService from "../../../sourceControl/GerritDirectService.ts";
 import * as GerritTarget from "../../../sourceControl/GerritTarget.ts";
+import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import { GerritDirectUploadError } from "../../../sourceControl/GerritDirectUpload.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -91,6 +92,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const read = yield* GerritDirectRead.GerritDirectRead;
   const service = yield* GerritDirectService.GerritDirectService;
+  const completion = yield* GerritWatchCompletion.GerritWatchCompletion;
   const cwd = Effect.fn("GerritDirectHandlers.cwd")(function* () {
     const scope = yield* McpInvocationContext.McpInvocationContext;
     if (
@@ -143,8 +145,15 @@ const make = Effect.gen(function* () {
         const request = yield* decodeAct(input, gerritDirectDecodeOptions).pipe(
           Effect.mapError(invalid),
         );
+        const checkout = yield* cwd();
+        const scope = yield* McpInvocationContext.McpInvocationContext;
         return publicValue(
-          yield* service.act({ cwd: yield* cwd(), ...request }).pipe(Effect.mapError(failed)),
+          yield* service.act({ cwd: checkout, ...request }).pipe(
+            Effect.provideService(GerritWatchCompletion.NativeAction, (action, write) =>
+              completion.action(scope.thread!.threadId, action, write),
+            ),
+            Effect.mapError(failed),
+          ),
         );
       }),
     ),
