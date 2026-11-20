@@ -58,13 +58,6 @@ export const definition = defineSourceControl({
     singular: "change",
     plural: "changes",
     latestRevisionLabel: "patch set",
-    verbs: {
-      merge: "Submit",
-      close: "Abandon",
-      reopen: "Restore",
-      draft: "Mark work in progress",
-      ready: "Ready for review",
-    },
   },
   repositoryPathHint: "project",
   defaultCloneTransport: "https",
