@@ -92,9 +92,7 @@ export function pullRequestAgentActions(
     },
     {
       task: "explain",
-      title: resolve(
-        msg("Explain this {term, select, mr {MR} cr {change request} other {PR}}", { term }),
-      ),
+      title: resolve(msg("Explain this {term, select, mr {MR} cr {change} other {PR}}", { term })),
       icon: "book",
       disabled: false,
     },
@@ -112,7 +110,7 @@ export function pullRequestAgentActions(
     },
     {
       task: "watch",
-      title: resolve(msg("Watch {term, select, mr {MR} cr {change request} other {PR}}", { term })),
+      title: resolve(msg("Watch {term, select, mr {MR} cr {change} other {PR}}", { term })),
       icon: "eye",
       disabled: pr.state !== "open" || !canWatch,
     },

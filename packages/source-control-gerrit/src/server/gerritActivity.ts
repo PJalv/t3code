@@ -163,20 +163,32 @@ export function mapGerritActivity(input: ActivityInput): GerritActivity {
       })),
     });
   }
-  const linkedCounts = new Map<string, number>();
+  const linkedComments = new Map<string, GerritComment[]>();
   for (const comment of byId.values()) {
-    if (comment.visibility === "published" && comment.changeMessageId)
-      linkedCounts.set(
-        comment.changeMessageId,
-        (linkedCounts.get(comment.changeMessageId) ?? 0) + 1,
-      );
+    if (comment.visibility !== "published" || !comment.changeMessageId) continue;
+    const linked = linkedComments.get(comment.changeMessageId) ?? [];
+    linked.push(comment);
+    linkedComments.set(comment.changeMessageId, linked);
   }
   const messages = input.messages.flatMap((message) => {
     let body = messageWithAccounts(message.message, input.messageAccounts);
-    const summary = /\n\n\((\d+) comments?\)\s*$/.exec(body);
-    // Remove the receipt only when every comment it refers to is available as a discussion.
-    if (summary && (linkedCounts.get(message.id) ?? 0) >= Number(summary[1])) {
-      body = body.slice(0, summary.index).trimEnd();
+    // PostReviewOp puts its receipt before user prose; later count paragraphs belong to the user.
+    const summary = /^(Patch Set \d+:[^\n]*)\n\n\(([1-9]\d*) comments?\)(?=\n\n|$)/.exec(body);
+    const linked = linkedComments.get(message.id) ?? [];
+    // Gerrit can link older comments to a later message, so the ID alone is not publish evidence.
+    if (
+      summary &&
+      linked.length === Number(summary[2]) &&
+      message.author?._account_id !== undefined &&
+      linked.every(
+        (comment) =>
+          comment.author?._account_id === message.author?._account_id &&
+          date(comment.updated) === date(message.date) &&
+          comment.message !== null &&
+          (!comment.identity || comment.identity.kind === "known"),
+      )
+    ) {
+      body = summary[1] + body.slice(summary[0].length);
       if (/^Patch Set \d+:\s*$/.test(body)) return [];
     }
     const vote = /^Patch Set \d+:[^\n]*\bCode-Review([+-][12])(?=\s|$)/.exec(body)?.[1];

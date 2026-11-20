@@ -86,7 +86,7 @@ function NumberLink({
               toneClassName,
             )}
             aria-label={gt(
-              "Open {term, select, mr {merge request} cr {change request} other {pull request}} #{number} on host",
+              "Open {term, select, mr {merge request} cr {change} other {pull request}} #{number} on host",
               {
                 term: changeRequestTermKind(
                   sourceControlClients.get(detail.provider).changeRequest,

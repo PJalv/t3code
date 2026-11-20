@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { FetchHttpClient, HttpClient } from "effect/http";
 
+import { isGerritBeta, gerritBetaRefusal } from "../buildProfile.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 const Version = Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/));
@@ -117,6 +118,7 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
   });
   return NpmRelease.of({
     get: Effect.fn("NpmRelease.get")(function* (input) {
+      if (isGerritBeta) return yield* new ServerNpmReleaseError({ reason: gerritBetaRefusal });
       const { spec } = yield* decodeInput(input).pipe(
         Effect.mapError(
           () => new ServerNpmReleaseError({ reason: "Invalid release version or track." }),

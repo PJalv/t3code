@@ -57,14 +57,20 @@ export function ProjectCloneBanner(props: {
       </Text>
       {clone.recoveryRequired ? (
         <Text className="mt-0.5 text-xs text-danger-foreground">
-          Publication may have completed. Inspect{" "}
-          {clone.recoveryPaths?.join(", ") || "the private attempt"} and {clone.destinationPath}. Do
-          not retry or delete either path.
+          {clone.recoveryPaths?.length
+            ? gt(
+                "Publication may have completed. Inspect {paths} and {destination}. Do not retry or delete either path.",
+                { paths: clone.recoveryPaths.join(", "), destination: clone.destinationPath },
+              )
+            : gt(
+                "Publication may have completed. Inspect the private attempt and {destination}. Do not retry or delete either path.",
+                { destination: clone.destinationPath },
+              )}
         </Text>
       ) : null}
       {cancelled && clone.recoveryPath ? (
         <Text className="mt-0.5 text-xs text-warning-foreground" numberOfLines={3}>
-          Private attempt: {clone.recoveryPath}
+          {gt("Private attempt: {path}", { path: clone.recoveryPath })}
         </Text>
       ) : null}
       {clone.error ? (

@@ -163,6 +163,74 @@ so use a server you trust; HTTP does not protect the hook from changes in transi
 needs a configured SSH host associated with the Gerrit server. If the remote is ambiguous, T3 Code
 cannot safely infer its project.
 
+#### Copy a saved credential to configured terminal Git
+
+Saving HTTP credentials does not sync them to terminal Git. On the saved connection, choose
+**Copy saved credential to configured Git → Copy command template**. This is not a ready-to-run
+command: replace the launcher and home placeholders first. Run it inside the HTTPS checkout on the
+**T3 server machine**, as the server's OS user, not on a remote client. It targets `origin`; use
+`--remote <name>` for another remote. It copies only this repository/account credential through stdin
+to an already configured secure helper. It does not contact Gerrit or change Git configuration or remotes.
+
+Identify the launcher and home from the server's launch command or service configuration:
+
+- **Packaged/custom install:** use the absolute CLI path belonging to that installation. `command -v t3`
+  on the server can locate a candidate, but verify it against the installation you launched. Check
+  `'/absolute/path/to/t3' gerrit copy-terminal-credential --help`; if unavailable, that binary is too old.
+  Use its configured `--base-dir` or `T3CODE_HOME`. Only the default install uses `$HOME/.t3`.
+- **Dev worktree:** replace `'<T3-LAUNCHER>'` with
+  `node '/absolute/server-checkout/apps/server/src/bin.ts'`. Use
+  `--base-dir '/absolute/server-checkout/.t3'`, unless the dev runner was started with another
+  `--home-dir`. The dev runner's home flag is `--home-dir`; this CLI command's flag is `--base-dir`.
+  Use the same Node installation as the dev server. Keep the working directory in the target Git
+  checkout, not the T3 source checkout.
+
+The home is the **parent of `userdata`**, not `userdata` itself. Verify the selected home by comparing
+`userdata/environment-id` with the template's `--environment-id`; this ID is not a secret. Do not
+inspect the secrets directory to locate the home. Quote paths with spaces; in POSIX single-quoted
+arguments, spell an embedded apostrophe as `'\''`. The command rejects a different environment ID.
+
+Linux requires an existing system-installed `git-credential-libsecret` and an unlocked Secret Service
+keyring. Native Windows, macOS, Git Credential Manager, shell helpers, and plaintext `store` are not
+supported. WSL uses the Linux implementation only when T3, Git, libsecret, and Secret Service run inside
+one distribution; no credential moves to Windows or another distribution.
+
+Before copying, inspect locally (never post output from custom helpers that may contain secrets):
+
+```sh
+git remote get-url --all origin
+git remote get-url --push --all origin
+git config --show-origin --get-regexp '^credential\.'
+git config --global --get credential.useHttpPath
+```
+
+The prerequisites are one absolute libsecret executable without arguments, global
+`credential.useHttpPath=true` without a matching false override, and an exact repository-scoped HTTP
+username. Find the helper path using your system's package tooling; no path is assumed. The following
+is **configuration syntax to review**, not a command to run or a block to append blindly:
+
+```gitconfig
+[credential]
+    helper = /absolute/package-provided/path/git-credential-libsecret
+    useHttpPath = true
+[credential "https://review.example/gerrit/a/team/repo"]
+    username = your-http-username
+```
+
+Replace the example URL with the exact remote, including any reverse-proxy path. Review helper entries
+from every config origin first: Git sends successful credentials to all matching helpers. Do not
+silently clear a chain, append another helper, or delete unrelated host/account rules. Global path
+matching affects other repositories, which may need their own path-scoped credentials. It is required
+because pathless lookups can retrieve credentials saved for another path. No setting is changed by the
+copy command. Conflicting rules require manual review, not a plaintext fallback.
+
+The command rejects trailing/repeated path slashes, encoded paths, URL rewrites, other URL-scoped
+credential rules, and differing fetch/push URLs instead of guessing. It never fixes or converts SSH
+remotes. The template contains no password. Re-run it for each repository after password rotation.
+Removing the T3 connection does not remove the keyring copy or revoke the Gerrit password. Remove the
+repository/account entry in your keyring application when no longer needed; revoke or rotate the HTTP
+password in Gerrit if required. No RPC or agent MCP tool exports this credential.
+
 Gerrit changes appear in **Pull requests** like reviews from any other host. A change shows its
 votes, submit requirements, topic, and work-in-progress and private state. You can vote, set the
 topic, mark it ready or work in progress, and make it private or public. The regular review actions

@@ -1092,9 +1092,9 @@ export function AddProjectRepositoryScreen(props: {
                 </Pressable>
               ))}
               {gerritMatches.configuredInstallations === 0 ? (
-                <Text>No Gerrit installations are configured.</Text>
+                <Text>{gt("No Gerrit installations are configured.")}</Text>
               ) : gerritMatches.results.length === 0 && gerritMatches.failures.length === 0 ? (
-                <Text>No matching Gerrit projects.</Text>
+                <Text>{gt("No matching Gerrit projects.")}</Text>
               ) : null}
               {gerritMatches.failures.map((failure) => (
                 <Text key={failure.installation} className="text-xs text-destructive">
@@ -1102,7 +1102,7 @@ export function AddProjectRepositoryScreen(props: {
                 </Text>
               ))}
               {gerritMatches.results.length === 0 && gerritMatches.failures.length > 0 ? (
-                <Text>No successful installation returned a match.</Text>
+                <Text>{gt("No successful installation returned a match.")}</Text>
               ) : null}
             </View>
           ) : null}
@@ -1744,7 +1744,9 @@ export function AddProjectDestinationScreen(props: {
   return (
     <AddProjectShell title={gt("Clone destination")}>
       {error ? <ErrorBanner message={error} /> : null}
-      {invalidSelection ? <ErrorBanner message="The selected Gerrit project is invalid." /> : null}
+      {invalidSelection ? (
+        <ErrorBanner message={gt("The selected Gerrit project is invalid.")} />
+      ) : null}
       {repositoryTitle ? (
         <View className="rounded-[24px] bg-grouped-card px-4 py-3">
           <Text className="text-base font-t3-bold">{repositoryTitle}</Text>

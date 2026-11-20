@@ -29,7 +29,7 @@ export function PullRequestActivityUnavailableState({
       <p className="text-sm font-medium text-foreground">
         <T>
           Could not load{" "}
-          <Branch branch={term} mr="merge request" cr="change request">
+          <Branch branch={term} mr="merge request" cr="change">
             pull request
           </Branch>{" "}
           activity

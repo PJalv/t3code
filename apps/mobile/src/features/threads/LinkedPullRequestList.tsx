@@ -94,7 +94,7 @@ export const LinkedPullRequestRow = memo(function LinkedPullRequestRow(props: {
       accessibilityRole="button"
       accessibilityLabel={[
         gt(
-          "{term, select, mr {Merge request {number}, {title}} cr {Change request {number}, {title}} other {Pull request {number}, {title}}}",
+          "{term, select, mr {Merge request {number}, {title}} cr {Change {number}, {title}} other {Pull request {number}, {title}}}",
           {
             term,
             number: link.number,
@@ -131,11 +131,11 @@ export const LinkedPullRequestRow = memo(function LinkedPullRequestRow(props: {
           if (!opened)
             Dialog.alert(
               gt(
-                "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+                "{term, select, mr {Unable to open MR} cr {Unable to open change} other {Unable to open PR}}",
                 { term },
               ),
               gt(
-                "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+                "{term, select, mr {The merge request could not be opened.} cr {The change could not be opened.} other {The pull request could not be opened.}}",
                 { term },
               ),
             );

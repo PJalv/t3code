@@ -1163,7 +1163,7 @@ export function createThreadOutboxDelivery(): {
           persistedMessage,
           m(
             msg(
-              "{term, select, mr {The MR worktree has local changes and could not update to the MR head. Resolve them before trying again.} cr {The change request worktree has local changes and could not update to the change request head. Resolve them before trying again.} other {The PR worktree has local changes and could not update to the PR head. Resolve them before trying again.}}",
+              "{term, select, mr {The MR worktree has local changes and could not update to the MR head. Resolve them before trying again.} cr {The change worktree has local changes and could not update to the change head. Resolve them before trying again.} other {The PR worktree has local changes and could not update to the PR head. Resolve them before trying again.}}",
               { term },
             ),
           ),

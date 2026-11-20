@@ -187,7 +187,7 @@ export function PullRequestMergeControls(props: {
                   )
                     throw new Error(
                       gt(
-                        "The {term, select, mr {merge request} cr {change request} other {pull request}} changed. Refresh before merging.",
+                        "The {term, select, mr {merge request} cr {change} other {pull request}} changed. Refresh before merging.",
                         {
                           term: changeRequestTermKind(terminology),
                         },
@@ -225,10 +225,9 @@ export function PullRequestMergeControls(props: {
               "{count, plural, one {Merge {count} stack layers?} other {Merge {count} stack layers?}}",
               { count: scope.layers.length },
             )
-          : gt(
-              "Merge {term, select, mr {merge request} cr {change request} other {pull request}}?",
-              { term: changeRequestTermKind(terminology) },
-            )
+          : gt("Merge {term, select, mr {merge request} cr {change} other {pull request}}?", {
+              term: changeRequestTermKind(terminology),
+            })
         : action === "enable-auto-merge"
           ? gt("Enable auto-merge?")
           : gt("Disable auto-merge?");
@@ -251,7 +250,7 @@ export function PullRequestMergeControls(props: {
             )
           : action === "disable-auto-merge"
             ? gt(
-                "Stop the provider from automatically merging this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+                "Stop the provider from automatically merging this {term, select, mr {merge request} cr {change} other {pull request}}.",
                 {
                   term: changeRequestTermKind(terminology),
                 },

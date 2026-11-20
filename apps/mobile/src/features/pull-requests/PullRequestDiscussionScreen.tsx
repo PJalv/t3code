@@ -1,6 +1,9 @@
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { actorDisplayName } from "@t3tools/client-runtime/source-control-clients";
-import { canResolveWithReply } from "@t3tools/client-runtime/pull-request-editing";
+import {
+  canResolvePullRequestThread,
+  canResolveWithReply,
+} from "@t3tools/client-runtime/pull-request-editing";
 import {
   parsePullRequestAnchor,
   pullRequestAnchorMatchesUrl,
@@ -143,9 +146,15 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
       refresh();
       return response;
     });
+  const canResolve =
+    permissions.canResolve &&
+    !!detail.data &&
+    !!thread &&
+    !thread.isDraft &&
+    canResolvePullRequestThread(detail.data, thread);
   const toggleResolved = () =>
     operation(async () => {
-      if (!thread || !permissions.canResolve) return undefined;
+      if (!thread || !canResolve) return undefined;
       const response = await resolve({
         ...target,
         input: { ...target.input, threadId: thread.id, resolved: !thread.isResolved },
@@ -199,7 +208,7 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
           subtitle={`#${params.number}`}
           onBack={() => navigation.goBack()}
           actions={
-            permissions.canResolve && thread
+            canResolve && thread
               ? [
                   {
                     accessibilityLabel: resolveLabel,
@@ -238,14 +247,18 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
               >
                 {thread.path === null ? null : (
                   <Text selectable className="font-mono text-xs text-foreground-muted">
-                    {thread.path === "/PATCHSET_LEVEL" ? "Change-level discussion" : thread.path}
+                    {thread.path === "/PATCHSET_LEVEL"
+                      ? gt("Change-level discussion")
+                      : thread.path}
                     {thread.path !== "/PATCHSET_LEVEL" && thread.line ? `:${thread.line}` : ""}
                   </Text>
                 )}
                 <View className="flex-row items-center gap-2">
                   <PullRequestDiscussionStatus resolved={thread.isResolved} />
                   {thread.isOutdated ? (
-                    <Text className="text-xs text-foreground-muted">{gt("Outdated", { $context: "review thread state" })}</Text>
+                    <Text className="text-xs text-foreground-muted">
+                      {gt("Outdated", { $context: "review thread state" })}
+                    </Text>
                   ) : null}
                 </View>
                 {filePath === null ? null : (
@@ -330,9 +343,9 @@ function Discussion({ params }: { params: PullRequestParams & { readonly discuss
           >
             {offerResolve ? (
               <View className="flex-row items-center justify-end gap-2">
-                <Text>Resolve conversation</Text>
+                <Text>{gt("Resolve conversation")}</Text>
                 <ThemedSwitch
-                  accessibilityLabel="Resolve conversation"
+                  accessibilityLabel={gt("Resolve conversation")}
                   value={resolveWithReply}
                   onValueChange={setResolveWithReply}
                   disabled={busy}

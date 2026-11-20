@@ -163,6 +163,23 @@ export class ServerSecretStore extends Context.Service<
   }
 >()("t3/auth/ServerSecretStore") {}
 
+// Local administrative commands can read without initializing or changing the live store.
+export const readFromDirectory = Effect.fn("ServerSecretStore.readFromDirectory")(function* (
+  directory: string,
+  name: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  return yield* fs.readFile(path.join(directory, `${name}.bin`)).pipe(
+    Effect.map((bytes) => Option.some(Uint8Array.from(bytes))),
+    Effect.catch((cause) =>
+      cause.reason._tag === "NotFound"
+        ? Effect.succeedNone
+        : Effect.fail(new SecretStoreReadError({ resource: `secret ${name}`, cause })),
+    ),
+  );
+});
+
 /** @public */
 export const make = Effect.gen(function* () {
   const crypto = yield* SecureRandom.SecureRandom;

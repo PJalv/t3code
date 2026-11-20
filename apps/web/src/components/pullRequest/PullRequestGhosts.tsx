@@ -12,6 +12,7 @@ import {
 import { msg, T, useGT, useMessages, Var } from "gt-react";
 import type { ReactNode } from "react";
 import {
+  capitalizeTerm,
   sourceControlClients,
   type ChangeRequestTerminology,
 } from "@t3tools/client-runtime/source-control-clients";
@@ -139,7 +140,7 @@ export function PullRequestDetailGhost({
     <div
       role="status"
       aria-label={gt(
-        "Loading {term, select, mr {merge request} cr {change request} other {pull request}}",
+        "Loading {term, select, mr {merge request} cr {change} other {pull request}}",
         { term: changeRequestTermKind(terminology) },
       )}
       className={cn(
@@ -167,7 +168,7 @@ export function PullRequestDetailGhost({
                 <InlineButton
                   onClick={() => void readLocalApi()?.shell.openExternal(seed.url)}
                   aria-label={gt(
-                    "Open {term, select, mr {merge request} cr {change request} other {pull request}} #{number} on host",
+                    "Open {term, select, mr {merge request} cr {change} other {pull request}} #{number} on host",
                     {
                       term: changeRequestTermKind(terminology),
                       number: seed.number,
@@ -193,7 +194,7 @@ export function PullRequestDetailGhost({
             variant="ghost"
             disabled
             aria-label={gt(
-              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} actions loading",
+              "{term, select, mr {Merge request} cr {Change} other {Pull request}} actions loading",
               {
                 term: changeRequestTermKind(terminology),
               },
@@ -206,7 +207,7 @@ export function PullRequestDetailGhost({
               size="icon-xs"
               variant="ghost"
               aria-label={gt(
-                "Collapse {term, select, mr {merge request} cr {change request} other {pull request}} panel",
+                "Collapse {term, select, mr {merge request} cr {change} other {pull request}} panel",
                 { term: changeRequestTermKind(terminology) },
               )}
               onClick={onClose}
@@ -260,11 +261,11 @@ export function PullRequestDetailGhost({
                     target={{
                       target: `${terminology.singular} checkout command`,
                       unavailableMessage: msg(
-                        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change request} other {pull request}} checkout command.",
+                        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change} other {pull request}} checkout command.",
                         { term: changeRequestTermKind(terminology) },
                       ),
                       failureMessage: msg(
-                        "Failed to copy {term, select, mr {merge request} cr {change request} other {pull request}} checkout command to the clipboard.",
+                        "Failed to copy {term, select, mr {merge request} cr {change} other {pull request}} checkout command to the clipboard.",
                         { term: changeRequestTermKind(terminology) },
                       ),
                     }}
@@ -300,7 +301,7 @@ export function PullRequestDetailGhost({
                       failureMessage: msg("Failed to copy branch name to the clipboard."),
                     }}
                     copyLabel={gt(
-                      "Copy {term, select, mr {merge request} cr {change request} other {pull request}} branch",
+                      "Copy {term, select, mr {merge request} cr {change} other {pull request}} branch",
                       { term: changeRequestTermKind(terminology) },
                     )}
                     copiedLabel={gt("Branch name copied")}
@@ -489,7 +490,7 @@ export function PullRequestConversationGhost({
     <div
       role="status"
       aria-label={gt(
-        "Loading {term, select, mr {merge request} cr {change request} other {pull request}} conversation",
+        "Loading {term, select, mr {merge request} cr {change} other {pull request}} conversation",
         { term: changeRequestTermKind(terminology) },
       )}
       className="motion-safe:animate-skeleton space-y-4 py-2"

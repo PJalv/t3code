@@ -1,3 +1,4 @@
+import { T, useGT } from "gt-react";
 import {
   GerritTargetBranch,
   type EnvironmentId,
@@ -49,6 +50,7 @@ export function GerritDeliveryDialog({
   readonly onCompleted: () => void;
   readonly threadId?: ThreadId;
 }) {
+  const gt = useGT();
   const [targetBranch, setTargetBranch] = useState("");
   const [topic, setTopic] = useState("");
   const [reviewers, setReviewers] = useState("");
@@ -142,11 +144,11 @@ export function GerritDeliveryDialog({
         invalidate({ environmentId, input: {} }),
       ]);
       if (statusRefresh._tag !== "Success" || pullRequestRefresh._tag !== "Success") {
-        setError("Upload succeeded, but git status or reviews could not be refreshed.");
+        setError(gt("Upload succeeded, but git status or reviews could not be refreshed."));
       }
     } else {
       const cause = squashAtomCommandFailure(response);
-      setError(cause instanceof Error ? cause.message : "Could not upload the commit.");
+      setError(cause instanceof Error ? cause.message : gt("Could not upload the commit."));
     }
     setBusy(false);
   };
@@ -172,20 +174,26 @@ export function GerritDeliveryDialog({
     >
       <DialogPopup className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Upload commit for review</DialogTitle>
-          <DialogDescription>Upload HEAD as a new change or patch set to Gerrit.</DialogDescription>
+          <DialogTitle>
+            <T>Upload commit for review</T>
+          </DialogTitle>
+          <DialogDescription>
+            <T>Upload HEAD as a new change or patch set to Gerrit.</T>
+          </DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <div className="grid gap-3">
             {ready?.kind !== "ready" && expectedChange === null && result === null ? (
               <div className="grid gap-1">
-                <Label htmlFor={`${id}-branch`}>Destination branch for a new change</Label>
+                <Label htmlFor={`${id}-branch`}>
+                  <T>Destination branch for a new change</T>
+                </Label>
                 <Input
                   id={`${id}-branch`}
                   value={targetBranch}
                   disabled={busy}
                   onChange={(event) => setTargetBranch(event.target.value)}
-                  placeholder="Configured branch"
+                  placeholder={gt("Configured branch")}
                 />
               </div>
             ) : null}
@@ -195,50 +203,63 @@ export function GerritDeliveryDialog({
               </p>
             ) : context === null ? (
               <p role="status" className="text-sm text-muted-foreground">
-                Reading checkout context…
+                <T>Reading checkout context…</T>
               </p>
             ) : ready === null ? (
               <p role="alert" className="text-sm text-warning">
                 {context.kind === "blocked" || context.kind === "not-bound"
                   ? context.detail
-                  : "Checkout unavailable."}
+                  : gt("Checkout unavailable.")}
               </p>
             ) : (
               <>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg bg-card p-3 text-sm">
-                  <dt>Local branch</dt>
+                  <dt>
+                    <T>Local branch</T>
+                  </dt>
                   <dd className="font-mono">{ready.localBranch}</dd>
-                  <dt>HEAD</dt>
+                  <dt>
+                    <T>HEAD</T>
+                  </dt>
                   <dd>
                     <span className="font-mono">{ready.head.slice(0, 12)}</span> · {ready.subject}
                   </dd>
-                  <dt>Change-Id</dt>
+                  <dt>
+                    <T>Change-Id</T>
+                  </dt>
                   <dd className="break-all font-mono">
                     {ready.kind === "ready" ? ready.change.key.changeId : ready.key.changeId}
                   </dd>
-                  <dt>Target</dt>
+                  <dt>
+                    <T>Target</T>
+                  </dt>
                   <dd>
                     {ready.kind === "ready"
                       ? `${ready.change.key.project} #${ready.change.number} · ${ready.change.key.branch}`
-                      : `New change · ${ready.key.branch}`}
+                      : gt("New change · {branch}", { branch: ready.key.branch })}
                   </dd>
                 </dl>
                 {mismatch ? (
                   <p role="alert" className="text-sm text-warning">
-                    HEAD does not match the selected Gerrit change. Open the checkout for that
-                    change.
+                    <T>
+                      HEAD does not match the selected Gerrit change. Open the checkout for that
+                      change.
+                    </T>
                   </p>
                 ) : null}
                 {ready.files.length > 0 ? (
                   <p role="alert" className="text-sm text-warning">
-                    The checkout has {ready.files.length} uncommitted{" "}
-                    {ready.files.length === 1 ? "file" : "files"}. Commit or stash the changes
-                    before uploading.
+                    {gt(
+                      "The checkout has {count, plural, one {{count} uncommitted file} other {{count} uncommitted files}}. Commit or stash the changes before uploading.",
+                      { count: ready.files.length },
+                    )}
                   </p>
                 ) : sameCommit && ready.kind === "ready" ? (
                   <p role="status" className="text-sm text-muted-foreground">
-                    HEAD is already patch set {ready.change.revision.patchSet} of #
-                    {ready.change.number}. Amend or add a commit to upload a new patch set.
+                    {gt(
+                      "HEAD is already patch set {patchSet} of #{number}. Amend or add a commit to upload a new patch set.",
+                      { patchSet: ready.change.revision.patchSet, number: ready.change.number },
+                    )}
                   </p>
                 ) : null}
               </>
@@ -246,7 +267,9 @@ export function GerritDeliveryDialog({
             {result === null ? (
               <>
                 <div className="grid gap-1">
-                  <Label htmlFor={`${id}-topic`}>Topic (optional)</Label>
+                  <Label htmlFor={`${id}-topic`}>
+                    <T>Topic (optional)</T>
+                  </Label>
                   <Input
                     id={`${id}-topic`}
                     value={topic}
@@ -259,27 +282,31 @@ export function GerritDeliveryDialog({
                       topicValid ? "text-xs text-muted-foreground" : "text-xs text-warning"
                     }
                   >
-                    Topics cannot contain whitespace, % or , or start with -.
+                    <T>Topics cannot contain whitespace, % or , or start with -.</T>
                   </p>
                 </div>
                 <div className="grid gap-1">
-                  <Label htmlFor={`${id}-reviewers`}>Reviewers (optional)</Label>
+                  <Label htmlFor={`${id}-reviewers`}>
+                    <T>Reviewers (optional)</T>
+                  </Label>
                   <Input
                     id={`${id}-reviewers`}
                     value={reviewers}
                     disabled={busy}
                     onChange={(event) => setReviewers(event.target.value)}
-                    placeholder="Accounts or email addresses, separated by commas"
+                    placeholder={gt("Accounts or email addresses, separated by commas")}
                   />
                 </div>
                 <div className="grid gap-1">
-                  <Label htmlFor={`${id}-cc`}>CC (optional)</Label>
+                  <Label htmlFor={`${id}-cc`}>
+                    <T>CC (optional)</T>
+                  </Label>
                   <Input
                     id={`${id}-cc`}
                     value={cc}
                     disabled={busy}
                     onChange={(event) => setCc(event.target.value)}
-                    placeholder="Accounts or email addresses, separated by commas"
+                    placeholder={gt("Accounts or email addresses, separated by commas")}
                   />
                 </div>
                 <div className="flex flex-wrap gap-4">
@@ -290,7 +317,9 @@ export function GerritDeliveryDialog({
                       disabled={busy}
                       onCheckedChange={(checked) => setWip(checked === true)}
                     />
-                    <Label htmlFor={`${id}-wip`}>Mark work in progress</Label>
+                    <Label htmlFor={`${id}-wip`}>
+                      <T>Mark work in progress</T>
+                    </Label>
                   </div>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -299,24 +328,29 @@ export function GerritDeliveryDialog({
                       disabled={busy}
                       onCheckedChange={(checked) => setPrivateChange(checked === true)}
                     />
-                    <Label htmlFor={`${id}-private`}>Mark private</Label>
+                    <Label htmlFor={`${id}-private`}>
+                      <T>Mark private</T>
+                    </Label>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Unchecked options leave existing WIP and private flags unchanged.
+                  <T>Unchecked options leave existing WIP and private flags unchanged.</T>
                 </p>
               </>
             ) : (
               <div role="status" className="text-sm">
                 <p>
-                  Upload complete
+                  {gt("Upload complete.")}
                   {(result.result.changeNumber ?? result.change?.number)
-                    ? ` · Change #${result.result.changeNumber ?? result.change?.number}`
-                    : ""}
+                    ? gt(" Change #{number}", {
+                        number: result.result.changeNumber ?? result.change?.number,
+                      })
+                    : null}
                   {(result.result.patchSet ?? result.change?.currentPatchSet)
-                    ? ` · Patch set ${result.result.patchSet ?? result.change?.currentPatchSet}`
-                    : ""}
-                  .
+                    ? gt(" Patch set {number}", {
+                        number: result.result.patchSet ?? result.change?.currentPatchSet,
+                      })
+                    : null}
                 </p>
                 {result.result.url ? (
                   <a
@@ -325,7 +359,7 @@ export function GerritDeliveryDialog({
                     rel="noreferrer"
                     className="underline"
                   >
-                    Open change
+                    <T>Open change</T>
                   </a>
                 ) : null}
                 {result.rereadError ? <p>{result.rereadError}</p> : null}
@@ -341,11 +375,13 @@ export function GerritDeliveryDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="outline" size="sm" onClick={close} disabled={busy}>
-            {result ? "Done" : "Cancel"}
+            {result ? gt("Done", { $context: "dismiss dialog, verb" }) : gt("Cancel")}
           </Button>
           {result === null ? (
             <Button size="sm" onClick={() => void submit()} disabled={!canUpload}>
-              {busy ? "Uploading…" : "Upload"}
+              {busy
+                ? gt("Uploading…")
+                : gt("Upload", { $context: "upload a commit for Gerrit review, verb" })}
             </Button>
           ) : null}
         </DialogFooter>

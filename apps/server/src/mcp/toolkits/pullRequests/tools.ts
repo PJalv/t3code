@@ -4,6 +4,9 @@ import {
   OrchestratorMcpFailure,
   PositiveInt,
   PullRequestCheck,
+  PullRequestGerritAnchor,
+  PullRequestGerritDetail,
+  PullRequestDiffSide,
   PullRequestCommentKind,
   PullRequestChecksState,
   PullRequestInvolvement,
@@ -499,6 +502,9 @@ export const PullRequestReadSection = Schema.Literals([
 export type PullRequestReadSection = typeof PullRequestReadSection.Type;
 
 const ReadComment = Schema.Struct({
+  id: Schema.String,
+  gerrit: Schema.optional(PullRequestGerritAnchor),
+  isDraft: Schema.optional(Schema.Boolean),
   author: Schema.NullOr(Schema.String),
   body: Schema.String,
   createdAt: Schema.String,
@@ -508,6 +514,9 @@ export const ReadPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
   summary: Schema.optional(
     Schema.Struct({
+      gerrit: Schema.optional(PullRequestGerritDetail),
+      gerritTruncated: Schema.optional(Schema.Boolean),
+      next: Schema.optional(Schema.String),
       title: Schema.String,
       body: Schema.String,
       state: PullRequestState,
@@ -532,7 +541,6 @@ export const ReadPullRequestResult = Schema.Struct({
       comments: Schema.Array(
         Schema.Struct({
           ...ReadComment.fields,
-          id: Schema.String,
           kind: PullRequestCommentKind,
           path: Schema.NullOr(Schema.String),
           reviewState: Schema.NullOr(Schema.String),
@@ -543,6 +551,10 @@ export const ReadPullRequestResult = Schema.Struct({
           id: Schema.String,
           path: Schema.String,
           line: Schema.NullOr(Schema.Int),
+          side: PullRequestDiffSide,
+          gerrit: Schema.optional(PullRequestGerritAnchor),
+          isDraft: Schema.optional(Schema.Boolean),
+          canResolve: Schema.optional(Schema.Boolean),
           isResolved: Schema.Boolean,
           isOutdated: Schema.Boolean,
           comments: Schema.Array(ReadComment),
@@ -610,7 +622,8 @@ export const MergePullRequestResult = Schema.Struct({
 export type MergePullRequestResult = typeof MergePullRequestResult.Type;
 
 const ReadPullRequestTool = Tool.make("pull_request_read", {
-  description: "Read a PR's state, checks, review comments, or diff. Use instead of gh or cafe.",
+  description:
+    "Read a PR's state, checks, published review comments, or diff. Private drafts are excluded. For Gerrit patch-set comparisons or explicit private draft reads, use read_gerrit. Use instead of gh or cafe.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     sections: Schema.optional(
@@ -654,7 +667,8 @@ const ListPullRequestsTool = Tool.make("pull_request_list", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const CreatePullRequestTool = Tool.make("pull_request_create", {
-  description: "Open a PR from this thread's pushed branch and link it, or return its open PR.",
+  description:
+    "Open a PR from this thread's pushed branch and link it, or return its open PR. Gerrit: use upload_gerrit to create a change or upload a patch set, not branch PR creation.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     title: TrimmedNonEmptyString,
@@ -680,7 +694,7 @@ const UpdateNames = Schema.Array(TrimmedNonEmptyString).check(
 
 const UpdatePullRequestTool = Tool.make("pull_request_update", {
   description:
-    "Edit a PR's title, body, labels, or reviewers, close or reopen it, or set ready (false: back to draft).",
+    "Edit a PR's title, body, labels, or reviewers, close or reopen it, or set ready (false: back to draft). Gerrit supports reviewers, ready/WIP, close (abandon), and reopen (restore), subject to permissions. For commit messages or label votes, use act_gerrit; for new patch sets, upload_gerrit.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     title: Schema.optional(TrimmedNonEmptyString),
@@ -706,7 +720,7 @@ const UpdatePullRequestTool = Tool.make("pull_request_update", {
 
 const RespondToPullRequestTool = Tool.make("pull_request_respond", {
   description:
-    "Reply to, resolve, or reopen a review thread. Without reviewThreadId, comment on the PR.",
+    "Reply to, resolve, or reopen a review thread. Without reviewThreadId, comment on the PR. Gerrit thread replies and resolution: read_gerrit for individual native comment IDs and anchors, then act_gerrit.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     reviewThreadId: Schema.optional(TrimmedNonEmptyString),
@@ -739,7 +753,7 @@ export type ReviewLineComment = typeof ReviewLineComment.Type;
 
 const ReviewPullRequestTool = Tool.make("pull_request_review", {
   description:
-    "Submit a review: approve, request changes, or comment, with optional line comments.",
+    "Submit a review: approve, request changes, or comment, with optional line comments. Gerrit: read_gerrit for permitted label scores and native anchors, then act_gerrit for review; generic verdicts are not Gerrit votes.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     verdict: PullRequestReviewVerdict,
@@ -758,7 +772,8 @@ const ReviewPullRequestTool = Tool.make("pull_request_review", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const MergePullRequestTool = Tool.make("pull_request_merge", {
-  description: "Merge a PR. Refuses if the head moved from expectedHeadSha (summary.headSha).",
+  description:
+    "Merge a PR. Refuses if the head moved from expectedHeadSha (summary.headSha). Gerrit: read_gerrit for submit requirements, then act_gerrit to submit. Generic merge strategies, stacks, and auto-merge do not apply.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     expectedHeadSha: TrimmedNonEmptyString,
@@ -813,7 +828,7 @@ export type RerunChecksResult = typeof RerunChecksResult.Type;
 
 const CheckLogsTool = Tool.make("ci_logs", {
   description:
-    "Read the tail of a PR's failing check logs, or one named check's. Use instead of gh run view.",
+    "Read the tail of a change request's failing check logs, or one named check's, when supported by its integration. Gerrit exposes configured Checks statuses and URLs only; use the check URL or configured CI system for logs.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     check: Schema.optional(TrimmedNonEmptyString),
@@ -835,7 +850,8 @@ const CheckLogsTool = Tool.make("ci_logs", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const RerunChecksTool = Tool.make("ci_rerun", {
-  description: "Re-run a PR's failing checks, or one named check.",
+  description:
+    "Re-run a change request's failing checks, or one named check, when supported by its integration. Gerrit reruns are not supported here; use the check URL and configured CI system.",
   parameters: Schema.Struct({
     ...ThreadPullRequestInput.fields,
     check: Schema.optional(TrimmedNonEmptyString),

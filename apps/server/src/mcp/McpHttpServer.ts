@@ -88,6 +88,7 @@ import * as IssuesHandlers from "./toolkits/issues/handlers.ts";
 import { IssuesToolkit } from "./toolkits/issues/tools.ts";
 import { GerritDirectToolkit } from "./toolkits/gerritDirect/tools.ts";
 import * as GerritDirectHandlers from "./toolkits/gerritDirect/handlers.ts";
+import * as GerritWatchCompletion from "../sourceControl/GerritWatchCompletion.ts";
 import * as GerritTarget from "../sourceControl/GerritTarget.ts";
 import * as GerritBranchReviews from "../sourceControl/gerritBranchReviews.ts";
 import * as GerritRemotes from "@t3tools/source-control-gerrit/server/GerritRemotes";
@@ -1378,6 +1379,7 @@ const layerGerritDirectToolkit = toolkitRegistration(
   GerritDirectToolkit,
   GerritDirectHandlers.layer,
 ).pipe(
+  Layer.provide(GerritWatchCompletion.layer),
   Layer.provide(GerritDirectRead.layer),
   Layer.provide(GerritDirectService.layer),
   Layer.provide(GerritDirectUpload.layer),
