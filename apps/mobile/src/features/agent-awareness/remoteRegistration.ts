@@ -3,6 +3,7 @@ import {
   configureAndroidAgentNotifications,
   clearAndroidAgentNotifications,
 } from "./androidNotifications";
+import { restoreLocalAgentNotifications } from "./localNotifications";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Clock from "effect/Clock";
@@ -219,6 +220,7 @@ export function setAgentAwarenessRelayTokenProvider(
   relayTokenProviderIdentity = provider ? (identity ?? null) : null;
   if (!provider) {
     clearAndroidAgentNotifications();
+    void restoreLocalAgentNotifications().catch(() => {});
     pushTokenSubscription?.remove();
     pushTokenSubscription = null;
     appStateSubscription?.remove();
