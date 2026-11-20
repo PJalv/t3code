@@ -3,6 +3,7 @@ import { SNAP_SHOT_MODIFIERS, type SnapShotModifier } from "@t3tools/contracts";
 
 import { loadWindowsForegroundApi } from "../electron/WindowsForeground.ts";
 import { WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS } from "./snapShot.ts";
+import { sendWorkerMessage } from "./WorkerIpc.ts";
 
 const POLL_INTERVAL_MS = 50;
 
@@ -15,13 +16,11 @@ const [left, right] = WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS[requested as SnapShotMo
 async function poll() {
   const api = await loadWindowsForegroundApi();
   let active = false;
-  process.send?.("ready");
+  sendWorkerMessage("ready");
   const timer = setInterval(() => {
     const pressed = api.isKeyDown(left) && api.isKeyDown(right);
     if (pressed && !active) {
-      try {
-        process.send?.("trigger");
-      } catch {}
+      sendWorkerMessage("trigger");
     }
     active = pressed;
   }, POLL_INTERVAL_MS);
