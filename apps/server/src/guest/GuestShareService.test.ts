@@ -343,6 +343,81 @@ it.effect("closes an open guest stream when T3 Connect stops serving the link's 
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("uses the configured origin without Connect and gives it precedence over Connect", () =>
+  Effect.gen(function* () {
+    const { guestShares } = yield* shareThread;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ guestLinkBaseUrl: "HTTPS://GUEST.example:8443/" });
+    const { url, share } = yield* guestShares.create({ threadId });
+    assert.isTrue(url.startsWith("https://guest.example:8443/guest#"));
+    assert.equal(share.host, "guest.example:8443");
+    yield* Ref.set(hostname, null);
+    const credential = url.slice(url.indexOf("#") + 1);
+    const { token, shareId } = yield* guestShares.redeem({ credential, name: "Sam" });
+    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(token))));
+    yield* guestShares.submit(token, { shareId, text: "Hello from the custom endpoint" }, []);
+    const collecting = yield* Stream.runCollect(yield* guestShares.stream(token)).pipe(
+      Effect.forkChild,
+    );
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://GUEST.example:8443/" });
+    assert.isTrue(Exit.isSuccess(yield* Effect.exit(guestShares.check(token))));
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://guest.example:9443" });
+    yield* TestClock.adjust("30 seconds");
+    const received = Array.from(yield* Fiber.join(collecting));
+    assert.notInclude(
+      received.map((event) => event.type),
+      "ended",
+    );
+    assert.equal((yield* Effect.flip(guestShares.check(token))).reason, "inactive");
+    assert.equal((yield* Effect.flip(guestShares.stream(token))).reason, "inactive");
+    assert.equal(
+      (yield* Effect.flip(guestShares.submit(token, { shareId, text: "Blocked" }, []))).reason,
+      "inactive",
+    );
+    assert.equal(
+      (yield* Effect.flip(guestShares.redeem({ credential, name: "Eve" }))).reason,
+      "inactive",
+    );
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("falls back to Connect when the configured origin is cleared", () =>
+  Effect.gen(function* () {
+    const { guestShares } = yield* shareThread;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://guest.example:8443" });
+    const custom = yield* guestShares.create({ threadId });
+    const credential = custom.url.slice(custom.url.indexOf("#") + 1);
+    const { token } = yield* guestShares.redeem({ credential, name: "Sam" });
+    yield* Ref.set(hostname, null);
+    yield* settings.updateSettings({ guestLinkBaseUrl: null });
+    assert.equal(
+      (yield* Effect.flip(guestShares.create({ threadId }))).reason,
+      "connect_unavailable",
+    );
+    yield* Ref.set(hostname, "env.t3.test");
+    const fallback = yield* guestShares.create({ threadId });
+    assert.isTrue(fallback.url.startsWith("https://env.t3.test/guest#"));
+    assert.equal((yield* Effect.flip(guestShares.check(token))).reason, "inactive");
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("refuses a Connect invite after selecting a custom endpoint", () =>
+  Effect.gen(function* () {
+    const { guestShares, credential } = yield* shareThread;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ guestLinkBaseUrl: "https://guest.example" });
+    assert.equal(
+      (yield* Effect.flip(guestShares.redeem({ credential, name: "Sam" }))).reason,
+      "inactive",
+    );
+    yield* settings.updateSettings({ guestLinkBaseUrl: null });
+    assert.isTrue(
+      Exit.isSuccess(yield* Effect.exit(guestShares.redeem({ credential, name: "Sam" }))),
+    );
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("refuses new links and every guest request while the beta is off", () =>
   Effect.gen(function* () {
     const { guestShares, credential } = yield* shareThread;
