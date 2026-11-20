@@ -215,6 +215,35 @@ describe("GerritDirectRead", () => {
       ).toBe(true);
     }).pipe(Effect.scoped),
   );
+  it.effect("resolves a change URL without the checkout", () =>
+    Effect.gen(function* () {
+      const inputs: Array<GerritTarget.TargetInput> = [];
+      const service = yield* Layer.build(
+        GerritDirectRead.layer.pipe(
+          Layer.provide(
+            Layer.merge(
+              dependencies,
+              Layer.succeed(GerritTarget.GerritTarget, {
+                resolve: (input: GerritTarget.TargetInput) => {
+                  inputs.push(input);
+                  return Effect.succeed({
+                    server: "https://review.example/",
+                    project: "team/repo",
+                    number: 12,
+                  });
+                },
+                credentials: () => Effect.succeed({}),
+              } as never),
+            ),
+          ),
+        ),
+      ).pipe(Effect.map((context) => Context.get(context, GerritDirectRead.GerritDirectRead)));
+      const url = "https://review.example/c/team/repo/+/12";
+      yield* service.read({ cwd: "/repo", request: { mode: "change", target: { url } } });
+      yield* service.read({ cwd: "/repo", request: { mode: "change", target: { number: 12 } } });
+      expect(inputs).toEqual([{ url }, { cwd: "/repo", number: 12 }]);
+    }).pipe(Effect.scoped),
+  );
   it.effect("renders a file diff", () =>
     Effect.gen(function* () {
       const service = yield* GerritDirectRead.GerritDirectRead;
