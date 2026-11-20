@@ -3,7 +3,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import {
   gerritConnectionConfigFromFields,
   gerritCredentialSaveMode,
-  gerritTerminalGitCommandTemplate,
 } from "@t3tools/client-runtime/state/source-control";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
@@ -14,7 +13,6 @@ import { Button } from "../../components/ui/Button";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 
 export function GerritConnectionSettings({
   environmentId,
@@ -40,7 +38,11 @@ export function GerritConnectionSettings({
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  // A result shows beside the connection it is about; null is the form's own save result.
+  const [notice, setNotice] = useState<{
+    readonly installation: string | null;
+    readonly text: string;
+  } | null>(null);
   const savedConnections =
     connections.isSuccess && !connections.isPending ? (connections.data ?? []) : [];
   const config = gerritConnectionConfigFromFields(
@@ -118,9 +120,7 @@ export function GerritConnectionSettings({
               setChecksProfile(connection.config.checksProfile ?? "none");
               setUsername("");
               setToken("");
-              setMessage(
-                gt("Leave both HTTP credential fields blank to keep the saved credentials."),
-              );
+              setNotice(null);
             }}
           />
           <Button
@@ -132,13 +132,15 @@ export function GerritConnectionSettings({
                 environmentId,
                 input: { installation: connection.config.installation },
               });
-              setMessage(
-                result._tag === "Success"
-                  ? gt("Verified account {account}. Deployment compatibility is unverified.", {
-                      account: result.value.account._account_id,
-                    })
-                  : gt("Connection test failed. Check the server URL and credentials."),
-              );
+              setNotice({
+                installation: connection.config.installation,
+                text:
+                  result._tag === "Success"
+                    ? gt("Verified account {account}. Deployment compatibility is unverified.", {
+                        account: result.value.account._account_id,
+                      })
+                    : gt("Connection test failed. Check the server URL and credentials."),
+              });
               setBusy(false);
             }}
           />
@@ -151,11 +153,13 @@ export function GerritConnectionSettings({
                 environmentId,
                 input: { installation: connection.config.installation },
               });
-              setMessage(
-                result._tag === "Success"
-                  ? gt("Credentials removed.")
-                  : gt("Could not remove credentials."),
-              );
+              setNotice({
+                installation: connection.config.installation,
+                text:
+                  result._tag === "Success"
+                    ? gt("Credentials removed.")
+                    : gt("Could not remove credentials."),
+              });
               setBusy(false);
               connections.refresh();
             }}
@@ -170,46 +174,22 @@ export function GerritConnectionSettings({
                 environmentId,
                 input: { installation: connection.config.installation },
               });
-              setMessage(
+              setNotice(
                 result._tag === "Success"
-                  ? gt("Connection removed.")
-                  : gt("Could not remove connection."),
+                  ? { installation: null, text: gt("Connection removed.") }
+                  : {
+                      installation: connection.config.installation,
+                      text: gt("Could not remove connection."),
+                    },
               );
               setBusy(false);
               connections.refresh();
             }}
           />
-          {connection.credentialPresent &&
-          gerritTerminalGitCommandTemplate(connection.config.installation, environmentId) ? (
-            <View className="gap-2">
-              <Text>
-                <T>Copy saved credential to configured Git</T>
-              </Text>
-              <Text className="text-sm text-foreground-muted">
-                <T>
-                  This is an editable command template, not a ready-to-run command. Replace the
-                  launcher and T3 home from the server’s launch configuration. Packaged install: use
-                  its absolute CLI path. Dev server: use node and that checkout’s
-                  apps/server/src/bin.ts; the home is normally its .t3 directory unless --home-dir
-                  overrides it. Do not use this phone’s installation or home.
-                </T>
-              </Text>
-              <Text className="text-sm text-foreground-muted">
-                <T>
-                  Run in the HTTPS checkout on the T3 server machine as its OS user. Linux libsecret
-                  only, already configured with global credential.useHttpPath=true and an exact
-                  repository username. No Git config or remote changes. Re-run after password
-                  rotation. Removing the T3 connection does not remove the keyring entry.
-                </T>
-              </Text>
-              <GerritCommandTemplateCopy
-                key={environmentId}
-                command={gerritTerminalGitCommandTemplate(
-                  connection.config.installation,
-                  environmentId,
-                )!}
-              />
-            </View>
+          {notice?.installation === connection.config.installation ? (
+            <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
+              {notice.text}
+            </Text>
           ) : null}
         </View>
       ))}
@@ -267,55 +247,22 @@ export function GerritConnectionSettings({
           });
           setToken("");
           setBusy(false);
-          setMessage(
-            result._tag === "Success"
-              ? gt("Saved. Test the connection to verify the account.")
-              : gt("Could not save connection."),
-          );
+          setNotice({
+            installation: null,
+            text:
+              result._tag === "Success"
+                ? gt("Saved. Test the connection to verify the account.")
+                : gt("Could not save connection."),
+          });
           connections.refresh();
         }}
       />
-      {message ? (
-        <Text accessibilityRole="text" className="text-sm text-foreground-muted">
-          {message}
+      {notice?.installation === null ? (
+        <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
+          {notice.text}
         </Text>
       ) : null}
       <GerritSigningPassphraseSettings environmentId={environmentId} />
-    </View>
-  );
-}
-
-function GerritCommandTemplateCopy({ command }: { readonly command: string }) {
-  const gt = useGT();
-  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
-  return (
-    <View className="gap-2">
-      <Button
-        label={gt("Copy command template")}
-        disabled={status === "copying"}
-        onPress={async () => {
-          setStatus("copying");
-          const copied = await tryCopyTextWithHaptic(command, {
-            target: "terminal Git command template",
-          });
-          setStatus(copied ? "copied" : "error");
-        }}
-      />
-      {status === "copying" || status === "copied" ? (
-        <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
-          {status === "copying" ? gt("Copying command template…") : gt("Command template copied.")}
-        </Text>
-      ) : null}
-      {status === "error" ? (
-        <>
-          <Text accessibilityRole="alert">
-            <T>Could not copy the command template. Select and copy it below, or try again.</T>
-          </Text>
-          <Text selectable accessibilityLabel={gt("Command template")}>
-            {command}
-          </Text>
-        </>
-      ) : null}
     </View>
   );
 }
