@@ -3,7 +3,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import {
   gerritConnectionConfigFromFields,
   gerritCredentialSaveMode,
-  gerritTerminalGitCommandTemplate,
 } from "@t3tools/client-runtime/state/source-control";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
@@ -13,11 +12,9 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
 import { SettingsRow } from "./settingsLayout";
 import { SecretInput } from "./SecretInput";
 import { GerritHookSetup } from "./GerritHookSetup";
-import { namedClipboardTarget, useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export function GerritConnectionSettings({
   environmentId,
@@ -48,7 +45,11 @@ export function GerritConnectionSettings({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  // A result shows beside the connection it is about; null is the form's own save result.
+  const [notice, setNotice] = useState<{
+    readonly installation: string | null;
+    readonly text: string;
+  } | null>(null);
   const savedConnections =
     connections.isSuccess && !connections.isPending ? (connections.data ?? []) : [];
   const config = gerritConnectionConfigFromFields(
@@ -133,9 +134,7 @@ export function GerritConnectionSettings({
                 setChecksProfile(connection.config.checksProfile ?? "none");
                 setUsername("");
                 setPassword("");
-                setMessage(
-                  gt("Leave both HTTP credential fields blank to keep the saved credentials."),
-                );
+                setNotice(null);
               }}
             >
               <T>Edit</T>
@@ -150,18 +149,20 @@ export function GerritConnectionSettings({
                   environmentId,
                   input: { installation: connection.config.installation },
                 });
-                setMessage(
-                  result._tag === "Success"
-                    ? result.value.version.kind === "observed"
-                      ? gt("Verified account {account} · Gerrit {version}", {
-                          account: result.value.account._account_id,
-                          version: result.value.version.value,
-                        })
-                      : gt("Verified account {account} · Gerrit version unknown", {
-                          account: result.value.account._account_id,
-                        })
-                    : gt("Connection test failed. Check the server URL and credentials."),
-                );
+                setNotice({
+                  installation: connection.config.installation,
+                  text:
+                    result._tag === "Success"
+                      ? result.value.version.kind === "observed"
+                        ? gt("Verified account {account} · Gerrit {version}", {
+                            account: result.value.account._account_id,
+                            version: result.value.version.value,
+                          })
+                        : gt("Verified account {account} · Gerrit version unknown", {
+                            account: result.value.account._account_id,
+                          })
+                      : gt("Connection test failed. Check the server URL and credentials."),
+                });
                 setBusy(false);
               }}
             >
@@ -177,11 +178,13 @@ export function GerritConnectionSettings({
                   environmentId,
                   input: { installation: connection.config.installation },
                 });
-                setMessage(
-                  result._tag === "Success"
-                    ? gt("Credentials removed.")
-                    : gt("Could not remove credentials."),
-                );
+                setNotice({
+                  installation: connection.config.installation,
+                  text:
+                    result._tag === "Success"
+                      ? gt("Credentials removed.")
+                      : gt("Could not remove credentials."),
+                });
                 setBusy(false);
                 refresh();
               }}
@@ -198,10 +201,13 @@ export function GerritConnectionSettings({
                   environmentId,
                   input: { installation: connection.config.installation },
                 });
-                setMessage(
+                setNotice(
                   result._tag === "Success"
-                    ? gt("Connection removed.")
-                    : gt("Could not remove connection."),
+                    ? { installation: null, text: gt("Connection removed.") }
+                    : {
+                        installation: connection.config.installation,
+                        text: gt("Could not remove connection."),
+                      },
                 );
                 setBusy(false);
                 refresh();
@@ -210,39 +216,10 @@ export function GerritConnectionSettings({
               <T>Remove connection</T>
             </Button>
           </div>
-          {connection.credentialPresent &&
-          gerritTerminalGitCommandTemplate(connection.config.installation, environmentId) ? (
-            <div className="grid gap-2">
-              <p className="text-sm font-medium">
-                <T>Copy saved credential to configured Git</T>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                <T>
-                  Copy an editable command template, not a ready-to-run command. Replace the
-                  launcher and T3 home placeholders using the server’s launch configuration. For a
-                  packaged install, use its absolute CLI path; do not assume this client’s t3
-                  command is correct. For a dev server, use node and that checkout’s
-                  apps/server/src/bin.ts; its home is normally the checkout’s .t3 directory unless
-                  --home-dir overrides it.
-                </T>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                <T>
-                  Run inside the HTTPS checkout on this environment’s T3 server machine as its OS
-                  user, not on a remote client. Linux libsecret only, already configured with global
-                  credential.useHttpPath=true and an exact repository username. The command copies
-                  the saved credential without changing Git config or remotes. Re-run after password
-                  rotation. Removing this connection does not remove the keyring entry.
-                </T>
-              </p>
-              <GerritCommandTemplateCopy
-                key={environmentId}
-                command={gerritTerminalGitCommandTemplate(
-                  connection.config.installation,
-                  environmentId,
-                )!}
-              />
-            </div>
+          {notice?.installation === connection.config.installation ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              {notice.text}
+            </p>
           ) : null}
         </div>
       ))}
@@ -282,11 +259,13 @@ export function GerritConnectionSettings({
           });
           setPassword("");
           setBusy(false);
-          setMessage(
-            result._tag === "Success"
-              ? gt("Saved. Test the connection to verify the current account.")
-              : gt("Could not save the connection."),
-          );
+          setNotice({
+            installation: null,
+            text:
+              result._tag === "Success"
+                ? gt("Saved. Test the connection to verify the current account.")
+                : gt("Could not save the connection."),
+          });
           if (result._tag === "Success") refresh();
         }}
       >
@@ -417,55 +396,12 @@ export function GerritConnectionSettings({
           </div>
         </fieldset>
       </form>
-      {message ? (
-        <p role="status" className="text-xs text-muted-foreground">
-          {message}
+      {notice?.installation === null ? (
+        <p role="status" className="px-4 text-xs text-muted-foreground">
+          {notice.text}
         </p>
       ) : null}
       <GerritSigningPassphraseSettings environmentId={environmentId} />
-    </div>
-  );
-}
-
-function GerritCommandTemplateCopy({ command }: { readonly command: string }) {
-  const gt = useGT();
-  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
-  const { copyToClipboard } = useCopyToClipboard({
-    target: namedClipboardTarget(gt("terminal Git command template")),
-    onCopy: () => setStatus("copied"),
-    onError: () => setStatus("error"),
-  });
-  return (
-    <div className="grid justify-items-start gap-2">
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={status === "copying"}
-        onClick={() => {
-          setStatus("copying");
-          copyToClipboard(command, undefined);
-        }}
-      >
-        <T>Copy command template</T>
-      </Button>
-      {status === "copying" || status === "copied" ? (
-        <p role="status" className="text-xs text-muted-foreground">
-          {status === "copying" ? gt("Copying command template…") : gt("Command template copied.")}
-        </p>
-      ) : null}
-      {status === "error" ? (
-        <>
-          <p role="alert" className="text-xs text-destructive">
-            <T>Could not copy the command template. Select and copy it below, or try again.</T>
-          </p>
-          <Textarea
-            aria-label={gt("Command template")}
-            readOnly
-            value={command}
-            onFocus={(event) => event.currentTarget.select()}
-          />
-        </>
-      ) : null}
     </div>
   );
 }
