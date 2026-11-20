@@ -165,10 +165,16 @@ cannot safely infer its project.
 
 #### Copy a saved credential to configured terminal Git
 
-Saving HTTP credentials does not sync them to terminal Git. On the saved connection, choose
-**Copy saved credential to configured Git → Copy command template**. This is not a ready-to-run
-command: replace the launcher and home placeholders first. Run it inside the HTTPS checkout on the
-**T3 server machine**, as the server's OS user, not on a remote client. It targets `origin`; use
+Saving HTTP credentials does not sync them to terminal Git. To copy one, run this inside the HTTPS
+checkout on the **T3 server machine**, as the server's OS user, not on a remote client:
+
+```sh
+'<T3-LAUNCHER>' gerrit copy-terminal-credential --base-dir '<T3-HOME>' \
+  --installation 'https://review.example.com/' --environment-id '<ENVIRONMENT-ID>'
+```
+
+Replace the launcher and home as described below. The environment ID is in
+`<T3-HOME>/userdata/environment-id`. It targets `origin`; use
 `--remote <name>` for another remote. It copies only this repository/account credential through stdin
 to an already configured secure helper. It does not contact Gerrit or change Git configuration or remotes.
 
@@ -185,8 +191,8 @@ Identify the launcher and home from the server's launch command or service confi
   Use the same Node installation as the dev server. Keep the working directory in the target Git
   checkout, not the T3 source checkout.
 
-The home is the **parent of `userdata`**, not `userdata` itself. Verify the selected home by comparing
-`userdata/environment-id` with the template's `--environment-id`; this ID is not a secret. Do not
+The home is the **parent of `userdata`**, not `userdata` itself. Its `userdata/environment-id` gives
+the `--environment-id`; this ID is not a secret. Do not
 inspect the secrets directory to locate the home. Quote paths with spaces; in POSIX single-quoted
 arguments, spell an embedded apostrophe as `'\''`. The command rejects a different environment ID.
 
