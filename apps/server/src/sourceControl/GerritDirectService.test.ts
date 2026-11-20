@@ -239,7 +239,7 @@ it.effect("rejects ambiguous checkout remotes", () => {
     expect(f.writes).toHaveLength(0);
   }).pipe(Effect.provide(f.layer));
 });
-it.effect("uploads a new change to the matched remote", () => {
+it.effect("plans and then uploads a new change to the matched remote", () => {
   const f = fixture({ realUpload: true });
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -253,10 +253,29 @@ it.effect("uploads a new change to the matched remote", () => {
     git("init", "--initial-branch=main");
     git("config", "user.name", "Fixture");
     git("config", "user.email", "fixture@example.invalid");
-    git("commit", "--allow-empty", "-m", `Subject\n\nChange-Id: I${"a".repeat(40)}`);
+    git("commit", "--allow-empty", "-m", "Base");
     git("init", "--bare", "receiver");
     git("remote", "add", "remote0", `${cwd}/receiver`);
+    git("push", "remote0", "HEAD:refs/heads/main");
+    git("fetch", "remote0");
+    git("commit", "--allow-empty", "-m", `Subject\n\nChange-Id: I${"a".repeat(40)}`);
     const service = yield* Direct.GerritDirectService;
+    const plan = yield* service.planUpload({ cwd, upload: { kind: "new", branch: "main" } });
+    expect(plan).toEqual({
+      server,
+      project: "repo",
+      kind: "new",
+      remote: "remote0",
+      branch: "main",
+      commits: [
+        {
+          sha: git("rev-parse", "--short=10", "HEAD").trim(),
+          subject: "Subject",
+          changeId: `I${"a".repeat(40)}`,
+        },
+      ],
+    });
+    expect(git("--git-dir=receiver", "for-each-ref", "refs/for")).toBe("");
     const result = yield* service.upload({ cwd, upload: { kind: "new", branch: "main" } });
     expect(result).toEqual({ result: { pushed: true }, change: null });
     expect(git("--git-dir=receiver", "for-each-ref", "--format=%(refname)")).toContain(

@@ -41,9 +41,12 @@ const fixture = Effect.fn("GerritDirectUpload.test.fixture")(function* () {
   run("init", "--initial-branch=main");
   run("config", "user.name", "Fixture");
   run("config", "user.email", "fixture@example.invalid");
-  run("commit", "--allow-empty", "-m", `Subject\n\nChange-Id: ${id}`);
+  run("commit", "--allow-empty", "-m", "Base");
   run("init", "--bare", "receiver");
   run("remote", "add", "origin", `${cwd}/receiver`);
+  run("push", "origin", "HEAD:refs/heads/main");
+  run("fetch", "origin");
+  run("commit", "--allow-empty", "-m", `Subject\n\nChange-Id: ${id}`);
   yield* fs.writeFileString(
     `${cwd}/receiver/hooks/pre-receive`,
     "#!/bin/sh\necho 'https://review.example/c/project/+/123/2' >&2\n",
@@ -97,7 +100,7 @@ it.effect("uploads a matching patch set and rejects a mismatched Change-Id befor
       })
       .pipe(Effect.flip);
     expect(error.reason).toBe("change-id-mismatch");
-    expect(f.run("--git-dir=receiver", "for-each-ref")).toBe("");
+    expect(f.run("--git-dir=receiver", "for-each-ref", "refs/for")).toBe("");
     const result = yield* service.upload({
       cwd: f.cwd,
       kind: "patch-set",
@@ -107,6 +110,31 @@ it.effect("uploads a matching patch set and rejects a mismatched Change-Id befor
     expect(
       f.run("--git-dir=receiver", "rev-parse", "refs/for/main%no-publish-comments").trim(),
     ).toBe(f.run("rev-parse", "HEAD").trim());
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("checks every commit the push would send, not just the tip", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture();
+    const service = yield* Direct.GerritDirectUpload;
+    f.run("commit", "--allow-empty", "-m", "No footer");
+    const bare = f.run("rev-parse", "--short=10", "HEAD").trim();
+    f.run("commit", "--allow-empty", "-m", `Tip\n\nChange-Id: I${"c".repeat(40)}`);
+    const error = yield* Effect.flip(service.upload({ cwd: f.cwd, kind: "new", branch: "main" }));
+    expect(error.reason).toBe("change-id");
+    expect(error.message).toContain(bare);
+    expect(f.run("--git-dir=receiver", "for-each-ref", "refs/for")).toBe("");
+    const plan = yield* service.plan({ cwd: f.cwd, kind: "new", branch: "main" });
+    expect(plan.commits.map((commit) => [commit.subject, commit.changeId])).toEqual([
+      ["Tip", `I${"c".repeat(40)}`],
+      ["No footer", null],
+      ["Subject", id],
+    ]);
+    expect(plan.refusal).toContain(bare);
+    const missing = yield* Effect.flip(
+      service.upload({ cwd: f.cwd, kind: "new", branch: "stable" }),
+    );
+    expect(missing.message).toContain("fetch_gerrit_branch");
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

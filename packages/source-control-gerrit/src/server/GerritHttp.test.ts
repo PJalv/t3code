@@ -1505,6 +1505,18 @@ it.effect("searches compact authenticated pages with escaped literal operators",
     expect(second.nextOffset).toBeNull();
     expect(second.completeness).toBe("complete");
     expect(new URL(requests[1]!.url).searchParams.get("S")).toBe("1");
+    yield* http.searchChanges({
+      installation,
+      credentials,
+      status: "all",
+      limit: 1,
+      offset: 0,
+      project: "Team/Repo",
+      rawQuery: "owner:self status:merged",
+    });
+    expect(new URL(requests[2]!.url).searchParams.get("q")).toBe(
+      '(status:open OR status:merged OR status:abandoned) project:"Team/Repo" (owner:self status:merged)',
+    );
   }).pipe(Effect.provide(GerritHttp.layer), Effect.provideService(HttpClient.HttpClient, client));
 });
 

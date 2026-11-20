@@ -7,7 +7,9 @@ import {
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
@@ -94,7 +96,27 @@ const make = Effect.gen(function* () {
   const read = yield* GerritDirectRead.GerritDirectRead;
   const service = yield* GerritDirectService.GerritDirectService;
   const completion = yield* GerritWatchCompletion.GerritWatchCompletion;
-  const cwd = Effect.fn("GerritDirectHandlers.cwd")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const invalidRepoPath = () =>
+    new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: "repoPath must be an existing file or folder inside this thread's folder.",
+    });
+  // Both sides are real paths so a symlink cannot lead a Gerrit command outside the thread's folder.
+  const nestedRepo = Effect.fn("GerritDirectHandlers.nestedRepo")(function* (
+    root: string,
+    repoPath: string,
+  ) {
+    const realRoot = yield* fileSystem.realPath(root);
+    const target = yield* fileSystem.realPath(path.resolve(root, repoPath));
+    const relative = path.relative(realRoot, target);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      return yield* invalidRepoPath();
+    const info = yield* fileSystem.stat(target);
+    return info.type === "Directory" ? target : path.dirname(target);
+  }, Effect.mapError(invalidRepoPath));
+  const cwd = Effect.fn("GerritDirectHandlers.cwd")(function* (repoPath?: string) {
     const scope = yield* McpInvocationContext.McpInvocationContext;
     if (
       scope.client !== undefined ||
@@ -108,45 +130,50 @@ const make = Effect.gen(function* () {
     if (thread === null || thread.deletedAt !== null) return yield* denied();
     const project = yield* projects.getById(thread.projectId).pipe(Effect.mapError(denied));
     if (Option.isNone(project) || project.value.deletedAt !== null) return yield* denied();
-    return thread.worktreePath ?? project.value.workspaceRoot;
+    const root = thread.worktreePath ?? project.value.workspaceRoot;
+    return repoPath === undefined ? root : yield* nestedRepo(root, repoPath);
   });
   return {
     fetch_gerrit_patch_set: McpToolAccess.actsAsCaller((input) =>
       Effect.gen(function* () {
         return yield* service
-          .fetchPatchSet({ cwd: yield* cwd(), target: input.target })
+          .fetchPatchSet({ cwd: yield* cwd(input.repoPath), target: input.target })
           .pipe(Effect.mapError(failed));
       }),
     ),
     fetch_gerrit_branch: McpToolAccess.actsAsCaller((input) =>
       Effect.gen(function* () {
         return yield* service
-          .fetchBranch({ cwd: yield* cwd(), branch: input.branch })
+          .fetchBranch({ cwd: yield* cwd(input.repoPath), branch: input.branch })
           .pipe(Effect.mapError(failed));
       }),
     ),
-    amend_gerrit_signed: McpToolAccess.actsAsCaller(() =>
+    amend_gerrit_signed: McpToolAccess.actsAsCaller((input) =>
       Effect.gen(function* () {
-        yield* service.amendSigned({ cwd: yield* cwd() }).pipe(Effect.mapError(failed));
+        yield* service
+          .amendSigned({ cwd: yield* cwd(input.repoPath) })
+          .pipe(Effect.mapError(failed));
         return { amended: true };
       }),
     ),
     read_gerrit: McpToolAccess.readsAsCaller((input) =>
       Effect.gen(function* () {
-        const request = yield* decodeRead(input, gerritDirectDecodeOptions).pipe(
+        const { repoPath, ...fields } = input;
+        const request = yield* decodeRead(fields, gerritDirectDecodeOptions).pipe(
           Effect.mapError(() => invalidRead(input)),
         );
         return publicValue(
-          yield* read.read({ cwd: yield* cwd(), request }).pipe(Effect.mapError(failed)),
+          yield* read.read({ cwd: yield* cwd(repoPath), request }).pipe(Effect.mapError(failed)),
         );
       }),
     ),
     act_gerrit: McpToolAccess.actsAsCaller((input) =>
       Effect.gen(function* () {
-        const request = yield* decodeAct(input, gerritDirectDecodeOptions).pipe(
+        const { repoPath, ...fields } = input;
+        const request = yield* decodeAct(fields, gerritDirectDecodeOptions).pipe(
           Effect.mapError(invalid),
         );
-        const checkout = yield* cwd();
+        const checkout = yield* cwd(repoPath);
         const scope = yield* McpInvocationContext.McpInvocationContext;
         return publicValue(
           yield* service.act({ cwd: checkout, ...request }).pipe(
@@ -160,11 +187,19 @@ const make = Effect.gen(function* () {
     ),
     upload_gerrit: McpToolAccess.actsAsCaller((input) =>
       Effect.gen(function* () {
-        const upload = yield* decodeUpload(input, gerritDirectDecodeOptions).pipe(
+        const { repoPath, dryRun, ...fields } = input;
+        const upload = yield* decodeUpload(fields, gerritDirectDecodeOptions).pipe(
           Effect.mapError(invalid),
         );
+        if (dryRun === true)
+          return publicValue({
+            dryRun: true,
+            ...(yield* service
+              .planUpload({ cwd: yield* cwd(repoPath), upload })
+              .pipe(Effect.mapError(failed))),
+          });
         const uploaded = yield* service
-          .upload({ cwd: yield* cwd(), upload })
+          .upload({ cwd: yield* cwd(repoPath), upload })
           .pipe(Effect.mapError(failed));
         const scope = yield* McpInvocationContext.McpInvocationContext;
         if (scope.thread !== undefined) {
