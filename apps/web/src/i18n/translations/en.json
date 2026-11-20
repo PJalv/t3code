@@ -667,6 +667,7 @@
   "ba273b237ed0e6c8": "Create {shortLabel}",
   "f936de5702861228": "Git action in progress.",
   "3c26d723568eb2bf": "Git status is unavailable.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Create and checkout a branch before pushing or opening a PR.} mr {Create and checkout a branch before pushing or opening an MR.} generic {Create and checkout a branch before pushing or opening a change request.} other {Create and checkout a branch before pushing or opening {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Commit & push",
   "c65e62ead20fb5f2": "Commit, push & {shortLabel}",
@@ -4569,6 +4570,9 @@
   "7f0f9b1ee42892db": "Output is no longer available.",
   "e470bb79fa74a6ae": "Tool output image",
   "e8c80b6d40c0944c": "Search result",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "exit ",
     {
@@ -8109,6 +8113,7 @@
   "cba61c55d252ddd3": "Could not remove backend",
   "0df2f6de1bed9c0e": "Remove {environment} from this device?\nThis forgets its pairing, credentials, and cached threads here. Switch it off instead to keep it saved.",
   "1f293df910bc80a1": "Revoke all other clients?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Enable network access",
   "0d1a41cbf4fab7af": "Failed to update WSL backend.",
   "c0945ab375a2a3cd": "Could not change WSL backend",
@@ -8128,6 +8133,8 @@
   "035a3c35d77332ef": "Exposed on all interfaces. Pairing links use {host}.",
   "e4364c60111215a3": "Exposed on all interfaces.",
   "a847a3a44f2fd582": "Limited to this machine.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "This connection cannot view or change network exposure.",
   "d4b7ed99318074c4": "Remote access is already configured. Change network exposure where the server starts.",
   "9698cd05b10a3613": "Only this machine can connect. Restart with a non-loopback host for remote pairing.",
@@ -8184,6 +8191,15 @@
     }
   ],
   "2b382086196fdd96": "Default distro",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Network exposure changes restart the backend and must be controlled where the server process is launched.",
   "5efa21c55ba2ac54": "This connection can create access links but cannot view authorized clients.",
   "40335d08877bc746": "Applying…",
@@ -8856,16 +8872,30 @@
   "298c7150a7621c80": "Simlock device hosts",
   "67937aa49179285e": "On a Mac, clone new worktrees from a checkout cached in the T3 home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache.",
   "f9904f78d3003f58": "Fast worktree checkout",
-  "ec7623deed751c05": [
-    "Share a thread with a guest who watches it live in a browser and sends messages you approve. Needs T3 Connect: sign in and link this machine in",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
       "c": "Sharing & access"
     },
-    ". Turning it off stops every guest link."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Let agents here work on your other machines, and theirs here. Turn it on for each machine, then link them in",
     " ",

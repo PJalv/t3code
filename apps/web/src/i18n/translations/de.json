@@ -667,6 +667,7 @@
   "ba273b237ed0e6c8": "{shortLabel} erstellen",
   "f936de5702861228": "Git-Aktion läuft.",
   "3c26d723568eb2bf": "Git-Status ist nicht verfügbar.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Erstelle einen Branch und checke ihn aus, bevor du pushst oder einen PR öffnest.} mr {Erstelle einen Branch und checke ihn aus, bevor du pushst oder einen MR öffnest.} generic {Erstelle einen Branch und checke ihn aus, bevor du pushst oder eine Änderungsanfrage öffnest.} other {Erstelle einen Branch und checke ihn aus, bevor du pushst oder {changeRequest} öffnest.}}",
   "1ed6d76914e9e3ff": "Committen & pushen",
   "c65e62ead20fb5f2": "Committen, pushen & {shortLabel}",
@@ -4570,6 +4571,9 @@
   "7f0f9b1ee42892db": "Die Ausgabe ist nicht mehr verfügbar.",
   "e470bb79fa74a6ae": "Bild aus Tool-Ausgabe",
   "e8c80b6d40c0944c": "Suchergebnis",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "Exit ",
     {
@@ -8102,6 +8106,7 @@
   "cba61c55d252ddd3": "Backend konnte nicht entfernt werden",
   "0df2f6de1bed9c0e": "{environment} von diesem Gerät entfernen?\nDadurch werden Kopplung, Anmeldedaten und zwischengespeicherte Threads hier vergessen. Schalte es stattdessen aus, um es gespeichert zu lassen.",
   "1f293df910bc80a1": "Alle anderen Clients widerrufen?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Netzwerkzugriff aktivieren",
   "0d1a41cbf4fab7af": "Das WSL-Backend konnte nicht aktualisiert werden.",
   "c0945ab375a2a3cd": "WSL-Backend konnte nicht geändert werden",
@@ -8121,6 +8126,8 @@
   "035a3c35d77332ef": "Auf allen Schnittstellen freigegeben. Kopplungslinks verwenden {host}.",
   "e4364c60111215a3": "Auf allen Schnittstellen freigegeben.",
   "a847a3a44f2fd582": "Auf diesen Rechner beschränkt.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "Diese Verbindung kann die Netzwerkfreigabe weder anzeigen noch ändern.",
   "d4b7ed99318074c4": "Der Remote-Zugriff ist bereits konfiguriert. Ändere die Netzwerkfreigabe dort, wo der Server gestartet wird.",
   "9698cd05b10a3613": "Nur dieser Rechner kann sich verbinden. Starte mit einem Nicht-Loopback-Host neu, um Remote-Kopplung zu ermöglichen.",
@@ -8177,6 +8184,15 @@
     }
   ],
   "2b382086196fdd96": "Standard-Distribution",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Änderungen an der Netzwerkfreigabe starten das Backend neu und müssen dort gesteuert werden, wo der Serverprozess gestartet wird.",
   "5efa21c55ba2ac54": "Diese Verbindung kann Zugriffslinks erstellen, aber keine autorisierten Clients anzeigen.",
   "40335d08877bc746": "Wird angewendet…",
@@ -8848,16 +8864,30 @@
   "298c7150a7621c80": "Simlock-Geräte-Hosts",
   "67937aa49179285e": "Auf einem Mac neue Worktrees aus einem im T3-Home-Ordner zwischengespeicherten Checkout klonen, statt jede Datei zu schreiben. Verwendet den normalen Git-Checkout, wenn das nicht geht. Beim Ausschalten wird der Cache gelöscht.",
   "f9904f78d3003f58": "Schneller Worktree-Checkout",
-  "ec7623deed751c05": [
-    "Teile einen Thread mit einem Gast, der ihn live im Browser verfolgt und Nachrichten sendet, die du genehmigst. Erfordert T3 Connect: Melde dich an und verknüpfe diesen Rechner unter",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "Freigabe & Zugriff"
+      "c": "Sharing & access"
     },
-    ". Beim Ausschalten werden alle Gastlinks beendet."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Lass Agenten hier auf deinen anderen Rechnern arbeiten und deren Agenten hier. Schalte es für jeden Rechner ein und verknüpfe sie dann unter",
     " ",

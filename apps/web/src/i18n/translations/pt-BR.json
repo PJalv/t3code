@@ -667,6 +667,7 @@
   "ba273b237ed0e6c8": "Criar {shortLabel}",
   "f936de5702861228": "Ação do Git em andamento.",
   "3c26d723568eb2bf": "O status do Git não está disponível.",
+  "3a69604cae020aef": "Gerrit patch sets require a review upload; ordinary push is not offered here.",
   "5f0fe7f77c742927": "{kind, select, pr {Crie um branch e faça checkout dele antes de fazer push ou abrir um PR.} mr {Crie um branch e faça checkout dele antes de fazer push ou abrir um MR.} generic {Crie um branch e faça checkout dele antes de fazer push ou abrir uma solicitação de alteração.} other {Crie um branch e faça checkout dele antes de fazer push ou abrir {changeRequest}.}}",
   "1ed6d76914e9e3ff": "Commit e push",
   "c65e62ead20fb5f2": "Commit, push e {shortLabel}",
@@ -4567,6 +4568,9 @@
   "7f0f9b1ee42892db": "A saída não está mais disponível.",
   "e470bb79fa74a6ae": "Imagem da saída da ferramenta",
   "e8c80b6d40c0944c": "Resultado da pesquisa",
+  "385a2a169c174c13": "Hide diff",
+  "7d846a47e9f4f79d": "Show diff",
+  "b95f021d9ee3ac33": "Loading diff…",
   "8d1906900b5c95c7": [
     "saída ",
     {
@@ -8101,6 +8105,7 @@
   "cba61c55d252ddd3": "Não foi possível remover o backend",
   "0df2f6de1bed9c0e": "Remover {environment} deste dispositivo?\nIsso esquece o pareamento, as credenciais e as threads em cache dele aqui. Desative-o em vez disso para mantê-lo salvo.",
   "1f293df910bc80a1": "Revogar todos os outros clientes?",
+  "a2a03b9c9b9e02a6": "Could not set the network interface",
   "b58ba344f4da84a1": "Ativar o acesso à rede",
   "0d1a41cbf4fab7af": "Falha ao atualizar o backend do WSL.",
   "c0945ab375a2a3cd": "Não foi possível alterar o backend do WSL",
@@ -8120,6 +8125,8 @@
   "035a3c35d77332ef": "Exposto em todas as interfaces. Os links de pareamento usam {host}.",
   "e4364c60111215a3": "Exposto em todas as interfaces.",
   "a847a3a44f2fd582": "Limitado a esta máquina.",
+  "1930f298f6138ef7": "Choose which network pairing links use when several interfaces are available.",
+  "cc600e517668e8b8": "Local network interface",
   "d71ae93f2af66491": "Esta conexão não pode ver nem alterar a exposição na rede.",
   "d4b7ed99318074c4": "O acesso remoto já está configurado. Altere a exposição na rede onde o servidor é iniciado.",
   "9698cd05b10a3613": "Só esta máquina pode se conectar. Reinicie com um host que não seja loopback para o pareamento remoto.",
@@ -8176,6 +8183,15 @@
     }
   ],
   "2b382086196fdd96": "Distro padrão",
+  "3b8c59b6dd8d0dc8": [
+    "Interface ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " is no longer detected. Using automatic selection until it comes back."
+  ],
   "dd2ebe5b11195240": "Mudanças na exposição na rede reiniciam o backend e precisam ser controladas onde o processo do servidor é iniciado.",
   "5efa21c55ba2ac54": "Esta conexão pode criar links de acesso, mas não pode ver os clientes autorizados.",
   "40335d08877bc746": "Aplicando…",
@@ -8846,16 +8862,30 @@
   "298c7150a7621c80": "Hosts de dispositivos Simlock",
   "67937aa49179285e": "No Mac, clona novos worktrees a partir de um checkout em cache na pasta T3 home em vez de gravar cada arquivo. Usa o checkout normal do Git quando não consegue. Desativar exclui o cache.",
   "f9904f78d3003f58": "Checkout rápido de worktree",
-  "ec7623deed751c05": [
-    "Compartilhe uma thread com um convidado que a acompanha ao vivo no navegador e envia mensagens que você aprova. Requer T3 Connect: entre e vincule esta máquina em",
+  "fdd433881febcefa": [
+    "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
+    " "
+  ],
+  "4475267a9a0b9437": [
+    "Uses this machine's configured guest endpoint: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
+  "03e5c0464153a195": [
+    "Needs T3 Connect: sign in and link this machine in",
     " ",
     {
       "t": "Link",
       "i": 1,
-      "c": "Compartilhamento"
+      "c": "Sharing & access"
     },
-    ". Desativar encerra todos os links de convidado."
+    "."
   ],
+  "c6aa1281da8e0a75": "Turning it off stops every guest link.",
   "bff0033ea41eb38e": [
     "Permite que os agentes daqui trabalhem nas suas outras máquinas, e os delas aqui. Ative em cada máquina e depois vincule-as em",
     " ",
