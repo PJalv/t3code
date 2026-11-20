@@ -47,6 +47,7 @@ import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
@@ -4984,8 +4985,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     { name: "restarted", operation: "submit", own: false },
   ] as const)(
     "records native Gerrit completion without duplicate wakes ($name)",
-    ({ name, operation, own }) =>
-      Effect.gen(function* () {
+    ({ name, operation, own }) => {
+      const logs: Array<{ readonly text: unknown; readonly reason: unknown }> = [];
+      return Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const completion = yield* GerritWatchCompletion.GerritWatchCompletion;
         const threadId = ThreadId.make(`native-gerrit-${name}`);
@@ -5148,6 +5150,156 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         assert.isUndefined(
           (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch,
         );
+        // A reactor wake refused because the action already ended the watch is not a failure, and
+        // the watch still ends as merged or closed rather than as stopped.
+        assert.notIncludeMembers(
+          logs.map(({ text }) => text),
+          [
+            "pull request watch update failed",
+            "Gerrit watch was not cleared after a native action",
+          ],
+        );
+        assert.deepEqual(
+          logs.flatMap(({ text, reason }) => (text === "pull request watch ended" ? [reason] : [])),
+          name === "unwatch"
+            ? ["stopped"]
+            : name === "restarted"
+              ? ["stopped", "merged"]
+              : [operation === "submit" ? "merged" : "closed"],
+        );
+      }).pipe(
+        Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([
+            Logger.make(({ message }) => {
+              const [text, fields] = Array.isArray(message) ? message : [message];
+              logs.push({ text, reason: fields?.reason });
+            }),
+          ]),
+        ),
+      );
+    },
+  );
+
+  it.effect.each([
+    // The rest of the topic merged with the agent's submit, so only another thread hears of it.
+    { name: "topic", together: true, callerWakes: [] },
+    // Without the submitted-together set the sibling looks external, as before.
+    { name: "unread-topic", together: false, callerWakes: ["#20: merged, stopped watching"] },
+  ] as const)(
+    "clears the caller's watches on changes a Gerrit submit merges together ($name)",
+    ({ name, together, callerWakes }) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const completion = yield* GerritWatchCompletion.GerritWatchCompletion;
+        const projectId = ProjectId.make(`native-gerrit-${name}`);
+        const caller = ThreadId.make(`native-gerrit-${name}-caller`);
+        const other = ThreadId.make(`native-gerrit-${name}-other`);
+        const repository = "team/repo";
+        yield* seedProject({
+          projectId,
+          title: name,
+          workspaceRoot: `/workspace/${name}`,
+          defaultModelSelection: null,
+          createdAt: "2026-10-01T00:00:00.000Z",
+        });
+        for (const [threadId, numbers] of [
+          [caller, [19, 20]],
+          [other, [20]],
+        ] as const) {
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`${threadId}-create`),
+            threadId,
+            projectId,
+            title: name,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+          for (const number of numbers) {
+            yield* orchestrator.dispatch({
+              type: "thread.pull-request.watch",
+              commandId: CommandId.make(`${threadId}-watch-${number}`),
+              threadId,
+              host: "review.example",
+              repository,
+              number,
+              watching: true,
+              until: "merged",
+              link: { url: `https://review.example/c/${repository}/+/${number}`, source: "agent" },
+            });
+          }
+        }
+        let state: PullRequestDetail["state"] = "open";
+        const reactor = yield* PullRequestWatchReactor.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(PullRequestService.PullRequestService)({
+                detail: (input) =>
+                  Effect.sync(() => ({
+                    ...watchedPullRequestDetail({
+                      projectId,
+                      number: input.number,
+                      at: "2026-10-02T12:00:00.000Z",
+                    }),
+                    host: "review.example",
+                    repository,
+                    state,
+                  })),
+                activity: () =>
+                  Effect.succeed({
+                    comments: [],
+                    commentCount: 0,
+                    commentsTruncated: false,
+                    reviewThreads: [],
+                    commits: [],
+                  }),
+              }),
+            ),
+          ),
+        );
+        yield* reactor.sweep;
+        const wakesOf = (threadId: ThreadId) =>
+          Effect.map(orchestrator.getThreadRecords(threadId, ["messages"]), ({ messages }) =>
+            messages.flatMap((message) => message.notification?.summary ?? []),
+          );
+        const before = { caller: yield* wakesOf(caller), other: yield* wakesOf(other) };
+
+        yield* completion.action(
+          caller,
+          {
+            server: "https://review.example/",
+            project: repository,
+            number: 19,
+            operation: "submit",
+            ...(together ? { together: [{ project: repository, number: 20 }] } : {}),
+          },
+          Effect.sync(() => {
+            state = "merged";
+          }),
+        );
+        yield* TestClock.adjust("10 minutes");
+        yield* reactor.sweep;
+        yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+
+        assert.deepEqual((yield* wakesOf(caller)).slice(before.caller.length), [...callerWakes]);
+        assert.deepEqual((yield* wakesOf(other)).slice(before.other.length), [
+          "#20: merged, stopped watching",
+        ]);
+        for (const threadId of [caller, other]) {
+          assert.isTrue(
+            (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.every(
+              (link) => link.watch === undefined,
+            ),
+          );
+        }
       }),
   );
 

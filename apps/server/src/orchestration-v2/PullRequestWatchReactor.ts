@@ -84,6 +84,11 @@ const logFailure =
       ? Effect.interrupt
       : Effect.logWarning(message, { ...fields, cause });
 
+// A native Gerrit action, or the user, can end or restart a watch while a pass reads it. The
+// orchestrator then refuses the pass's stale update, which is expected, not a failure.
+const watchMoved = <E>(cause: Cause.Cause<E>) =>
+  Option.exists(Cause.findErrorOption(cause), Orchestrator.isPullRequestWatchMovedError);
+
 interface WatchTarget {
   readonly thread: ProjectionStore.ProjectionThreadPullRequests;
   readonly link: ThreadPullRequestLink;
@@ -521,6 +526,17 @@ export const make = Effect.gen(function* () {
           item.reason === undefined ? Effect.void : ended(item.target, item.reason),
         ),
         Effect.catchCause((cause) => {
+          if (watchMoved(cause)) {
+            // Whatever moved it, such as the agent's own Gerrit submit, needs no wake from here.
+            return Effect.logDebug("pull request watch moved before its update", {
+              threadId: item.target.thread.id,
+              pullRequest: item.groupKey,
+            }).pipe(
+              Effect.andThen(
+                item.reason === undefined ? Effect.void : ended(item.target, item.reason),
+              ),
+            );
+          }
           lastReads.delete(item.groupKey);
           return logFailure("pull request watch update failed", {
             threadId: item.target.thread.id,
@@ -641,6 +657,12 @@ export const make = Effect.gen(function* () {
       step(target).pipe(
         Effect.as(true),
         Effect.catchCause((cause) => {
+          if (watchMoved(cause)) {
+            return Effect.logDebug("pull request watch moved before its update", {
+              threadId: target.thread.id,
+              pullRequest: group.key,
+            }).pipe(Effect.as(true));
+          }
           lastReads.delete(group.key);
           return logFailure("pull request watch update failed", {
             threadId: target.thread.id,

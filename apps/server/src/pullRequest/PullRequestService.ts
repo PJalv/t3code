@@ -82,6 +82,7 @@ import { sourceControlDefinitions } from "../sourceControl/sourceControlDefiniti
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as GerritNativeAction from "../sourceControl/GerritNativeAction.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -2229,6 +2230,37 @@ export const make = Effect.gen(function* () {
     readonly repository: string;
     readonly summary: PullRequestSummary | undefined;
   };
+  // An agent's own abandon or submit is not news to it. This names the change by the one
+  // installation configured for the host, as the Gerrit provider's credential lookup does.
+  const gerritNativeAction = Effect.fn("PullRequestService.gerritNativeAction")(function* <A, E>(
+    project: SupportedProject,
+    input: PullRequestActionInput,
+    write: Effect.Effect<A, E>,
+  ) {
+    const operation =
+      input.action === "merge" ? "submit" : input.action === "close" ? "abandon" : undefined;
+    if (project.api.kind !== "gerrit" || operation === undefined) return yield* write;
+    const host = URL.parse(`https://${project.host}`)?.host.toLowerCase();
+    const installations = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) =>
+        Object.values(settings.gerritConnections)
+          .map((connection) => connection.installation)
+          .filter((installation) => URL.parse(installation)?.host.toLowerCase() === host),
+      ),
+      Effect.orElseSucceed(() => []),
+    );
+    if (installations.length !== 1) return yield* write;
+    const nativeAction = yield* GerritNativeAction.NativeAction;
+    return yield* nativeAction(
+      {
+        server: installations[0]!,
+        project: project.repository,
+        number: input.number,
+        operation,
+      },
+      write,
+    );
+  });
   const runAction = (
     input: PullRequestActionInput,
   ): Effect.Effect<ActionOutcome, PullRequestError> =>
@@ -2363,8 +2395,10 @@ export const make = Effect.gen(function* () {
             return headPinned.pipe(
               Effect.andThen(mergeSettings),
               Effect.flatMap((removeAgentCreditsOnMerge) =>
-                project.api
-                  .runAction({
+                gerritNativeAction(
+                  project,
+                  input,
+                  project.api.runAction({
                     cwd: project.project.workspaceRoot,
                     repository: project.repository,
                     host: project.host,
@@ -2382,26 +2416,24 @@ export const make = Effect.gen(function* () {
                     ...(input.updateMethod === undefined
                       ? {}
                       : { updateMethod: input.updateMethod }),
-                  })
-                  .pipe(
-                    Effect.ensuring(
-                      input.stackNumber === undefined
-                        ? Effect.void
-                        : refreshAfterTurn(project.project.id),
-                    ),
-                    Effect.mapError(toPullRequestError("runAction")),
-                    observeRead,
-                    Effect.map(({ value, observedAt }) => ({
-                      repository:
-                        project.repositoryKey !== null
-                          ? input.repository.trim()
-                          : project.repository,
-                      summary:
-                        value === undefined || input.stackNumber !== undefined
-                          ? undefined
-                          : toSummary(project, value, observedAt, true),
-                    })),
+                  }),
+                ).pipe(
+                  Effect.ensuring(
+                    input.stackNumber === undefined
+                      ? Effect.void
+                      : refreshAfterTurn(project.project.id),
                   ),
+                  Effect.mapError(toPullRequestError("runAction")),
+                  observeRead,
+                  Effect.map(({ value, observedAt }) => ({
+                    repository:
+                      project.repositoryKey !== null ? input.repository.trim() : project.repository,
+                    summary:
+                      value === undefined || input.stackNumber !== undefined
+                        ? undefined
+                        : toSummary(project, value, observedAt, true),
+                  })),
+                ),
               ),
             );
           }),
