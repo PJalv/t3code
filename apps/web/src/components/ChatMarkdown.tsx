@@ -184,9 +184,14 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { projectEnvironment } from "../state/projects";
 import { filesystemEnvironment } from "../state/filesystem";
 import {
+  cachedWorkspaceBasenameLookup,
+  collectWorkspaceBasenameCandidates,
+} from "../workspaceBasenameResolution";
+import {
   findAgentDirectoryMatch,
   needsWorkspaceBasenameLookup,
   pickProjectLinkMatch,
+  pickWorkspaceBasenameMatch,
   pickWorkspaceLinkMatch,
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
   workspaceLinkLookupQuery,
@@ -589,6 +594,14 @@ function useChatMarkdownState({
   const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
     reportFailure: false,
   });
+  const [workspaceBasenamePaths, setWorkspaceBasenamePaths] = useState<{
+    scope: string;
+    paths: Map<string, string>;
+  }>(() => ({ scope: "", paths: new Map() }));
+  const workspaceBasenameLookupCache = useRef<{
+    scope: string;
+    entries: Map<string, Promise<string | null>>;
+  }>({ scope: "", entries: new Map() });
   const getFilesystemMetadata = useAtomQueryRunner(filesystemEnvironment.getMetadata, {
     reportFailure: false,
     refresh: true,
@@ -893,6 +906,80 @@ function useChatMarkdownState({
     }
     return findAgentDirectoryMatch(workspaceRelativePath, agentRoots, searchRoot);
   };
+  // The batched cache below looks up bare basenames, while the finder takes a
+  // parsed link meta; this adapts one to the other without duplicating search.
+  const resolveWorkspaceBasenamePath = async (name: string): Promise<string | null> => {
+    const meta = markdownFileLinkMetaByHref
+      ? [...markdownFileLinkMetaByHref.values()].find(
+          (candidate) => candidate.workspaceRelativePath === name,
+        )
+      : undefined;
+    if (meta) return findWorkspaceFileMatch(meta);
+    if (!cwd || environmentId === null) return null;
+    if (!readEnvironmentScope(environmentId, AuthFilesystemReadScope)) return null;
+    const result = await searchProjectEntries({
+      environmentId,
+      input: { cwd, query: name, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
+    });
+    if (result._tag !== "Success") return null;
+    return pickWorkspaceBasenameMatch(name, result.value.entries);
+  };
+
+  // Image sources render synchronously, so their bare basenames resolve before
+  // render. File links resolve through findWorkspaceFileMatch when opened.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- batched image basename lookups follow the text, not a handler
+  useEffect(() => {
+    const scope = `${environmentId}:${cwd}`;
+    if (workspaceBasenameLookupCache.current.scope !== scope)
+      workspaceBasenameLookupCache.current = { scope, entries: new Map() };
+    if (!cwd || environmentId === null) return;
+    const imagePaths = [...text.matchAll(/!\[[^\]]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/g)].map(
+      (match) => match[1] ?? match[2] ?? "",
+    );
+    const candidates = collectWorkspaceBasenameCandidates(imagePaths);
+    let cancelled = false;
+    void Promise.all(
+      [...candidates].map(
+        async (name) =>
+          [
+            name,
+            await cachedWorkspaceBasenameLookup(
+              workspaceBasenameLookupCache.current.entries,
+              name,
+              resolveWorkspaceBasenamePath,
+            ),
+          ] as const,
+      ),
+    ).then((matches) => {
+      if (cancelled) return;
+      const next = new Map(
+        matches.filter((entry): entry is readonly [string, string] => entry[1] !== null),
+      );
+      setWorkspaceBasenamePaths((previous) =>
+        previous.scope === scope &&
+        previous.paths.size === next.size &&
+        [...next].every(([key, value]) => previous.paths.get(key) === value)
+          ? previous
+          : { scope, paths: next },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd, environmentId, resolveWorkspaceBasenamePath, text]);
+  const currentBasenamePaths =
+    cwd && environmentId !== null && workspaceBasenamePaths.scope === `${environmentId}:${cwd}`
+      ? workspaceBasenamePaths.paths
+      : EMPTY_WORKSPACE_BASENAME_PATHS;
+  const resolveWorkspaceBasename = (path: string) =>
+    cwd && needsWorkspaceBasenameLookup(path) ? (currentBasenamePaths.get(path) ?? path) : path;
+  const resolvedFileLinkMeta = (meta: MarkdownFileLinkMeta) => {
+    const resolved = meta.workspaceRelativePath
+      ? currentBasenamePaths.get(meta.workspaceRelativePath)
+      : undefined;
+    return resolved && cwd ? (resolveMarkdownFileLinkMeta(resolved, cwd) ?? meta) : meta;
+  };
+
   const openFileInPanel = (fileLinkMeta: MarkdownFileLinkMeta, panelPath: string) => {
     if (!threadRef) return;
     const openAt = (path: string) =>
@@ -920,10 +1007,11 @@ function useChatMarkdownState({
     })();
   };
   const fileLinkChip = (
-    fileLinkMeta: MarkdownFileLinkMeta,
+    fileLinkMetaInput: MarkdownFileLinkMeta,
     copyMarkdown: string,
     mediaSource?: string,
   ) => {
+    const fileLinkMeta = resolvedFileLinkMeta(fileLinkMetaInput);
     const resolveHostPath = () =>
       resolveMarkdownFileHostPath({
         meta: fileLinkMeta,
@@ -1056,6 +1144,7 @@ function useChatMarkdownState({
     skills,
     threadRef,
     updateThreadPullRequestLink,
+    resolveWorkspaceBasename,
   };
   return {
     componentState,
@@ -1097,6 +1186,9 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
     );
   };
 }
+
+// Keep component types stable when streaming changes the message state.
+const EMPTY_WORKSPACE_BASENAME_PATHS = new Map<string, string>();
 
 const CHAT_MARKDOWN_COMPONENTS = {
   h1: markdownHeadingRenderer(1),
@@ -1577,6 +1669,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       renderContextReference,
       fileLinkChip,
       resolvedTheme,
+      resolveWorkspaceBasename,
     } = use(ChatMarkdownRendererContext);
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
@@ -1597,7 +1690,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle);
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
-    const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
+    const resolvedSrc =
+      cwd && needsWorkspaceBasenameLookup(classifiedSrc)
+        ? resolveWorkspaceBasename(classifiedSrc)
+        : classifiedSrc;
+    const imageSource = classifyMarkdownImageSource(resolvedSrc, imageBaseDir ?? cwd);
     const mediaKind = mediaKindFromPath(classifiedSrc);
     if (mediaKind === "audio") {
       const filePath = imageSource._tag === "WorkspaceFile" ? imageSource.path : null;
