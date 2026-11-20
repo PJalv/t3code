@@ -9,8 +9,10 @@ import {
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -50,15 +52,17 @@ const harness = Effect.fn("GerritDirectTest.harness")(function* (
   deleted = false,
   missing = false,
   failLink = false,
+  worktreePath = "/worktree",
 ) {
   const thread = {
     ...Testkit.liveThreadShell(id),
-    worktreePath: "/worktree",
+    worktreePath,
     deletedAt: deleted ? DateTime.makeUnsafe("2026-01-01T00:00:00Z") : null,
   };
   const commands: unknown[] = [];
   const deps = Layer.mergeAll(
     NodeCrypto.layer,
+    NodeServices.layer,
     Layer.mock(Orchestrator.OrchestratorV2)({
       getThreadShell: (threadId) => {
         expect(threadId).toBe(id);
@@ -167,6 +171,25 @@ describe("direct Gerrit handlers", () => {
         }),
       );
     }),
+  );
+  it.effect("runs in a repoPath inside the thread's folder and refuses one outside it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.realPath(yield* fileSystem.makeTempDirectoryScoped());
+      const outside = yield* fileSystem.makeTempDirectoryScoped();
+      yield* fileSystem.makeDirectory(`${root}/src/repo`, { recursive: true });
+      yield* fileSystem.writeFileString(`${root}/src/repo/file.txt`, "");
+      yield* fileSystem.symlink(outside, `${root}/escape`);
+      const h = yield* harness(false, false, false, root);
+      const read = (repoPath: string) => h.call("read_gerrit", { mode: "search", repoPath });
+      expect(yield* read("src/repo")).toMatchObject({ input: { cwd: `${root}/src/repo` } });
+      expect(yield* read(`${root}/src/repo/file.txt`)).toMatchObject({
+        input: { cwd: `${root}/src/repo` },
+      });
+      for (const repoPath of [outside, "..", "escape", "missing"]) {
+        expect(yield* Effect.isFailure(read(repoPath)), repoPath).toBe(true);
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
   it.effect("rejects a deleted thread or a missing project", () =>
     Effect.gen(function* () {
