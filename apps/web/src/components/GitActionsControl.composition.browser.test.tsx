@@ -9,6 +9,7 @@ import { PublishRepositoryDialog } from "./GitActionsControl";
 const publish = vi.hoisted(() => ({ run: vi.fn() }));
 
 vi.mock("~/state/query", () => ({
+  formatEnvironmentQueryError: () => "Query failed",
   useEnvironmentQuery: () => ({
     data: {
       versionControlSystems: [],
