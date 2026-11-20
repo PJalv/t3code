@@ -87,7 +87,7 @@ export function statusSummary(
     parts.push(
       resolve(
         msg(
-          "{term, select, mr {MR #{number} open} cr {change request #{number} open} other {PR #{number} open}}",
+          "{term, select, mr {MR #{number} open} cr {change #{number} open} other {PR #{number} open}}",
           { term, number: gitStatus.pr.number },
         ),
       ),

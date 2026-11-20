@@ -1,3 +1,5 @@
+import { T, useGT, msg, useMessages } from "gt-react";
+import { m, type MessageResolver } from "~/i18n/messages";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -36,22 +38,22 @@ export function gerritVoteOptions(
     });
 }
 
-export function gerritRequirementStatus(status: string | null) {
+export function gerritRequirementStatus(status: string | null, resolve: MessageResolver = m) {
   switch (status) {
     case "satisfied":
-      return "Satisfied";
+      return resolve(msg("Satisfied", { $context: "Gerrit submit requirement status" }));
     case "unsatisfied":
-      return "Not met";
+      return resolve(msg("Not met", { $context: "Gerrit submit requirement status" }));
     case "not-applicable":
-      return "Not applicable";
+      return resolve(msg("Not applicable", { $context: "Gerrit submit requirement status" }));
     case "override":
-      return "Overridden";
+      return resolve(msg("Overridden", { $context: "Gerrit submit requirement status" }));
     case "error":
-      return "Error";
+      return resolve(msg("Error", { $context: "Gerrit submit requirement status" }));
     case "unknown":
-      return "Unknown";
+      return resolve(msg("Unknown", { $context: "Gerrit submit requirement status" }));
     default:
-      return "Unavailable";
+      return resolve(msg("Unavailable", { $context: "Gerrit submit requirement status" }));
   }
 }
 
@@ -97,6 +99,7 @@ export function GerritVotePicker({
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
+  const gt = useGT();
   const options = gerritVoteOptions(label.permittedValues, label.valueDescriptions);
   if (options.length === 0) return null;
   return (
@@ -107,8 +110,11 @@ export function GerritVotePicker({
         if (next !== null) onChange(next);
       }}
     >
-      <SelectTrigger size="xs" aria-label={`Vote on ${label.name}`}>
-        <span>{options.find((option) => option.value === value)?.label ?? "Vote"}</span>
+      <SelectTrigger size="xs" aria-label={gt("Vote on {label}", { label: label.name })}>
+        <span>
+          {options.find((option) => option.value === value)?.label ??
+            gt("Vote", { $context: "cast a Gerrit label vote, verb" })}
+        </span>
       </SelectTrigger>
       <SelectPopup>
         {options.map((option) => (
@@ -123,9 +129,14 @@ export function GerritVotePicker({
 
 function gerritAccountName(
   account: PullRequestGerritDetail["labels"][number]["votes"][number]["account"],
+  resolve: MessageResolver,
 ) {
   return (
-    account.name ?? account.display_name ?? account.username ?? account.email ?? "Unknown account"
+    account.name ??
+    account.display_name ??
+    account.username ??
+    account.email ??
+    resolve(msg("Unknown account"))
   );
 }
 
@@ -173,6 +184,8 @@ export function PullRequestGerritSummary({
   detail: PullRequestDetailView;
   onRefresh: () => void;
 }) {
+  const gt = useGT();
+  const resolve = useMessages();
   const canWrite = useAtomValue(pullRequestEnvironment.gerritCommand.permissionAtom(environmentId));
   const command = useAtomCommand(pullRequestEnvironment.gerritCommand, { reportFailure: false });
   const [pending, setPending] = useState(false);
@@ -200,36 +213,38 @@ export function PullRequestGerritSummary({
   const saveTopic = () =>
     run(
       { ...reference, command: "setTopic", payload: { topic: gerritTopicValue(topic) } },
-      "Could not set topic",
+      gt("Could not set topic"),
       () => setEditingTopic(false),
     );
   const togglePrivate = () =>
     run(
       { ...reference, command: "setPrivate", payload: { isPrivate: !gerrit.isPrivate } },
-      "Could not change privacy",
+      gt("Could not change privacy"),
     );
   const vote = (name: string, value: string) =>
     run(
       { ...reference, command: "setVotes", payload: { votes: { [name]: Number(value) } } },
-      "Could not set vote",
+      gt("Could not set vote"),
     );
 
   const review = (
     <>
       <div className="space-y-2">
-        <GerritHeading title="Submit requirements">
+        <GerritHeading title={gt("Submit requirements")}>
           {gerrit.submittable === null ? null : gerrit.submittable ? (
             <Badge size="sm" variant="success">
-              Ready to submit
+              <T>Ready to submit</T>
             </Badge>
           ) : (
             <Badge size="sm" variant="warning">
-              Not ready to submit
+              <T>Not ready to submit</T>
             </Badge>
           )}
         </GerritHeading>
         {gerrit.submitRequirements.length === 0 ? (
-          <p className="text-muted-foreground">No requirements reported.</p>
+          <p className="text-muted-foreground">
+            <T>No requirements reported.</T>
+          </p>
         ) : (
           <ul className="space-y-1.5">
             {gerrit.submitRequirements.map((requirement) => (
@@ -238,7 +253,7 @@ export function PullRequestGerritSummary({
                   <RequirementIcon status={requirement.status} />
                   <span className="min-w-0 break-words">{requirement.name}</span>
                   <Badge size="sm" variant={gerritRequirementTone(requirement.status)}>
-                    {gerritRequirementStatus(requirement.status)}
+                    {gerritRequirementStatus(requirement.status, resolve)}
                   </Badge>
                 </div>
                 {requirement.description && requirement.status !== "satisfied" ? (
@@ -250,9 +265,11 @@ export function PullRequestGerritSummary({
         )}
       </div>
       <div className="space-y-2">
-        <GerritHeading title="Votes" />
+        <GerritHeading title={gt("Votes", { $context: "Gerrit label votes, noun" })} />
         {gerrit.labels.length === 0 ? (
-          <p className="text-muted-foreground">No labels reported.</p>
+          <p className="text-muted-foreground">
+            <T>No labels reported.</T>
+          </p>
         ) : (
           <ul className="space-y-2">
             {gerrit.labels.map((label) => {
@@ -262,7 +279,9 @@ export function PullRequestGerritSummary({
                   <div className="min-w-0 flex-1 space-y-1">
                     <span className="font-medium">{label.name}</span>
                     {votes.length === 0 ? (
-                      <p className="text-muted-foreground">No votes yet</p>
+                      <p className="text-muted-foreground">
+                        <T>No votes yet</T>
+                      </p>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {votes.map((entry, index) => (
@@ -272,7 +291,7 @@ export function PullRequestGerritSummary({
                             variant={entry.value > 0 ? "success" : "error"}
                           >
                             {entry.value > 0 ? `+${entry.value}` : entry.value}{" "}
-                            {gerritAccountName(entry.account)}
+                            {gerritAccountName(entry.account, resolve)}
                           </Badge>
                         ))}
                       </div>
@@ -296,25 +315,29 @@ export function PullRequestGerritSummary({
   );
 
   return (
-    <section aria-label="Gerrit change" className="space-y-4 px-4 py-3 text-xs">
+    <section aria-label={gt("Gerrit change")} className="space-y-4 px-4 py-3 text-xs">
       {wip ? (
         <Alert variant="warning">
           <CircleDashedIcon />
-          <AlertTitle>Work in progress</AlertTitle>
+          <AlertTitle>
+            <T>Work in progress</T>
+          </AlertTitle>
           <AlertDescription>
-            Reviewers are not notified and the change cannot be submitted until it is ready for
-            review.
+            <T>
+              Reviewers are not notified and the change cannot be submitted until it is ready for
+              review.
+            </T>
           </AlertDescription>
         </Alert>
       ) : null}
       <div className="space-y-1">
-        <GerritRow label="Change">
+        <GerritRow label={gt("Change", { $context: "Gerrit change, noun" })}>
           <span className="truncate font-mono text-muted-foreground">{gerrit.changeId}</span>
           <Badge size="sm" variant="outline">
-            Patch set {gerrit.currentPatchSet}
+            {gt("Patch set {number}", { number: gerrit.currentPatchSet })}
           </Badge>
         </GerritRow>
-        <GerritRow label="Topic">
+        <GerritRow label={gt("Topic", { $context: "Gerrit topic, noun" })}>
           {editingTopic && controls.topic ? (
             <form
               className="flex items-center gap-1"
@@ -324,14 +347,14 @@ export function PullRequestGerritSummary({
               }}
             >
               <Input
-                aria-label="Topic"
+                aria-label={gt("Topic", { $context: "Gerrit topic, noun" })}
                 size="sm"
                 value={topic}
                 onChange={(event) => setTopic(event.target.value)}
                 disabled={pending}
               />
               <Button size="xs" type="submit" disabled={pending}>
-                Save
+                <T>Save</T>
               </Button>
               <Button
                 size="xs"
@@ -340,7 +363,7 @@ export function PullRequestGerritSummary({
                 disabled={pending}
                 onClick={() => setEditingTopic(false)}
               >
-                Cancel
+                <T>Cancel</T>
               </Button>
             </form>
           ) : (
@@ -350,7 +373,9 @@ export function PullRequestGerritSummary({
                   {gerrit.topic}
                 </Badge>
               ) : (
-                <span className="text-muted-foreground">None</span>
+                <span className="text-muted-foreground">
+                  <T>None</T>
+                </span>
               )}
               {controls.topic ? (
                 <Button
@@ -362,15 +387,17 @@ export function PullRequestGerritSummary({
                     setEditingTopic(true);
                   }}
                 >
-                  Edit
+                  <T>Edit</T>
                 </Button>
               ) : null}
             </>
           )}
         </GerritRow>
-        <GerritRow label="Visibility">
+        <GerritRow label={gt("Visibility", { $context: "Gerrit change visibility" })}>
           <Badge size="sm" variant={gerrit.isPrivate ? "warning" : "outline"}>
-            {gerrit.isPrivate ? "Private" : "Public"}
+            {gerrit.isPrivate
+              ? gt("Private", { $context: "Gerrit change visibility" })
+              : gt("Public", { $context: "Gerrit change visibility" })}
           </Badge>
           {controls.private ? (
             <Button
@@ -379,7 +406,7 @@ export function PullRequestGerritSummary({
               disabled={pending}
               onClick={() => void togglePrivate()}
             >
-              {gerrit.isPrivate ? "Make public" : "Make private"}
+              {gerrit.isPrivate ? gt("Make public") : gt("Make private")}
             </Button>
           ) : null}
         </GerritRow>
@@ -387,7 +414,7 @@ export function PullRequestGerritSummary({
       {wip ? (
         <details className="group space-y-3">
           <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
-            Votes and submit requirements
+            <T>Votes and submit requirements</T>
           </summary>
           <div className="space-y-4 pt-3">{review}</div>
         </details>

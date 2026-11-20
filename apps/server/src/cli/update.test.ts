@@ -16,6 +16,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { afterEach, vi } from "vite-plus/test";
 
+import * as BuildProfile from "../buildProfile.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "../cloud/serviceProtocol.ts";
@@ -159,6 +160,11 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
     Effect.gen(function* () {
       const error = yield* runWithPolicy({ mode: "off" });
       assert.equal(error.message, "Example Corp manages T3 Code updates.");
+      using _beta = vi.spyOn(BuildProfile, "isGerritBeta", "get").mockReturnValue(true);
+      assert.equal(
+        (yield* runWithPolicy({ mode: "auto" })).message,
+        BuildProfile.gerritBetaRefusal,
+      );
     }),
   );
 

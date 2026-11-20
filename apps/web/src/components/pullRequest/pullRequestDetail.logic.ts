@@ -826,10 +826,9 @@ export function buildPullRequestTimeline(
       at: detail.createdAt,
       kind: "opened" as const,
       title: resolve(
-        msg(
-          "opened this {term, select, mr {merge request} cr {change request} other {pull request}}",
-          { term },
-        ),
+        msg("opened this {term, select, mr {merge request} cr {change} other {pull request}}", {
+          term,
+        }),
       ),
       body: null,
       markdown: false,
@@ -887,10 +886,9 @@ export function buildPullRequestTimeline(
             at: detail.mergedAt,
             kind: "merged" as const,
             title: resolve(
-              msg(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} merged",
-                { term },
-              ),
+              msg("{term, select, mr {Merge request} cr {Change} other {Pull request}} merged", {
+                term,
+              }),
             ),
             body: null,
             markdown: false,
@@ -912,10 +910,9 @@ export function buildPullRequestTimeline(
             at: detail.closedAt,
             kind: "closed" as const,
             title: resolve(
-              msg(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} closed",
-                { term },
-              ),
+              msg("{term, select, mr {Merge request} cr {Change} other {Pull request}} closed", {
+                term,
+              }),
             ),
             body: null,
             markdown: false,

@@ -2,7 +2,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentQuery } from "~/state/query";
 import { GerritVotePicker } from "./PullRequestGerritSummary";
-import { capitalizeTerm } from "@t3tools/client-runtime/source-control-clients";
 import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@t3tools/contracts";
 import { CheckIcon, MessageSquareIcon, XCircleIcon } from "lucide-react";
 import { msg, useGT, useMessages } from "gt-react";
@@ -48,10 +47,9 @@ const VERDICTS: ReadonlyArray<{
     label: msg("Approve", { $context: "review verdict" }),
     sent: (term) =>
       m(
-        msg(
-          "{term, select, mr {Merge request} cr {Change request} other {Pull request}} approved",
-          { term },
-        ),
+        msg("{term, select, mr {Merge request} cr {Change} other {Pull request}} approved", {
+          term,
+        }),
       ),
     icon: <CheckIcon className="size-3" />,
   },
@@ -188,8 +186,8 @@ export function PullRequestReviewForm({
         toastManager.add({
           type: "error",
           title: voteOnly
-            ? "Votes could not be set"
-            : "Review submitted, but votes could not be set",
+            ? m(msg("Votes could not be set"))
+            : m(msg("Review submitted, but votes could not be set")),
         });
         if (!voteOnly) onSubmitted();
         return;

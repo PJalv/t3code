@@ -914,84 +914,84 @@ export function PullRequestSummaryTab({
       <section className="px-4 pt-2.5 pb-1">
         <div className="space-y-2">
           {detail.gerrit?.isWip === true && detail.state === "open" ? null : (
-          <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label={gt("Reviewers")}>
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {reviewerEntries.length === 0 ? (
-                <span className="text-muted-foreground">
-                  <T context="no reviewers">None</T>
-                </span>
-              ) : (
-                <span className="flex items-center -space-x-1">
-                  {reviewerEntries.map((entry) => {
-                    const login = entry.actor?.login ?? "ghost";
-                    const named =
-                      entry.actor?.name && entry.actor.name !== login
-                        ? `${entry.actor.name} (@${login})`
-                        : login;
-                    return (
-                      <Tooltip key={entry.key}>
-                        <TooltipTrigger
-                          render={
-                            <span
-                              className={cn(
-                                "relative rounded-full hover:z-10",
-                                entry.outcome
-                                  ? pullRequestReviewOutcomeRingClassName(
-                                      entry.outcome,
-                                      entry.stale,
-                                    )
-                                  : undefined,
-                              )}
-                            />
-                          }
-                        >
-                          <PullRequestActorLabel
-                            actor={entry.actor}
-                            provider={detail.provider}
-                            tooltip={false}
-                            variant="avatar"
-                          />
-                          {entry.outcome ? (
-                            <>
-                              <PullRequestReviewOutcomeAvatarBadge
-                                outcome={entry.outcome}
-                                stale={entry.stale}
+            <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label={gt("Reviewers")}>
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {reviewerEntries.length === 0 ? (
+                  <span className="text-muted-foreground">
+                    <T context="no reviewers">None</T>
+                  </span>
+                ) : (
+                  <span className="flex items-center -space-x-1">
+                    {reviewerEntries.map((entry) => {
+                      const login = entry.actor?.login ?? "ghost";
+                      const named =
+                        entry.actor?.name && entry.actor.name !== login
+                          ? `${entry.actor.name} (@${login})`
+                          : login;
+                      return (
+                        <Tooltip key={entry.key}>
+                          <TooltipTrigger
+                            render={
+                              <span
+                                className={cn(
+                                  "relative rounded-full hover:z-10",
+                                  entry.outcome
+                                    ? pullRequestReviewOutcomeRingClassName(
+                                        entry.outcome,
+                                        entry.stale,
+                                      )
+                                    : undefined,
+                                )}
                               />
-                              <span className="sr-only">
-                                {entry.stale
-                                  ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
-                                  : pullRequestReviewOutcomeLabel(entry.outcome, resolve)}
-                              </span>
-                            </>
-                          ) : null}
-                        </TooltipTrigger>
-                        <TooltipPopup side="bottom">
-                          {entry.outcome
-                            ? `${named}: ${
-                                entry.stale
-                                  ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
-                                  : pullRequestReviewOutcomeLabel(entry.outcome, resolve)
-                              }`
-                            : named}
-                        </TooltipPopup>
-                      </Tooltip>
-                    );
-                  })}
-                </span>
-              )}
-              {/* Azure DevOps accepts reviewers but cannot list candidates. */}
-              {detail.capabilities.reviewers.request &&
-              detail.capabilities.reviewers.listCandidates ? (
-                <PullRequestReviewerPicker
-                  provider={detail.provider}
-                  searchable={detail.capabilities.reviewers.searchCandidates === true}
-                  environmentId={environmentId}
-                  reference={reference}
-                  allowed={detail.viewerPermissions.requestReviewers}
-                />
-              ) : null}
-            </span>
-          </PullRequestMetaRow>
+                            }
+                          >
+                            <PullRequestActorLabel
+                              actor={entry.actor}
+                              provider={detail.provider}
+                              tooltip={false}
+                              variant="avatar"
+                            />
+                            {entry.outcome ? (
+                              <>
+                                <PullRequestReviewOutcomeAvatarBadge
+                                  outcome={entry.outcome}
+                                  stale={entry.stale}
+                                />
+                                <span className="sr-only">
+                                  {entry.stale
+                                    ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
+                                    : pullRequestReviewOutcomeLabel(entry.outcome, resolve)}
+                                </span>
+                              </>
+                            ) : null}
+                          </TooltipTrigger>
+                          <TooltipPopup side="bottom">
+                            {entry.outcome
+                              ? `${named}: ${
+                                  entry.stale
+                                    ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
+                                    : pullRequestReviewOutcomeLabel(entry.outcome, resolve)
+                                }`
+                              : named}
+                          </TooltipPopup>
+                        </Tooltip>
+                      );
+                    })}
+                  </span>
+                )}
+                {/* Azure DevOps accepts reviewers but cannot list candidates. */}
+                {detail.capabilities.reviewers.request &&
+                detail.capabilities.reviewers.listCandidates ? (
+                  <PullRequestReviewerPicker
+                    provider={detail.provider}
+                    searchable={detail.capabilities.reviewers.searchCandidates === true}
+                    environmentId={environmentId}
+                    reference={reference}
+                    allowed={detail.viewerPermissions.requestReviewers}
+                  />
+                ) : null}
+              </span>
+            </PullRequestMetaRow>
           )}
           {detail.labels.length > 0 || detail.capabilities.labels === true ? (
             <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label={gt("Labels")}>
@@ -1048,11 +1048,11 @@ export function PullRequestSummaryTab({
               completionScope={completionScope}
               threadRef={threadRef}
               label={gt(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} description",
+                "{term, select, mr {Merge request} cr {Change} other {Pull request}} description",
                 { term: changeRequestTermKind(terminology) },
               )}
               placeholder={gt(
-                "Describe this {term, select, mr {merge request} cr {change request} other {pull request}}",
+                "Describe this {term, select, mr {merge request} cr {change} other {pull request}}",
                 { term: changeRequestTermKind(terminology) },
               )}
               saving={descriptionSaving}
@@ -1064,7 +1064,9 @@ export function PullRequestSummaryTab({
               <PullRequestMarkdown
                 className="min-w-0 flex-1"
                 text={
-                  descriptionText.trim().length > 0 ? descriptionText : gt("_No descriptionText provided._")
+                  descriptionText.trim().length > 0
+                    ? descriptionText
+                    : gt("_No descriptionText provided._")
                 }
                 cwd={detail.workspaceRoot}
                 environmentId={environmentId}

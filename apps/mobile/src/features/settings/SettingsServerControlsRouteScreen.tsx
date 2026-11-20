@@ -25,7 +25,6 @@ import {
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
-import { GerritConnectionSettings } from "./GerritConnectionSettings";
 import { DatabaseStorageNotice } from "./components/DatabaseStorageNotice";
 import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -414,23 +413,6 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
 
             {props.page === "source-control" ? (
               <>
-                {!projectSelected
-                  ? targets
-                      .filter(
-                        (target) =>
-                          target.environment.serverConfig.environment.capabilities.gerrit === true,
-                      )
-                      .map((target) => (
-                        <SettingsSection
-                          key={target.environment.environmentId}
-                          title={`Gerrit · ${target.environment.label}`}
-                        >
-                          <GerritConnectionSettings
-                            environmentId={target.environment.environmentId}
-                          />
-                        </SettingsSection>
-                      ))
-                  : null}
                 {projectSelected ? null : (
                   <SourceControlProvidersSection
                     environments={selectedTargets}

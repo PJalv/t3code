@@ -62,25 +62,31 @@ export function pullRequestActionLabel(
   const term = changeRequestTermKind(terminology);
   switch (action) {
     case "merge":
-      if (terminology.verbs?.merge) return `${terminology.verbs.merge} ${terminology.singular}`;
+      if (term === "cr") return resolve(msg("Submit change"));
       return resolve(
-        msg("Merge {term, select, mr {merge request} cr {change request} other {pull request}}", {
+        msg("Merge {term, select, mr {merge request} cr {change} other {pull request}}", {
           term,
         }),
       );
     case "ready":
-      return terminology.verbs?.ready ?? resolve(msg("Mark ready for review"));
+      return term === "cr"
+        ? resolve(msg("Ready for review"))
+        : resolve(msg("Mark ready for review"));
     case "draft":
-      return terminology.verbs?.draft ?? resolve(msg("Convert to draft"));
+      return term === "cr"
+        ? resolve(msg("Mark work in progress"))
+        : resolve(msg("Convert to draft"));
     case "close":
+      if (term === "cr") return resolve(msg("Abandon change"));
       return resolve(
-        msg("Close {term, select, mr {merge request} cr {change request} other {pull request}}", {
+        msg("Close {term, select, mr {merge request} cr {change} other {pull request}}", {
           term,
         }),
       );
     case "reopen":
+      if (term === "cr") return resolve(msg("Restore change"));
       return resolve(
-        msg("Reopen {term, select, mr {merge request} cr {change request} other {pull request}}", {
+        msg("Reopen {term, select, mr {merge request} cr {change} other {pull request}}", {
           term,
         }),
       );
@@ -92,10 +98,9 @@ export function pullRequestActionLabel(
       return resolve(msg("Disable auto-merge"));
     case "revert":
       return resolve(
-        msg(
-          "Create revert {term, select, mr {merge request} cr {change request} other {pull request}}",
-          { term },
-        ),
+        msg("Create revert {term, select, mr {merge request} cr {change} other {pull request}}", {
+          term,
+        }),
       );
     case "delete-branch":
       return resolve(msg("Delete branch"));
@@ -180,14 +185,14 @@ export function mergeUnavailableReason(
   if (pr.state === "merged")
     return resolve(
       msg(
-        "This {term, select, mr {merge request} cr {change request} other {pull request}} has been merged.",
+        "This {term, select, mr {merge request} cr {change} other {pull request}} has been merged.",
         { term },
       ),
     );
   if (pr.state === "closed")
     return resolve(
       msg(
-        "Reopen this {term, select, mr {merge request} cr {change request} other {pull request}} before merging.",
+        "Reopen this {term, select, mr {merge request} cr {change} other {pull request}} before merging.",
         { term },
       ),
     );
@@ -197,7 +202,7 @@ export function mergeUnavailableReason(
   if (!pr.viewerPermissions.actions.includes("merge"))
     return resolve(
       msg(
-        "Your account cannot merge this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+        "Your account cannot merge this {term, select, mr {merge request} cr {change} other {pull request}}.",
         { term },
       ),
     );
