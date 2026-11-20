@@ -82,8 +82,19 @@ import * as EventStore from "./EventStore.ts";
 import * as ProjectionReplay from "./testkit/ProjectionReplay.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as PullRequestWatchReactor from "./PullRequestWatchReactor.ts";
+import * as GerritWatchCompletion from "../sourceControl/GerritWatchCompletion.ts";
 import { PULL_REQUEST_WATCH_WAKE_LIMIT } from "./pullRequestWatch.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import * as PullRequestProviderRegistry from "../pullRequest/PullRequestProviderRegistry.ts";
+import * as PullRequestReadCache from "../pullRequest/PullRequestReadCache.ts";
+import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as KeyValueStore from "effect/persistence/KeyValueStore";
+import {
+  fakePullRequestProvider,
+  fakeSourceControlProvider,
+} from "@t3tools/source-control-testing/fakeSourceControlDriver";
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as RuntimeLayer from "./runtimeLayer.ts";
@@ -345,7 +356,7 @@ const layerProjectionReplayTest = ProjectionReplay.layer.pipe(
   ),
 );
 
-const layerTest = Layer.mergeAll(
+const layerTestRuntime = Layer.mergeAll(
   RuntimeLayer.layer,
   layerProjectionReplayTest,
   RuntimeLayer.layerEventSink,
@@ -364,6 +375,11 @@ const layerTest = Layer.mergeAll(
   Layer.provide(layerGitWorkflowTest),
   Layer.provide(layerProjectServiceTest),
   Layer.provide(layerPlatformTest),
+);
+
+const layerTest = GerritWatchCompletion.layer.pipe(
+  Layer.provideMerge(layerTestRuntime),
+  Layer.provide(NodeCrypto.layer),
 );
 
 const layerLegacyImportTest = Layer.merge(RuntimeLayer.layer, layerProjectionReplayTest).pipe(
@@ -4872,6 +4888,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
             watchFingerprint: () => Effect.succeed({ status: "steady", remarks: "" }),
             invalidate: () => Effect.void,
             changes: () => Stream.never,
+            subscribeGerritDetailObservations: Effect.succeed(Stream.never),
           }),
           Layer.succeed(Orchestrator.OrchestratorV2, {
             ...orchestrator,
@@ -4947,6 +4964,189 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           "messages",
         ])).messages.flatMap((message) => message.notification?.summary ?? []);
         assert.sameMembers(wakes, [...expected]);
+      }),
+  );
+
+  it.effect.each([
+    { name: "submit", operation: "submit", own: true },
+    { name: "abandon", operation: "abandon", own: true },
+    { name: "external-submit", operation: "submit", own: false },
+    { name: "external-abandon", operation: "abandon", own: false },
+    { name: "failed-submit", operation: "submit", own: false },
+    { name: "failed-abandon", operation: "abandon", own: false },
+    { name: "other-host", operation: "submit", own: false },
+    { name: "other-installation", operation: "submit", own: false },
+    { name: "other-repository", operation: "submit", own: false },
+    { name: "other-change", operation: "submit", own: false },
+    { name: "other-thread", operation: "submit", own: false },
+    { name: "unwatch", operation: "submit", own: true },
+    { name: "restarted", operation: "submit", own: false },
+  ] as const)(
+    "records native Gerrit completion without duplicate wakes ($name)",
+    ({ name, operation, own }) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const completion = yield* GerritWatchCompletion.GerritWatchCompletion;
+        const threadId = ThreadId.make(`native-gerrit-${name}`);
+        const projectId = ProjectId.make(`native-gerrit-${name}`);
+        const key = { host: "review.example", repository: "team/repo", number: 19 };
+        yield* seedProject({
+          projectId,
+          title: name,
+          workspaceRoot: `/workspace/${name}`,
+          defaultModelSelection: null,
+          createdAt: "2026-10-01T00:00:00.000Z",
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${threadId}-create`),
+          threadId,
+          projectId,
+          title: name,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.pull-request.watch",
+          commandId: CommandId.make(`${threadId}-watch`),
+          threadId,
+          ...key,
+          watching: true,
+          until: "merged",
+          link: { url: "https://review.example/c/team/repo/+/19", source: "agent" },
+        });
+        let state: PullRequestDetail["state"] = "open";
+        const terminalRead = yield* Deferred.make<void>();
+        const reactor = yield* PullRequestWatchReactor.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(PullRequestService.PullRequestService)({
+                detail: () =>
+                  Effect.gen(function* () {
+                    if (state !== "open") yield* Deferred.succeed(terminalRead, undefined);
+                    return {
+                      ...watchedPullRequestDetail({
+                        projectId,
+                        number: 19,
+                        at: "2026-10-02T12:00:00.000Z",
+                      }),
+                      ...key,
+                      state,
+                      checks: [
+                        {
+                          name: "lint",
+                          status: "success" as const,
+                          description: null,
+                          url: null,
+                          required: true,
+                        },
+                      ],
+                    };
+                  }),
+                activity: () =>
+                  Effect.succeed({
+                    comments: [],
+                    commentCount: 0,
+                    commentsTruncated: false,
+                    reviewThreads: [],
+                    commits: [],
+                  }),
+              }),
+            ),
+          ),
+        );
+        yield* reactor.sweep;
+        const watch = (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch;
+        assert.strictEqual(watch?.until, "merged");
+        assert.isTrue(
+          (yield* orchestrator.getThreadShell(threadId))?.pendingBackgroundTasks?.some(
+            (task) => task.kind === "monitor" && task.awaited === true,
+          ),
+        );
+        const before = (yield* orchestrator.getThreadRecords(threadId, ["messages"])).messages
+          .length;
+        const writeStarted = yield* Deferred.make<void>();
+        const finishWrite = yield* Deferred.make<void>();
+        const failed = name.startsWith("failed-");
+        const action = completion
+          .action(
+            name === "other-thread" ? ThreadId.make("other-thread") : threadId,
+            {
+              server:
+                name === "other-host"
+                  ? "https://other.example/"
+                  : name === "other-installation"
+                    ? "https://review.example/other"
+                    : "https://review.example/",
+              project: name === "other-repository" ? "other/repo" : key.repository,
+              number: name === "other-change" ? 20 : key.number,
+              operation,
+            },
+            Effect.gen(function* () {
+              yield* Deferred.succeed(writeStarted, undefined);
+              yield* Deferred.await(finishWrite);
+              if (failed) return yield* Effect.fail("write-failed");
+            }),
+          )
+          .pipe(Effect.result);
+        const external = name.startsWith("external-");
+        const actionFiber = external ? undefined : yield* Effect.forkChild(action);
+        if (!external) yield* Deferred.await(writeStarted);
+        if (name === "unwatch" || name === "restarted") {
+          yield* orchestrator.dispatch({
+            type: "thread.pull-request.watch",
+            commandId: CommandId.make(`${threadId}-unwatch`),
+            threadId,
+            ...key,
+            watching: false,
+          });
+          assert.isFalse(
+            (yield* orchestrator.getThreadShell(threadId))!.pendingBackgroundTasks?.some(
+              (task) => task.kind === "monitor",
+            ),
+          );
+          if (name === "restarted") {
+            yield* TestClock.adjust("1 millis");
+            yield* orchestrator.dispatch({
+              type: "thread.pull-request.watch",
+              commandId: CommandId.make(`${threadId}-restart`),
+              threadId,
+              ...key,
+              watching: true,
+              until: "merged",
+            });
+          }
+        }
+        state = operation === "submit" ? "merged" : "closed";
+        yield* TestClock.adjust("10 minutes");
+        const readFiber = yield* Effect.forkChild(reactor.sweep);
+        if (name !== "unwatch") yield* Deferred.await(terminalRead);
+        yield* Deferred.succeed(finishWrite, undefined);
+        if (actionFiber !== undefined) {
+          // Gerrit applied the write, so the caller hears success even when the watch moved.
+          const outcome = yield* Fiber.join(actionFiber);
+          assert.strictEqual(outcome._tag, failed ? "Failure" : "Success");
+        }
+        yield* Fiber.join(readFiber);
+        yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+        yield* reactor.sweep;
+        const messages = (yield* orchestrator.getThreadRecords(threadId, [
+          "messages",
+        ])).messages.slice(before);
+        assert.deepEqual(
+          messages.flatMap((message) => message.notification?.summary ?? []),
+          own ? [] : [`#19: ${state}, stopped watching`],
+        );
+        assert.isUndefined(
+          (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch,
+        );
       }),
   );
 
@@ -6148,13 +6348,13 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
-  it.effect(
-    "reads a watched pull request when the host reports a change, and wakes once per change",
-    () =>
+  it.effect.each(["host", "local", "local-paused"] as const)(
+    "reads a watched pull request on %s change hints, and wakes once per change",
+    (source) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
-        const threadId = ThreadId.make("runtime-pull-request-watch-host-event");
-        const projectId = ProjectId.make("pr-watch-host-event-project");
+        const threadId = ThreadId.make(`runtime-pull-request-watch-host-event-${source}`);
+        const projectId = ProjectId.make(`pr-watch-host-event-project-${source}`);
         yield* seedProject({
           projectId,
           title: "Watch host events",
@@ -6166,7 +6366,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           type: "thread.create",
           createdBy: "user",
           creationSource: "web",
-          commandId: CommandId.make("pr-watch-host-event-create"),
+          commandId: CommandId.make(`pr-watch-host-event-create-${source}`),
           threadId,
           projectId,
           title: "Watch host events",
@@ -6179,7 +6379,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         const key = { host: "github.com", repository: "pingdotgg/t3code", number: 15 };
         yield* orchestrator.dispatch({
           type: "thread.pull-request.watch",
-          commandId: CommandId.make("pr-watch-host-event-start"),
+          commandId: CommandId.make(`pr-watch-host-event-start-${source}`),
           threadId,
           ...key,
           watching: true,
@@ -6190,16 +6390,28 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           { name: "lint", status: "pending", description: null, url: null, required: true },
         ];
         let fingerprints = 0;
+        let targetedReads = 0;
         const events = yield* Queue.unbounded<void>();
+        const localEvents =
+          yield* Queue.unbounded<ReadonlyArray<PullRequestService.GerritDetailObservation>>();
+        const fingerprintReads = yield* Queue.unbounded<void>();
+        let paused = false;
         const following = yield* Deferred.make<void>();
         const detailReads = yield* Queue.unbounded<void>();
         const host = Layer.mergeAll(
           NodeServices.layer,
           NodeCrypto.layer,
           Layer.mock(PullRequestService.PullRequestService)({
-            detail: () =>
-              Queue.offer(detailReads, undefined).pipe(
-                Effect.as({
+            detail: (reference) =>
+              Effect.gen(function* () {
+                assert.strictEqual(reference.expectedAccountId, undefined);
+                assert.isFalse(yield* PullRequestService.ObserveGerritDetails);
+                assert.isFalse(yield* SourceControlRateLimit.Interactive);
+                if (reference.projectId === projectId) {
+                  targetedReads += 1;
+                  yield* Queue.offer(detailReads, undefined);
+                }
+                return {
                   ...watchedPullRequestDetail({
                     projectId,
                     number: 15,
@@ -6207,8 +6419,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
                   }),
                   headSha: "aaaaaaaaaa",
                   checks,
-                }),
-              ),
+                };
+              }),
             activity: () =>
               Effect.succeed({
                 comments: [],
@@ -6217,14 +6429,45 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
                 reviewThreads: [],
                 commits: [],
               }),
-            // A fresh fingerprint every time, so every pass reads the detail.
-            watchFingerprint: () =>
-              Effect.sync(() => ({ status: String(++fingerprints), remarks: "" })),
-            invalidate: () => Effect.void,
-            changes: () =>
-              Stream.fromEffectDrain(Deferred.succeed(following, undefined)).pipe(
-                Stream.concat(Stream.fromQueue(events)),
+            watchFingerprint: (reference) =>
+              (reference.projectId === projectId
+                ? Queue.offer(fingerprintReads, undefined)
+                : Effect.void
+              ).pipe(
+                Effect.andThen(
+                  Effect.suspend(() =>
+                    paused
+                      ? Effect.fail(
+                          new PullRequestOperationError({
+                            operation: "watchFingerprint",
+                            detail: "Paused",
+                            cause: new PullRequestProviderError({
+                              provider: SourceControlProviderKind.make("gerrit"),
+                              operation: "watchFingerprint",
+                              reason: "rate-limited",
+                              detail: "Paused",
+                            }),
+                          }),
+                        )
+                      : Effect.succeed({
+                          status: source === "host" ? String(++fingerprints) : "stable",
+                          remarks: "",
+                        }),
+                  ),
+                ),
               ),
+            invalidate: () => Effect.void,
+            resolveReadReference: (reference) =>
+              Effect.succeed({ ...reference, host: reference.host ?? key.host }),
+            subscribeGerritDetailObservations: Effect.succeed(
+              Stream.fromQueue(localEvents).pipe(Stream.flatMap(Stream.fromIterable)),
+            ),
+            changes: (reference) =>
+              reference.projectId === projectId
+                ? Stream.fromEffectDrain(Deferred.succeed(following, undefined)).pipe(
+                    Stream.concat(Stream.fromQueue(events)),
+                  )
+                : Stream.empty,
           }),
         );
         const wakes = Effect.map(
@@ -6240,15 +6483,47 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         // The feed starts after the first sweep has read the pull request.
         yield* Deferred.await(following);
         yield* Queue.take(detailReads);
+        yield* Queue.take(fingerprintReads);
 
         checks = [
           { name: "lint", status: "failure", description: null, url: null, required: true },
         ];
-        yield* Queue.offer(events, undefined);
+        const hint = {
+          reference: { projectId, ...key, expectedAccountId: "different-ui-account" },
+          url: "https://github.com/pingdotgg/t3code/pull/15",
+          credentialFingerprint: "ui-credential",
+        };
+        const notify =
+          source === "host"
+            ? Queue.offer(events, undefined)
+            : Queue.offer(localEvents, [
+                {
+                  ...hint,
+                  reference: { ...hint.reference, projectId: ProjectId.make("other-project") },
+                },
+                { ...hint, reference: { ...hint.reference, host: "other.example" } },
+                { ...hint, reference: { ...hint.reference, repository: "other/repo" } },
+                { ...hint, reference: { ...hint.reference, number: 999 } },
+                { ...hint, url: "https://github.com/other-installation/c/15" },
+                hint,
+                hint,
+              ]);
+        if (source === "local-paused") {
+          paused = true;
+          yield* notify;
+          yield* Queue.take(fingerprintReads);
+          yield* reactor.sweep;
+          assert.strictEqual(yield* Queue.size(detailReads), 0);
+          assert.lengthOf(yield* wakes, 0);
+          paused = false;
+          yield* reactor.sweep;
+        } else {
+          yield* notify;
+        }
         // The clock never moves, so no sweep can be the one that reads the failure.
         yield* Queue.take(detailReads);
         // Nothing new: this read must compare against the watch the last one recorded.
-        yield* Queue.offer(events, undefined);
+        yield* notify;
         yield* Queue.take(detailReads);
         // A sweep waits for the change read in flight.
         yield* reactor.sweep;
@@ -6256,10 +6531,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         const woken = yield* wakes;
         assert.lengthOf(woken, 1);
         assert.include(woken[0]!.notification?.summary ?? "", "failed");
+        if (source !== "host") assert.strictEqual(targetedReads, 3);
 
         yield* orchestrator.dispatch({
           type: "thread.pull-request.watch",
-          commandId: CommandId.make("pr-watch-host-event-end"),
+          commandId: CommandId.make(`pr-watch-host-event-end-${source}`),
           threadId,
           ...key,
           watching: false,
@@ -6333,6 +6609,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
               }),
             invalidate: () => Effect.void,
             changes: () => Stream.never,
+            subscribeGerritDetailObservations: Effect.succeed(Stream.never),
           }),
           // Each subscriber reads every event, as each event sink stream does, and replay means one
           // that subscribes late misses none.
@@ -6395,6 +6672,245 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         yield* worker.drain();
       }),
+  );
+
+  it.effect("routes local Gerrit observations to an Inbox watch through its checkout", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("gerrit-inbox-a");
+      const checkoutId = ProjectId.make("gerrit-checkout-b");
+      const otherId = ProjectId.make("gerrit-checkout-c");
+      const otherHostId = ProjectId.make("gerrit-checkout-d");
+      const threadId = ThreadId.make("gerrit-inbox-watch");
+      const at = "2026-10-02T12:00:00.000Z";
+      const key = { host: "review.example", repository: "pingdotgg/t3code", number: 15 };
+      const url = "https://review.example/gerrit/c/pingdotgg/t3code/+/15";
+      const shells = [projectId, checkoutId, otherId, otherHostId].map((id) => {
+        const host = id === otherHostId ? "other.example" : key.host;
+        return {
+          id,
+          title: id,
+          workspaceRoot: `/workspace/${id}`,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: at,
+          updatedAt: at,
+          ...(id === projectId
+            ? {}
+            : {
+                repositoryIdentity: {
+                  canonicalKey: `${host}/${key.repository}`,
+                  provider: SourceControlProviderKind.make("gerrit"),
+                  displayName: key.repository,
+                  locator: {
+                    source: "git-remote" as const,
+                    remoteName: "origin",
+                    remoteUrl: `https://${host}/${key.repository}.git`,
+                  },
+                },
+              }),
+        };
+      });
+      yield* seedProject({
+        projectId,
+        title: "Inbox",
+        workspaceRoot: shells[0]!.workspaceRoot,
+        defaultModelSelection: null,
+        createdAt: at,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("gerrit-inbox-create"),
+        threadId,
+        projectId,
+        title: "Inbox watch",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.watch",
+        commandId: CommandId.make("gerrit-inbox-start"),
+        threadId,
+        ...key,
+        watching: true,
+        link: { url, source: "agent" },
+      });
+
+      const processed = yield* Queue.unbounded<void>();
+      const following = yield* Deferred.make<void>();
+      let routingFails = false;
+      let inboxResolutions = 0;
+      let backgroundReads = 0;
+      let revision = 0;
+      let observedUrl = url;
+      let status: PullRequestCheck["status"] = "pending";
+      const provider = fakePullRequestProvider("gerrit", {
+        getViewer: () => Effect.succeed("watch-account"),
+        withVerifiedCredential: (_, use) =>
+          use({ accountId: "ui-account", viewer: "ui-viewer", credentialFingerprint: "ui-key" }),
+        getChangeRequest: ({ cwd }) =>
+          Effect.gen(function* () {
+            if (!(yield* PullRequestService.ObserveGerritDetails)) {
+              assert.isFalse(yield* SourceControlRateLimit.Interactive);
+              assert.strictEqual(cwd, shells[1]!.workspaceRoot);
+              backgroundReads++;
+            }
+            return {
+              number: key.number,
+              title: "Watched Gerrit change",
+              body: "",
+              author: { login: "watch-account", name: null, avatarUrl: null },
+              headBranch: "feature",
+              headSha: "abc1234def",
+              baseBranch: "main",
+              state: "open" as const,
+              isDraft: false,
+              mergeability: "mergeable" as const,
+              additions: 1,
+              deletions: 0,
+              changedFiles: 1,
+              createdAt: at,
+              closedAt: null,
+              mergedAt: null,
+              reviewers: [],
+              labels: [],
+              mergeCapabilities: { merge: true, squash: false, rebase: false },
+              viewerPermissions: {
+                actions: [],
+                comment: true,
+                resolve: false,
+                verdicts: [],
+                requestReviewers: false,
+              },
+              url: observedUrl,
+              reviewRequestLogins: [],
+              updatedAt: `2026-10-02T12:00:${String(revision).padStart(2, "0")}.000Z`,
+              checks: [{ name: "lint", status, description: null, url: null, required: true }],
+            };
+          }),
+        getChangeRequestActivity: () =>
+          Effect.succeed({
+            comments: [],
+            commentCount: 0,
+            commentsTruncated: false,
+            reviewThreads: [],
+            commits: [],
+          }),
+        getChangeRequestWatchFingerprint: () =>
+          Effect.succeed({ status: "stable", remarks: "", coversDetail: true }),
+        changeRequestEvents: () =>
+          Stream.fromEffectDrain(Deferred.succeed(following, undefined)).pipe(
+            Stream.concat(Stream.never),
+          ),
+      });
+      const serviceContext = yield* Layer.build(
+        Layer.mergeAll(
+          ServerSettings.layerTest(),
+          Layer.succeed(
+            PullRequestProviderRegistry.PullRequestProviderRegistry,
+            PullRequestProviderRegistry.fromProviders([provider]),
+          ),
+          Layer.mock(ProjectService.ProjectService)({
+            getShell: (id) =>
+              Effect.sync(() => {
+                if (id === projectId) inboxResolutions++;
+                return Option.fromNullishOr(shells.find((shell) => shell.id === id));
+              }),
+            listShells: () => Effect.sync(() => (routingFails ? [] : shells)),
+          }),
+          Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+            resolve: () => Effect.succeed(null),
+          }),
+          Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+            resolveLink: () => undefined,
+            get: () => Effect.succeed(fakeSourceControlProvider("gerrit")),
+          }),
+          SourceControlRateLimit.layer,
+          PullRequestFilesViewed.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+          Layer.effect(PullRequestReadCache.PullRequestReadCache, PullRequestReadCache.make).pipe(
+            Layer.provide(KeyValueStore.layerMemory),
+            Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+          ),
+        ),
+      );
+      const service = yield* PullRequestService.make.pipe(Effect.provideContext(serviceContext));
+      const reactor = yield* PullRequestWatchReactor.make.pipe(
+        Effect.provideService(PullRequestService.PullRequestService, {
+          ...service,
+          subscribeGerritDetailObservations: service.subscribeGerritDetailObservations.pipe(
+            Effect.map((stream) =>
+              stream.pipe(
+                Stream.flatMap((hint) =>
+                  Stream.make(hint, hint).pipe(
+                    // Acknowledge consumption; duplicate delivery must still make one group read.
+                    Stream.concat(Stream.fromEffectDrain(Queue.offer(processed, undefined))),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }),
+        Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      );
+      const wakes = orchestrator
+        .getThreadRecords(threadId, ["messages"])
+        .pipe(
+          Effect.map(({ messages }) => messages.filter((message) => message.notification != null)),
+        );
+      yield* reactor.start();
+      yield* Deferred.await(following);
+      assert.strictEqual(backgroundReads, 1);
+      assert.strictEqual(yield* Queue.size(processed), 0);
+      status = "failure";
+      const observe = Effect.fn("test.observeGerritCheckout")(function* (
+        id: ProjectId,
+        host = key.host,
+      ) {
+        revision++;
+        const ref = { projectId: id, ...key, host, expectedAccountId: "ui-account" };
+        yield* service.invalidate({ reference: ref });
+        yield* service.withRoutingCredential(ref, service.detail(ref));
+        yield* Queue.take(processed);
+      });
+      yield* observe(otherId);
+      assert.strictEqual(backgroundReads, 1);
+      inboxResolutions = 0;
+      yield* observe(otherHostId, "other.example");
+      observedUrl = "https://review.example/other-installation/c/pingdotgg/t3code/+/15";
+      yield* observe(checkoutId);
+      assert.strictEqual(inboxResolutions, 0);
+      assert.strictEqual(backgroundReads, 1);
+      observedUrl = url;
+      routingFails = true;
+      yield* observe(checkoutId);
+      assert.strictEqual(backgroundReads, 1);
+      assert.lengthOf(yield* wakes, 0);
+      routingFails = false;
+      yield* observe(checkoutId);
+      // No clock advance: this wake must come from the real service's observation stream.
+      assert.strictEqual(backgroundReads, 2);
+      assert.lengthOf(yield* wakes, 1);
+      yield* observe(checkoutId);
+      assert.strictEqual(backgroundReads, 3);
+      yield* TestClock.adjust("2 minutes");
+      yield* reactor.sweep;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.lengthOf(yield* wakes, 1);
+      assert.strictEqual(backgroundReads, 3);
+      assert.strictEqual(yield* Queue.size(processed), 0);
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.watch",
+        commandId: CommandId.make("gerrit-inbox-end"),
+        threadId,
+        ...key,
+        watching: false,
+      });
+    }),
   );
 
   it.effect("wakes for checks that complete after the no-checks notice on the same head", () =>

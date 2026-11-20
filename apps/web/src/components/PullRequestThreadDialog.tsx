@@ -163,7 +163,7 @@ export function PullRequestThreadDialog({
         setPrepareErrorMessage(
           thrownErrorMessage(error, m) ??
             gt(
-              "Failed to prepare {term, select, mr {merge request} cr {change request} other {pull request}} thread.",
+              "Failed to prepare {term, select, mr {merge request} cr {change} other {pull request}} thread.",
               { term },
             ),
         );
@@ -185,12 +185,12 @@ export function PullRequestThreadDialog({
     ? null
     : reference.trim().length === 0
       ? gt(
-          "Paste a {term, select, mr {merge request} cr {change request} other {pull request}} URL, checkout command, or enter 123 / #123.",
+          "Paste a {term, select, mr {merge request} cr {change} other {pull request}} URL, checkout command, or enter 123 / #123.",
           { term },
         )
       : parsedReference === null
         ? gt(
-            "Use a {term, select, mr {merge request} cr {change request} other {pull request}} URL, checkout command, 123, or #123.",
+            "Use a {term, select, mr {merge request} cr {change} other {pull request}} URL, checkout command, 123, or #123.",
             { term },
           )
         : null;
@@ -202,7 +202,7 @@ export function PullRequestThreadDialog({
       : preparePullRequestThreadAction.error
         ? (thrownErrorMessage(preparePullRequestThreadAction.error, messages) ??
           gt(
-            "Failed to prepare {term, select, mr {merge request} cr {change request} other {pull request}} thread.",
+            "Failed to prepare {term, select, mr {merge request} cr {change} other {pull request}} thread.",
             { term },
           ))
         : null);
@@ -227,14 +227,13 @@ export function PullRequestThreadDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center">
             <SourceControlIcon className="me-2 size-4" />
-            {gt(
-              "Checkout {term, select, mr {merge request} cr {change request} other {pull request}}",
-              { term },
-            )}
+            {gt("Checkout {term, select, mr {merge request} cr {change} other {pull request}}", {
+              term,
+            })}
           </DialogTitle>
           <DialogDescription>
             {gt(
-              "Resolve a {provider} {term, select, mr {merge request} cr {change request} other {pull request}}, then create the draft thread in the main repo or in a dedicated worktree.",
+              "Resolve a {provider} {term, select, mr {merge request} cr {change} other {pull request}}, then create the draft thread in the main repo or in a dedicated worktree.",
               { provider: sourceControlPresentation.providerName, term },
             )}
           </DialogDescription>
@@ -242,7 +241,7 @@ export function PullRequestThreadDialog({
         <DialogPanel>
           <label className="grid gap-1.5">
             <span className="text-xs font-medium text-foreground capitalize">
-              {gt("{term, select, mr {merge request} cr {change request} other {pull request}}", {
+              {gt("{term, select, mr {merge request} cr {change} other {pull request}}", {
                 term,
                 $context: "field label, capitalized by CSS",
               })}
@@ -250,7 +249,7 @@ export function PullRequestThreadDialog({
             <Input
               ref={referenceInputRef}
               placeholder={gt(
-                "{term, select, mr {MR} cr {change request} other {PR}} URL, checkout command, or #42",
+                "{term, select, mr {MR} cr {change} other {PR}} URL, checkout command, or #42",
                 {
                   term,
                 },
@@ -305,7 +304,7 @@ export function PullRequestThreadDialog({
             <div className="flex items-center gap-2 text-muted-foreground text-xs">
               <Spinner size="sm" />
               {gt(
-                "Resolving {term, select, mr {merge request} cr {change request} other {pull request}}...",
+                "Resolving {term, select, mr {merge request} cr {change} other {pull request}}...",
                 { term },
               )}
             </div>

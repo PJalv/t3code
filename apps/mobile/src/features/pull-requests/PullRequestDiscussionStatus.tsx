@@ -1,9 +1,11 @@
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { useGT } from "gt-react-native";
 import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 
 export function PullRequestDiscussionStatus({ resolved }: { resolved: boolean }) {
+  const gt = useGT();
   return (
     <View
       className={
@@ -26,7 +28,9 @@ export function PullRequestDiscussionStatus({ resolved }: { resolved: boolean })
             : "text-xs font-t3-medium text-warning-foreground"
         }
       >
-        {resolved ? "Resolved" : "Unresolved"}
+        {resolved
+          ? gt("Resolved", { $context: "review thread state" })
+          : gt("Unresolved", { $context: "review thread state" })}
       </Text>
     </View>
   );

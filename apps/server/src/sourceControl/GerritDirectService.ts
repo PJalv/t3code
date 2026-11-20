@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GerritTarget from "./GerritTarget.ts";
+import * as GerritWatchCompletion from "./GerritWatchCompletion.ts";
 import * as GerritDirectUpload from "./GerritDirectUpload.ts";
 
 export class GerritDirectError extends Schema.TaggedError<GerritDirectError>()(
@@ -267,7 +268,15 @@ const make = Effect.gen(function* () {
           });
       }
     })();
-    const result = yield* run.pipe(
+    const nativeAction = yield* GerritWatchCompletion.NativeAction;
+    const write =
+      a.kind === "submit" || a.kind === "abandon"
+        ? nativeAction(
+            { server: resolved.server, project: resolved.project, number, operation: a.kind },
+            run,
+          )
+        : run;
+    const result = yield* write.pipe(
       Effect.mapError((cause) =>
         isDirectError(cause) ? cause : new GerritDirectError({ reason: "action", cause }),
       ),

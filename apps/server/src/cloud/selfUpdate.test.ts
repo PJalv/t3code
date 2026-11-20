@@ -1,3 +1,5 @@
+import { vi } from "vite-plus/test";
+import * as BuildProfile from "../buildProfile.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import type { ManagedPolicyDocument } from "@t3tools/contracts";
@@ -177,6 +179,29 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
+  it.effect.each(["web", "desktop"] as const)(
+    "refuses beta %s update and commit before download or handoff",
+    (mode) =>
+      Effect.gen(function* () {
+        using _beta = vi.spyOn(BuildProfile, "isGerritBeta", "get").mockReturnValue(true);
+        const { selfUpdate, order, urls } = yield* makeHarness({ mode });
+        expect(
+          ServerSelfUpdate.resolveServerSelfUpdateCapability({
+            desktopManaged: mode === "desktop",
+            launcherManaged: true,
+          }),
+        ).toBeNull();
+        expect(
+          (yield* selfUpdate.update({ targetVersion: "1.1.0", stageOnly: true }).pipe(Effect.flip))
+            .reason,
+        ).toBe(BuildProfile.gerritBetaRefusal);
+        expect((yield* selfUpdate.commitDesktopUpdate("request").pipe(Effect.flip)).reason).toBe(
+          BuildProfile.gerritBetaRefusal,
+        );
+        expect(order).toEqual([]);
+        expect(urls).toEqual([]);
+      }),
+  );
   it.effect.each([
     { asset: "checksums", status: 504 },
     { asset: "archive", status: 503 },

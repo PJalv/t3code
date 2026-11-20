@@ -174,9 +174,23 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
       const cancelled = clone.phase === "cancelled";
       const options = stackedThreadToast({
         type: cancelled ? "info" : "error",
-        title: cancelled ? m(msg("Cancelled cloning {name}", { name })) : m(msg("Failed to clone {name}", { name })),
+        title: cancelled
+          ? m(msg("Cancelled cloning {name}", { name }))
+          : m(msg("Failed to clone {name}", { name })),
         description: clone.recoveryRequired
-          ? `Publication may have completed. Inspect ${clone.recoveryPaths?.join(", ") || "the private attempt"} and ${clone.destinationPath}. Do not retry or delete either path.`
+          ? clone.recoveryPaths?.length
+            ? m(
+                msg(
+                  "Publication may have completed. Inspect {paths} and {destination}. Do not retry or delete either path.",
+                  { paths: clone.recoveryPaths.join(", "), destination: clone.destinationPath },
+                ),
+              )
+            : m(
+                msg(
+                  "Publication may have completed. Inspect the private attempt and {destination}. Do not retry or delete either path.",
+                  { destination: clone.destinationPath },
+                ),
+              )
           : cancelled
             ? (clone.recoveryPath ?? clone.destinationPath)
             : (clone.error ?? m(msg("The clone failed."))),

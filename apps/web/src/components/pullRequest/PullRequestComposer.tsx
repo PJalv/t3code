@@ -83,16 +83,15 @@ export function PullRequestComposer({
         aria-label={
           pendingComments.length > 0
             ? gt(
-                "{count, plural, one {Review {term, select, mr {merge request} cr {change request} other {pull request}}, {count} comment pending} other {Review {term, select, mr {merge request} cr {change request} other {pull request}}, {count} comments pending}}",
+                "{count, plural, one {Review {term, select, mr {merge request} cr {change} other {pull request}}, {count} comment pending} other {Review {term, select, mr {merge request} cr {change} other {pull request}}, {count} comments pending}}",
                 { count: pendingComments.length, term },
               )
             : reviewStarted || !canComment
-              ? gt(
-                  "Review {term, select, mr {merge request} cr {change request} other {pull request}}",
-                  { term },
-                )
+              ? gt("Review {term, select, mr {merge request} cr {change} other {pull request}}", {
+                  term,
+                })
               : gt(
-                  "Comment on {term, select, mr {merge request} cr {change request} other {pull request}}",
+                  "Comment on {term, select, mr {merge request} cr {change} other {pull request}}",
                   { term },
                 )
         }
@@ -115,7 +114,7 @@ export function PullRequestComposer({
         width="lg"
         initialFocus={mode === "review" ? reviewRef : commentRef}
         aria-label={gt(
-          "{term, select, mr {Merge request} cr {Change request} other {Pull request}} composer",
+          "{term, select, mr {Merge request} cr {Change} other {Pull request}} composer",
           { term },
         )}
       >
@@ -142,12 +141,11 @@ export function PullRequestComposer({
           ) : (
             <PopoverTitle>
               {mode === "review"
-                ? gt(
-                    "Review {term, select, mr {merge request} cr {change request} other {pull request}}",
-                    { term },
-                  )
+                ? gt("Review {term, select, mr {merge request} cr {change} other {pull request}}", {
+                    term,
+                  })
                 : gt(
-                    "Comment on {term, select, mr {merge request} cr {change request} other {pull request}}",
+                    "Comment on {term, select, mr {merge request} cr {change} other {pull request}}",
                     { term },
                   )}
             </PopoverTitle>

@@ -55,6 +55,7 @@ async function setup(platform: "ios" | "android" = "ios") {
   vi.stubGlobal("WebSocket", Socket);
   const configuration = {
     platform,
+    labels: { screen: "Device screen", reconnectingControls: "Reconnecting device controls..." },
     deviceId: "fixture-device",
     access: {
       httpBase: "https://device.test",

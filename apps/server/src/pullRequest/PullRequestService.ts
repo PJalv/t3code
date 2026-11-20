@@ -109,6 +109,19 @@ export interface PullRequestMergeEvent extends PullRequestRef {
   readonly mergedAt: string;
 }
 
+export interface GerritDetailObservation {
+  readonly reference: PullRequestRef;
+  /** The canonical change URL retains the installation path missing from host-only refs. */
+  readonly url: string;
+  readonly credentialFingerprint: string | null;
+}
+
+// Watch reads maintain the dedupe baseline but must not schedule themselves again.
+export const ObserveGerritDetails = Context.Reference<boolean>(
+  "t3/PullRequestService/ObserveGerritDetails",
+  { defaultValue: () => true },
+);
+
 type PullRequestReading = Pick<
   PullRequestSummary,
   "state" | "isDraft" | "updatedAt" | "observedAt"
@@ -192,6 +205,10 @@ export class PullRequestService extends Context.Service<
     readonly routing: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestRoutingResult, PullRequestError>;
+    /** Resolve checkout scope without reading or adopting a caller's account identity. */
+    readonly resolveReadReference: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestRef & { readonly host: string }, PullRequestError>;
     readonly routingIdentity: (
       input: PullRequestRoutingIdentityInput,
     ) => Effect.Effect<PullRequestRoutingIdentityResult, PullRequestError>;
@@ -224,6 +241,11 @@ export class PullRequestService extends Context.Service<
     >;
     readonly subscribeStateChanges: Effect.Effect<
       Stream.Stream<ThreadPullRequestKey>,
+      never,
+      Scope.Scope
+    >;
+    readonly subscribeGerritDetailObservations: Effect.Effect<
+      Stream.Stream<GerritDetailObservation>,
       never,
       Scope.Scope
     >;
@@ -778,6 +800,7 @@ const observeRead = Effect.fnUntraced(function* <A, E, R>(read: Effect.Effect<A,
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const stateChanges = yield* PubSub.sliding<ThreadPullRequestKey>(64);
+  const gerritDetailObservations = yield* PubSub.sliding<GerritDetailObservation>(64);
   const pullRequestRefreshes = yield* SubscriptionRef.make(0);
   const linkedThreadRefreshes = yield* SubscriptionRef.make(0);
   const registry = yield* PullRequestProviderRegistry.PullRequestProviderRegistry;
@@ -3442,10 +3465,67 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const observedGerritDetails = new Map<
+    string,
+    PullRequestReading & { readonly headSha: string | undefined }
+  >();
+  const gerritObservationKey = (ref: CredentialRef, url: string) =>
+    JSON.stringify([
+      refScope(ref),
+      url,
+      ref.expectedAccountId ?? null,
+      ref[credentialNamespace] ?? null,
+    ]);
+  const observeGerritDetail = Effect.fn("PullRequestService.observeGerritDetail")(function* (
+    key: string,
+    value: PullRequestDetail,
+  ) {
+    const emit = yield* ObserveGerritDetails;
+    const ref: CredentialRef = refOfCacheKey(key);
+    if (value.provider !== "gerrit" || refCacheKey(ref) !== key) return;
+    const identity = gerritObservationKey(ref, value.url);
+    const previous = observedGerritDetails.get(identity);
+    if (!supersedesReading(previous, value)) return;
+    observedGerritDetails.delete(identity);
+    observedGerritDetails.set(identity, {
+      headSha: value.headSha,
+      state: value.state,
+      isDraft: value.isDraft,
+      updatedAt: value.updatedAt,
+      observedAt: value.observedAt,
+    });
+    if (observedGerritDetails.size > DETAIL_CACHE_CAPACITY) {
+      observedGerritDetails.delete(observedGerritDetails.keys().next().value!);
+    }
+    if (
+      !emit ||
+      (previous !== undefined &&
+        previous.headSha === value.headSha &&
+        previous.state === value.state &&
+        previous.isDraft === value.isDraft &&
+        previous.updatedAt === value.updatedAt)
+    )
+      return;
+    yield* PubSub.publish(gerritDetailObservations, {
+      reference: {
+        projectId: ref.projectId,
+        host: ref.host,
+        repository: ref.repository,
+        number: ref.number,
+        ...(ref.expectedAccountId === undefined
+          ? {}
+          : { expectedAccountId: ref.expectedAccountId }),
+      },
+      url: value.url,
+      credentialFingerprint: ref[credentialNamespace] ?? null,
+    });
+  });
+
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
       const statsKey = statsCacheKey(key);
       return detailUncached(refOfCacheKey(key)).pipe(
+        Effect.tap((value) => observeGerritDetail(key, value)),
         Effect.tap(
           Effect.fn("PullRequestService.recordDetailStats")(function* (value: PullRequestDetail) {
             // GitHub and Azure detail include the same checks; the checks TTL counts from their observation.
@@ -3962,7 +4042,10 @@ export const make = Effect.gen(function* () {
     if (read === undefined) {
       return yield* new PullRequestOperationError({
         operation: "checkLogs",
-        detail: "This host cannot read check logs.",
+        detail:
+          project.api.kind === "gerrit"
+            ? "Gerrit provides check statuses and URLs when Checks is configured, but this integration cannot read CI logs. Open the check URL from the change's checks, or use your configured CI system."
+            : `The ${project.api.kind} integration does not support reading CI logs. Open the check URL from the change's checks, or use your CI system.`,
       });
     }
     const checks = yield* selectChecks(project, input, "checkLogs");
@@ -3998,7 +4081,10 @@ export const make = Effect.gen(function* () {
     if (rerun === undefined) {
       return yield* new PullRequestOperationError({
         operation: "rerunChecks",
-        detail: "This host cannot re-run checks.",
+        detail:
+          project.api.kind === "gerrit"
+            ? "Gerrit provides check statuses and URLs when Checks is configured, but this integration cannot re-run checks. Open the check URL from the change's checks and re-run the job in your configured CI system."
+            : `The ${project.api.kind} integration does not support re-running checks. Open the check URL from the change's checks and re-run the job in your CI system.`,
       });
     }
     const checks = yield* selectChecks(project, input, "rerunChecks");
@@ -4184,6 +4270,7 @@ export const make = Effect.gen(function* () {
     routing,
     routingIdentity,
     withRoutingCredential,
+    resolveReadReference: canonicalRef,
     list,
     filterOptions,
     // The local operation owns the span; this wrapper only canonicalizes refs.
@@ -4200,6 +4287,9 @@ export const make = Effect.gen(function* () {
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
     subscribeStateChanges: PubSub.subscribe(stateChanges).pipe(
+      Effect.map((subscription) => Stream.fromSubscription(subscription)),
+    ),
+    subscribeGerritDetailObservations: PubSub.subscribe(gerritDetailObservations).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
     reportState,

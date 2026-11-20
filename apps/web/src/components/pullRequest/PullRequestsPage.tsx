@@ -1527,18 +1527,18 @@ export function PullRequestsPage() {
     void writeTextToClipboard(url, {
       target: `${terminology.singular} link`,
       unavailableMessage: msg(
-        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change request} other {pull request}} link.",
+        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change} other {pull request}} link.",
         { term: changeRequestTermKind(terminology) },
       ),
       failureMessage: msg(
-        "Failed to copy {term, select, mr {merge request} cr {change request} other {pull request}} link to the clipboard.",
+        "Failed to copy {term, select, mr {merge request} cr {change} other {pull request}} link to the clipboard.",
         { term: changeRequestTermKind(terminology) },
       ),
     }).then(undefined, (error) => {
       toastManager.add({
         type: "error",
         title: m(
-          msg("Failed to copy {term, select, mr {MR} cr {change request} other {PR}} link", {
+          msg("Failed to copy {term, select, mr {MR} cr {change} other {PR}} link", {
             term: changeRequestTermKind(terminology),
           }),
         ),

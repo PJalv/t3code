@@ -22,6 +22,8 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { Argument, Flag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
+import { isGerritBeta } from "../buildProfile.ts";
+import { validateBetaHome } from "./betaHome.ts";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
@@ -277,6 +279,18 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
   const selectAutomaticPort = options?.selectAutomaticPort ?? findAvailablePort;
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
+  if (isGerritBeta) {
+    yield* validateBetaHome(Option.getOrUndefined(flags.baseDir));
+    flags = {
+      ...flags,
+      mode: Option.some("web"),
+      host: Option.some("127.0.0.1"),
+      port: Option.some(Option.getOrElse(flags.port, () => 4773)),
+      noBrowser: Option.some(true),
+      lan: Option.some(false),
+      tailscaleServeEnabled: Option.some(false),
+    };
+  }
   const env = yield* EnvServerConfig;
   const normalizedFlags = {
     mode: flags.mode ?? Option.none(),
@@ -293,7 +307,9 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
     tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     lan: flags.lan ?? Option.none(),
   } satisfies CliServerFlags;
-  const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
+  const bootstrapFd = isGerritBeta
+    ? undefined
+    : (Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd);
   const bootstrapEnvelope =
     bootstrapFd !== undefined
       ? yield* readBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd)
@@ -325,10 +341,12 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
       },
     },
   );
-  const devUrl = Option.getOrElse(
-    resolveOptionPrecedence(normalizedFlags.devUrl, Option.fromUndefinedOr(env.devUrl)),
-    () => undefined,
-  );
+  const devUrl = isGerritBeta
+    ? undefined
+    : Option.getOrElse(
+        resolveOptionPrecedence(normalizedFlags.devUrl, Option.fromUndefinedOr(env.devUrl)),
+        () => undefined,
+      );
   const devAuthToken =
     mode === "web" && devUrl !== undefined ? yield* DevAuthTokenConfig : undefined;
   const explicitBaseDir = resolveOptionPrecedence(
@@ -371,7 +389,9 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
   const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
     derivedPaths.settingsPath,
   );
-  const serverTracePath = env.traceFile ?? derivedPaths.serverTracePath;
+  const serverTracePath = isGerritBeta
+    ? derivedPaths.serverTracePath
+    : (env.traceFile ?? derivedPaths.serverTracePath);
   yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true });
   const startupPresentation = options?.startupPresentation ?? "browser";
   const isHeadlessStartup = startupPresentation === "headless";

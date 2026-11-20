@@ -84,7 +84,7 @@ export function PullRequestEditScreen({ route }: StaticScreenProps<PullRequestEd
           : params.field === "comment"
             ? gt("You can't edit this comment.")
             : gt(
-                "You can't edit this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+                "You can't edit this {term, select, mr {merge request} cr {change} other {pull request}}.",
                 { term },
               );
   const unchanged = draft === null || draft === original;
@@ -159,13 +159,12 @@ export function PullRequestEditScreen({ route }: StaticScreenProps<PullRequestEd
         autoFocus
         accessibilityLabel={
           params.field === "title"
-            ? gt(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} title",
-                { term },
-              )
+            ? gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} title", {
+                term,
+              })
             : params.field === "body"
               ? gt(
-                  "{term, select, mr {Merge request} cr {Change request} other {Pull request}} description",
+                  "{term, select, mr {Merge request} cr {Change} other {Pull request}} description",
                   { term },
                 )
               : gt("Comment", { $context: "noun, field label" })

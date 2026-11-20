@@ -68,6 +68,7 @@ import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/pu
 import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -195,10 +196,11 @@ function useNotificationsReady(): boolean {
 }
 
 function LocalSenderConfigurationRow({ enabled }: { readonly enabled: boolean }) {
+  const gt = useGT();
   return (
     <SettingsRow
       icon="doc.on.doc"
-      label="Copy local sender configuration"
+      label={gt("Copy local sender configuration")}
       disabled={!enabled}
       onPress={() => {
         void (async () => {
@@ -207,10 +209,14 @@ function LocalSenderConfigurationRow({ enabled }: { readonly enabled: boolean })
           const copied = await tryCopyTextWithHaptic(
             JSON.stringify({ token, deviceId, userId: `local:${deviceId}` }, null, 2),
           );
-          if (!copied) Dialog.alert("Could not copy", "Try again.");
-          else Dialog.alert("Copied", "Sender configuration copied. Keep the push token private.");
+          if (!copied) Dialog.alert(gt("Could not copy"), gt("Try again."));
+          else
+            Dialog.alert(
+              gt("Copied"),
+              gt("Sender configuration copied. Keep the push token private."),
+            );
         })().catch(() =>
-          Dialog.alert("Could not get push token", "Enable notifications and try again."),
+          Dialog.alert(gt("Could not get push token"), gt("Enable notifications and try again.")),
         );
       }}
     />
@@ -218,8 +224,9 @@ function LocalSenderConfigurationRow({ enabled }: { readonly enabled: boolean })
 }
 
 function LocalAndroidNotificationsSettings() {
+  const gt = useGT();
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const enabled =
     AsyncResult.isSuccess(preferences) && preferences.value.localNotificationsEnabled === true;
   const ongoing =
@@ -232,7 +239,7 @@ function LocalAndroidNotificationsSettings() {
       try {
         const permission = await runtime.runPromiseExit(requestAgentNotificationPermission);
         if (permission._tag !== "Success" || permission.value.type !== "granted") {
-          Dialog.alert("Notifications unavailable", "Notification permission is required.");
+          Dialog.alert(gt("Notifications unavailable"), gt("Notification permission is required."));
           return;
         }
         await enableLocalAgentNotifications(withOngoing);
@@ -241,21 +248,21 @@ function LocalAndroidNotificationsSettings() {
           localNotificationsOngoing: withOngoing,
         });
       } catch {
-        Dialog.alert("Notifications unavailable", "Could not enable local notifications.");
+        Dialog.alert(gt("Notifications unavailable"), gt("Could not enable local notifications."));
       } finally {
         setBusy(false);
       }
     },
-    [savePreferences],
+    [gt, savePreferences],
   );
 
   return (
-    <SettingsScreen title="Notifications">
+    <SettingsScreen title={gt("Notifications")}>
       <ScrollView contentContainerClassName="gap-6 px-5 pt-4">
-        <SettingsSection title="Device-local Android notifications">
+        <SettingsSection title={gt("Device-local Android notifications")}>
           <SettingsSwitchRow
             icon="bell.badge"
-            label="Device Notifications"
+            label={gt("Device Notifications")}
             value={enabled}
             disabled={busy}
             onValueChange={(value) => {
@@ -269,26 +276,34 @@ function LocalAndroidNotificationsSettings() {
                     });
                   })
                   .catch(() =>
-                    Dialog.alert("Notifications unavailable", "Could not save the setting."),
+                    Dialog.alert(
+                      gt("Notifications unavailable"),
+                      gt("Could not save the setting."),
+                    ),
                   );
             }}
           />
           <SettingsSwitchRow
             icon="bolt.circle"
-            label="Ongoing Agent Activity"
+            label={gt("Ongoing Agent Activity")}
             value={ongoing}
             disabled={!enabled || busy}
             onValueChange={(value) => {
               void setLocalAgentOngoing(value)
                 .then(() => savePreferences({ localNotificationsOngoing: value }))
                 .catch(() =>
-                  Dialog.alert("Notifications unavailable", "Could not update ongoing activity."),
+                  Dialog.alert(
+                    gt("Notifications unavailable"),
+                    gt("Could not update ongoing activity."),
+                  ),
                 );
             }}
           />
           <Text className="text-base text-foreground-muted">
-            No T3 Connect account or relay is used. Delivery requires a separate sender configured
-            with this app's Firebase project.
+            {gt(
+              "No {product} account or relay is used. Delivery requires a separate sender configured with this app's {service} project.",
+              { product: "T3 Connect", service: "Firebase" },
+            )}
           </Text>
           <LocalSenderConfigurationRow enabled={enabled} />
         </SettingsSection>
@@ -319,6 +334,7 @@ export function SettingsNotificationsRouteScreen() {
 }
 
 function ConfiguredSettingsNotificationsRouteScreen() {
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const gt = useGT();
   const m = useMessages();
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
@@ -577,18 +593,27 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             runtime.runPromiseExit(requestAgentNotificationPermission),
           );
           if (permission._tag !== "Success" || permission.value.type !== "granted") {
-            Dialog.alert("Notifications unavailable", "Notification permission is required.");
+            Dialog.alert(
+              gt("Notifications unavailable"),
+              gt("Notification permission is required."),
+            );
             return;
           }
           await enableLocalAgentNotifications(false);
           savePreferences({ localNotificationsEnabled: true, localNotificationsOngoing: false });
           setNotificationStatus("enabled");
           Dialog.alert(
-            "Notifications enabled",
-            "Local notifications are enabled. A local Firebase sender is required for delivery.",
+            gt("Notifications enabled"),
+            gt(
+              "Local notifications are enabled. A local {service} sender is required for delivery.",
+              { service: "Firebase" },
+            ),
           );
         })().catch(() =>
-          Dialog.alert("Notifications unavailable", "Could not enable local notifications."),
+          Dialog.alert(
+            gt("Notifications unavailable"),
+            gt("Could not enable local notifications."),
+          ),
         );
         return;
       }
@@ -606,7 +631,10 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           savePreferences({ localNotificationsEnabled: false, localNotificationsOngoing: false });
         })
         .catch(() => {
-          Dialog.alert("Notifications unavailable", "Could not save the notification setting.");
+          Dialog.alert(
+            gt("Notifications unavailable"),
+            gt("Could not save the notification setting."),
+          );
         });
       return;
     }
@@ -690,8 +718,8 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     if (!isSignedIn && Platform.OS === "android") {
       if (!localNotificationsEnabled && enabled) {
         Dialog.alert(
-          "Enable notifications first",
-          "Turn on Device Notifications before enabling ongoing activity.",
+          gt("Enable notifications first"),
+          gt("Turn on Device Notifications before enabling ongoing activity."),
         );
         return;
       }
@@ -701,7 +729,10 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           setLiveActivityStatus(enabled ? "enabled" : "disabled");
         })
         .catch(() =>
-          Dialog.alert("Ongoing activity unavailable", "Could not update local ongoing activity."),
+          Dialog.alert(
+            gt("Ongoing activity unavailable"),
+            gt("Could not update local ongoing activity."),
+          ),
         );
       return;
     }

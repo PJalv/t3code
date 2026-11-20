@@ -86,7 +86,7 @@ export function usePullRequestListActions(
         )
           throw new Error(
             gt(
-              "Review requests aren't available for this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+              "Review requests aren't available for this {term, select, mr {merge request} cr {change} other {pull request}}.",
               {
                 term: changeRequestTermKind(terminology),
               },
@@ -104,7 +104,7 @@ export function usePullRequestListActions(
       )
         throw new Error(
           gt(
-            "This action isn't available for this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+            "This action isn't available for this {term, select, mr {merge request} cr {change} other {pull request}}.",
             {
               term: changeRequestTermKind(terminology),
             },
@@ -128,7 +128,7 @@ export function usePullRequestListActions(
       const cause = squashAtomCommandFailure(result);
       Dialog.alert(
         gt(
-          "Couldn't update this {term, select, mr {merge request} cr {change request} other {pull request}}",
+          "Couldn't update this {term, select, mr {merge request} cr {change} other {pull request}}",
           { term: changeRequestTermKind(terminology) },
         ),
         cause instanceof Error
@@ -181,10 +181,9 @@ export function usePullRequestListActions(
     return [
       {
         id: "open",
-        title: gt(
-          "Open {term, select, mr {merge request} cr {change request} other {pull request}}",
-          { term: changeRequestTermKind(terminology) },
-        ),
+        title: gt("Open {term, select, mr {merge request} cr {change} other {pull request}}", {
+          term: changeRequestTermKind(terminology),
+        }),
         image: "arrow.up.right",
       },
       ...(writableEnvironments.has(entry.environmentId) && entry.state === "open"
@@ -196,7 +195,7 @@ export function usePullRequestListActions(
             },
             {
               id: entry.isDraft ? "ready" : "draft",
-              title: pullRequestActionLabel(entry.isDraft ? "ready" : "draft", terminology, messages),
+              title: pullRequestActionLabel(entry.isDraft ? "ready" : "draft", terminology, m),
               image: "pencil",
             },
             {
