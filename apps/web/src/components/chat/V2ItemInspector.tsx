@@ -16,7 +16,7 @@ import {
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
 import { ExternalLinkIcon } from "lucide-react";
-import { memo, type ReactNode, Suspense, use } from "react";
+import { lazy, memo, type ReactNode, Suspense, use, useState } from "react";
 
 import { canOpenLinksInApp, resolveLinkTarget } from "../../browser/browserLinkTarget";
 import { useOpenLink } from "../../browser/useOpenLink";
@@ -38,6 +38,88 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
 import { useInitialOutputReady, type TurnItemSource } from "./timelineRowContext";
 
+const V2FileChangeDiffView = lazy(() =>
+  import("./V2FileChangeDiffView").then((module) => ({ default: module.V2FileChangeDiffView })),
+);
+
+function FileChangeInspector({
+  item,
+  workspaceRoot,
+  onOpenToolDiff,
+  sourceThreadId,
+  sourceItemId,
+}: FileChangeInspectorProps) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDiff = Boolean(item.diffStr?.trim()) || item.newStr !== undefined;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-muted-foreground">
+          {formatWorkspaceRelativePath(item.fileName, workspaceRoot)}
+        </span>
+        {item.additions !== undefined || item.deletions !== undefined ? (
+          <span>
+            <span className="text-diff-addition">+{formatDiffCount(item.additions ?? 0)}</span>{" "}
+            <span className="text-diff-deletion">-{formatDiffCount(item.deletions ?? 0)}</span>
+          </span>
+        ) : null}
+        {hasDiff ? (
+          <Button
+            size="xs"
+            variant="outline"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <T>Hide diff</T> : <T>Show diff</T>}
+          </Button>
+        ) : null}
+        {onOpenToolDiff ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() =>
+              onOpenToolDiff({
+                threadId: sourceThreadId,
+                itemId: sourceItemId,
+                revision: turnItemDetailRevision(item),
+              })
+            }
+          >
+            <T>Open diff</T>
+          </Button>
+        ) : null}
+      </div>
+      {item.status === "failed" && item.diffStr?.trim() ? (
+        <StructuredValue value={item.diffStr} />
+      ) : null}
+      {expanded && hasDiff ? (
+        <Suspense
+          fallback={
+            <div className="text-muted-foreground">
+              <T>Loading diff…</T>
+            </div>
+          }
+        >
+          <V2FileChangeDiffView item={item} cacheKey={`v2:${item.id}:${item.fileName}`} />
+        </Suspense>
+      ) : null}
+      {item.changes?.length ? (
+        <ul className="space-y-1 font-mono text-muted-foreground">
+          {item.changes.map((change) => (
+            <li key={JSON.stringify([change.operation, change.oldPath, change.path])}>
+              {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
+              {formatWorkspaceRelativePath(change.path, workspaceRoot)}
+              {change.fileType || change.mimeType
+                ? ` (${[change.fileType, change.mimeType].filter(Boolean).join(", ")})`
+                : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 interface V2ItemInspectorProps {
   readonly onInitialOutputReady?: (() => void) | undefined;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -47,6 +129,14 @@ interface V2ItemInspectorProps {
   readonly onOpenToolDiff?: ((target: ToolCallDiffTarget) => void) | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   readonly source?: TurnItemSource | undefined;
+}
+
+interface FileChangeInspectorProps {
+  readonly item: Extract<OrchestrationV2ProjectedTurnItem["item"], { type: "file_change" }>;
+  readonly workspaceRoot: string | undefined;
+  readonly onOpenToolDiff: V2ItemInspectorProps["onOpenToolDiff"];
+  readonly sourceThreadId: OrchestrationV2ProjectedTurnItem["sourceThreadId"];
+  readonly sourceItemId: OrchestrationV2ProjectedTurnItem["sourceItemId"];
 }
 
 function SyntaxTokens({
@@ -339,50 +429,14 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "file_change" ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-muted-foreground">
-              {formatWorkspaceRelativePath(item.fileName, props.workspaceRoot)}
-            </span>
-            {item.additions !== undefined || item.deletions !== undefined ? (
-              <span>
-                <span className="text-diff-addition">+{formatDiffCount(item.additions ?? 0)}</span>{" "}
-                <span className="text-diff-deletion">-{formatDiffCount(item.deletions ?? 0)}</span>
-              </span>
-            ) : null}
-            {props.onOpenToolDiff ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() =>
-                  props.onOpenToolDiff?.({
-                    threadId: props.projectedItem.sourceThreadId,
-                    itemId: props.projectedItem.sourceItemId,
-                    revision: turnItemDetailRevision(item),
-                  })
-                }
-              >
-                <T>Open diff</T>
-              </Button>
-            ) : null}
-          </div>
-          {item.status === "failed" && item.diffStr?.trim() ? (
-            <StructuredValue value={item.diffStr} />
-          ) : null}
-          {item.changes !== undefined && item.changes.length > 0 ? (
-            <ul className="space-y-1 font-mono text-muted-foreground">
-              {item.changes.map((change) => (
-                <li key={JSON.stringify([change.operation, change.oldPath, change.path])}>
-                  {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
-                  {formatWorkspaceRelativePath(change.path, props.workspaceRoot)}
-                  {change.fileType || change.mimeType
-                    ? ` (${[change.fileType, change.mimeType].filter(Boolean).join(", ")})`
-                    : ""}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <FileChangeInspector
+          key={item.id}
+          item={item}
+          workspaceRoot={props.workspaceRoot}
+          onOpenToolDiff={props.onOpenToolDiff}
+          sourceThreadId={props.projectedItem.sourceThreadId}
+          sourceItemId={props.projectedItem.sourceItemId}
+        />
       ) : null}
 
       {/* The row label already shows the pattern unless the provider titled the search itself. */}
