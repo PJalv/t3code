@@ -176,7 +176,11 @@ function EnvironmentProviders(props: {
               accessibilityLabel: gt("Offer {provider} when adding or publishing a project", {
                 provider: item.label,
               }),
-              value: isSourceControlProviderOffered(offered, item.kind),
+              value: isSourceControlProviderOffered(
+                offered,
+                item.kind,
+                Object.keys(environment.serverConfig.settings.gerritConnections).length > 0,
+              ),
               disabled,
               onValueChange: (value) =>
                 void updateSettings({

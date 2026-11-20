@@ -162,12 +162,19 @@ export function getDefaultCloneUrl(
 
 export type OfferedSourceControlProviders = ServerSettings["offeredSourceControlProviders"];
 
-/** Whether the project pickers offer a host. Only the default host is on until the user turns others on. */
+/**
+ * Whether the project pickers offer a host. Until the user sets it, only the default host is on,
+ * and Gerrit follows whether this environment has a Gerrit server configured.
+ */
 export function isSourceControlProviderOffered(
   offered: OfferedSourceControlProviders | undefined,
   kind: SourceControlProviderKind,
+  gerritConfigured = false,
 ): boolean {
-  return offered?.[kind] ?? kind === sourceControlClients.get(undefined).kind;
+  return (
+    offered?.[kind] ??
+    (kind === "gerrit" ? gerritConfigured : kind === sourceControlClients.get(undefined).kind)
+  );
 }
 
 export function sortAddProjectProviderSources(
@@ -177,9 +184,7 @@ export function sortAddProjectProviderSources(
 ): ReadonlyArray<SourceControlProviderKind> {
   return Arr.sort(
     ADD_PROJECT_REMOTE_PROVIDER_SOURCES.filter((source) =>
-      source === "gerrit" && offered?.[source] === undefined
-        ? gerritConfigured
-        : isSourceControlProviderOffered(offered, source),
+      isSourceControlProviderOffered(offered, source, gerritConfigured),
     ),
     Order.mapInput(
       Order.Struct({
