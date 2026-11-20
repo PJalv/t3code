@@ -1,5 +1,5 @@
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
-import { msg, useGT, useMessages } from "gt-react-native";
+import { T, useGT, useMessages, msg } from "gt-react-native";
 import * as Dialog from "../../components/ui/Dialog";
 import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
 import {
@@ -20,12 +20,13 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { m as resolveMessage } from "../../i18n/messages";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
   createEnvironmentCommand,
   isAtomCommandInterrupted,
@@ -43,6 +44,12 @@ import {
   LiveActivityEnvironmentUpdateError,
   setLiveActivityUpdatesEnabled,
 } from "../agent-awareness/liveActivityPreferences";
+import {
+  disableLocalAgentNotifications,
+  enableLocalAgentNotifications,
+  setLocalAgentOngoing,
+} from "../agent-awareness/localNotifications";
+import { loadOrCreateAgentAwarenessDeviceId } from "../../persistence/imperative";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
   agentAwarenessNotificationsReady,
@@ -162,9 +169,10 @@ function liveActivityStatusFrom(
   isLoaded: boolean,
   isSignedIn: boolean | undefined,
   preferencesResult: AsyncResult.AsyncResult<{ readonly liveActivitiesEnabled?: boolean }, unknown>,
+  localOngoingEnabled: boolean,
 ): LiveActivityStatus {
   if (!isLoaded) return "checking";
-  if (!isSignedIn) return "signed-out";
+  if (!isSignedIn) return localOngoingEnabled ? "enabled" : "signed-out";
   if (AsyncResult.isFailure(preferencesResult)) return "enabled";
   if (!AsyncResult.isSuccess(preferencesResult)) return "checking";
   return preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled";
@@ -187,9 +195,136 @@ function useNotificationsReady(): boolean {
   );
 }
 
+function LocalSenderConfigurationRow({ enabled }: { readonly enabled: boolean }) {
+  const gt = useGT();
+  return (
+    <SettingsRow
+      icon="doc.on.doc"
+      label={gt("Copy local sender configuration")}
+      disabled={!enabled}
+      onPress={() => {
+        void (async () => {
+          const deviceId = await loadOrCreateAgentAwarenessDeviceId();
+          const token = (await Notifications.getDevicePushTokenAsync()).data;
+          const copied = await tryCopyTextWithHaptic(
+            JSON.stringify({ token, deviceId, userId: `local:${deviceId}` }, null, 2),
+          );
+          if (!copied)
+            Dialog.alert(resolveMessage(msg("Could not copy")), resolveMessage(msg("Try again.")));
+          else
+            Dialog.alert(
+              resolveMessage(msg("Copied")),
+              resolveMessage(msg("Sender configuration copied. Keep the push token private.")),
+            );
+        })().catch(() =>
+          Dialog.alert(
+            resolveMessage(msg("Could not get push token")),
+            resolveMessage(msg("Enable notifications and try again.")),
+          ),
+        );
+      }}
+    />
+  );
+}
+
+type DeviceNotificationOutcome = "enabled" | "denied" | "failed";
+
+// Module scope keeps the try/catch out of the component, which the React
+// Compiler bails out of when a try block contains a value block.
+async function enableDeviceNotifications(withOngoing: boolean): Promise<DeviceNotificationOutcome> {
+  try {
+    const permission = await runtime.runPromiseExit(requestAgentNotificationPermission);
+    if (permission._tag !== "Success" || permission.value.type !== "granted") return "denied";
+    await enableLocalAgentNotifications(withOngoing);
+    return "enabled";
+  } catch {
+    return "failed";
+  }
+}
+
+function LocalAndroidNotificationsSettings() {
+  const gt = useGT();
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const [overrides, setOverrides] = useState<{ enabled?: boolean; ongoing?: boolean }>({});
+  const [busy, setBusy] = useState(false);
+  const storedPreferences = AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : {};
+  const enabled = overrides.enabled ?? storedPreferences.localNotificationsEnabled === true;
+  const ongoing = overrides.ongoing ?? storedPreferences.localNotificationsOngoing === true;
+
+  const enable = useCallback(async (withOngoing = false) => {
+    setBusy(true);
+    const outcome = await enableDeviceNotifications(withOngoing);
+    if (outcome === "enabled") {
+      setOverrides({ enabled: true, ongoing: withOngoing });
+    } else if (outcome === "denied") {
+      Dialog.alert(
+        resolveMessage(msg("Notifications unavailable")),
+        resolveMessage(msg("Notification permission is required.")),
+      );
+    } else {
+      Dialog.alert(
+        resolveMessage(msg("Notifications unavailable")),
+        resolveMessage(msg("Could not enable local notifications.")),
+      );
+    }
+    setBusy(false);
+  }, []);
+
+  return (
+    <SettingsScreen title={gt("Notifications")}>
+      <ScrollView contentContainerClassName="gap-6 px-5 pt-4">
+        <SettingsSection title={gt("Device-local Android notifications")}>
+          <SettingsSwitchRow
+            icon="bell.badge"
+            label={gt("Device Notifications")}
+            value={enabled}
+            disabled={busy}
+            onValueChange={(value) => {
+              if (value) void enable(ongoing);
+              else
+                void disableLocalAgentNotifications()
+                  .then(() => setOverrides({ enabled: false, ongoing: false }))
+                  .catch(() =>
+                    Dialog.alert(
+                      resolveMessage(msg("Notifications unavailable")),
+                      resolveMessage(msg("Could not save the setting.")),
+                    ),
+                  );
+            }}
+          />
+          <SettingsSwitchRow
+            icon="bolt.circle"
+            label={gt("Ongoing Agent Activity")}
+            value={ongoing}
+            disabled={!enabled || busy}
+            onValueChange={(value) => {
+              void setLocalAgentOngoing(value)
+                .then(() => setOverrides((current) => ({ ...current, ongoing: value })))
+                .catch(() =>
+                  Dialog.alert(
+                    resolveMessage(msg("Notifications unavailable")),
+                    resolveMessage(msg("Could not update ongoing activity.")),
+                  ),
+                );
+            }}
+          />
+          <Text className="text-base text-foreground-muted">
+            <T>
+              No T3 Connect account or relay is used. Delivery requires a separate sender configured
+              with this app's Firebase project.
+            </T>
+          </Text>
+          <LocalSenderConfigurationRow enabled={enabled} />
+        </SettingsSection>
+      </ScrollView>
+    </SettingsScreen>
+  );
+}
+
 export function SettingsNotificationsRouteScreen() {
   const gt = useGT();
   if (!hasCloudPublicConfig()) {
+    if (Platform.OS === "android") return <LocalAndroidNotificationsSettings />;
     return (
       <SettingsScreen title={gt("Notifications")}>
         <ScrollView
@@ -223,6 +358,30 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const notificationStatus = useAtomValue(notificationStatusAtom);
   const setNotificationStatus = useAtomSet(notificationStatusAtom);
+  // The atom mirrors the persisted preferences, so the handlers below only mark
+  // which keys they wrote.
+  const [localNotificationOverrides, setLocalNotificationOverrides] = useState<{
+    isSignedIn: boolean | null | undefined;
+    enabled?: boolean;
+    ongoing?: boolean;
+  }>({ isSignedIn: null });
+  // Local notifications only apply to a signed-out Android device, so an auth
+  // change drops earlier toggle overrides and falls back to the stored keys.
+  if (localNotificationOverrides.isSignedIn !== isSignedIn) {
+    setLocalNotificationOverrides({ isSignedIn });
+  }
+  const localNotificationsEnabled =
+    localNotificationOverrides.enabled ??
+    (localNotificationOverrides.isSignedIn === false &&
+      Platform.OS === "android" &&
+      AsyncResult.isSuccess(preferencesResult) &&
+      preferencesResult.value.localNotificationsEnabled === true);
+  const localOngoingEnabled =
+    localNotificationOverrides.ongoing ??
+    (localNotificationOverrides.isSignedIn === false &&
+      Platform.OS === "android" &&
+      AsyncResult.isSuccess(preferencesResult) &&
+      preferencesResult.value.localNotificationsOngoing === true);
   // A write in progress or a failed one shows its own status until the auth or
   // preference state it was based on changes.
   const [liveActivityOverride, setLiveActivityOverride] = useState<{
@@ -236,7 +395,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     liveActivityOverride.basis.isSignedIn === isSignedIn &&
     liveActivityOverride.basis.preferencesResult === preferencesResult
       ? liveActivityOverride.status
-      : liveActivityStatusFrom(isLoaded, isSignedIn, preferencesResult);
+      : liveActivityStatusFrom(isLoaded, isSignedIn, preferencesResult, localOngoingEnabled);
   const setLiveActivityStatus = (status: LiveActivityStatus) =>
     setLiveActivityOverride({ status, basis: liveActivityBasis });
   const liveActivityWriteInFlight = useRef(false);
@@ -448,6 +607,37 @@ function ConfiguredSettingsNotificationsRouteScreen() {
 
   const handleDeviceNotificationsChange = (enabled: boolean) => {
     if (enabled) {
+      if (!isSignedIn && Platform.OS === "android") {
+        void (async () => {
+          const permission = await settleAsyncResult(() =>
+            runtime.runPromiseExit(requestAgentNotificationPermission),
+          );
+          if (permission._tag !== "Success" || permission.value.type !== "granted") {
+            Dialog.alert(
+              resolveMessage(msg("Notifications unavailable")),
+              resolveMessage(msg("Notification permission is required.")),
+            );
+            return;
+          }
+          await enableLocalAgentNotifications(false);
+          setLocalNotificationOverrides((current) => ({ ...current, enabled: true }));
+          setNotificationStatus("enabled");
+          Dialog.alert(
+            resolveMessage(msg("Notifications enabled")),
+            resolveMessage(
+              msg(
+                "Local notifications are enabled. A local Firebase sender is required for delivery.",
+              ),
+            ),
+          );
+        })().catch(() =>
+          Dialog.alert(
+            resolveMessage(msg("Notifications unavailable")),
+            resolveMessage(msg("Could not enable local notifications.")),
+          ),
+        );
+        return;
+      }
       if (!isSignedIn) {
         promptSignIn();
         return;
@@ -456,6 +646,17 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       return;
     }
 
+    if (!isSignedIn && Platform.OS === "android") {
+      void disableLocalAgentNotifications().catch(() => {
+        Dialog.alert(
+          resolveMessage(msg("Notifications unavailable")),
+          resolveMessage(msg("Could not save the notification setting.")),
+        );
+      });
+      setLocalNotificationOverrides((current) => ({ ...current, enabled: false }));
+      setLocalNotificationOverrides((current) => ({ ...current, ongoing: false }));
+      return;
+    }
     Dialog.alert(
       gt("Disable notifications"),
       gt("Open system Settings to disable notifications for {product}.", { product: "T3 Code" }),
@@ -533,6 +734,27 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   // Both writers settle their own failures, so awaiting them never throws.
   const handleLiveActivitiesChange = async (enabled: boolean) => {
     if (liveActivityWriteInFlight.current) return;
+    if (!isSignedIn && Platform.OS === "android") {
+      if (!localNotificationsEnabled && enabled) {
+        Dialog.alert(
+          resolveMessage(msg("Enable notifications first")),
+          resolveMessage(msg("Turn on Device Notifications before enabling ongoing activity.")),
+        );
+        return;
+      }
+      void setLocalAgentOngoing(enabled)
+        .then(() => {
+          setLocalNotificationOverrides((current) => ({ ...current, ongoing: enabled }));
+          setLiveActivityStatus(enabled ? "enabled" : "disabled");
+        })
+        .catch(() =>
+          Dialog.alert(
+            resolveMessage(msg("Ongoing activity unavailable")),
+            resolveMessage(msg("Could not update local ongoing activity.")),
+          ),
+        );
+      return;
+    }
     if (!enabled) {
       liveActivityWriteInFlight.current = true;
       setLiveActivityStatus("linking");
@@ -574,7 +796,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             }
             subtitle={agentAwarenessSubtitle}
             value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && notificationsReady
+              agentAwarenessPushAvailable &&
+              notificationStatus === "enabled" &&
+              (notificationsReady || localNotificationsEnabled)
             }
             onValueChange={handleDeviceNotificationsChange}
           />
@@ -598,7 +822,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             value={
               agentAwarenessPushAvailable &&
               (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
-              deviceRegistered
+              (deviceRegistered || localOngoingEnabled)
             }
             onValueChange={(enabled) => void handleLiveActivitiesChange(enabled)}
           />
@@ -608,6 +832,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
               label={gt("Turn off Live Activity preference")}
               onPress={() => void handleLiveActivitiesChange(false)}
             />
+          ) : null}
+          {!isSignedIn && Platform.OS === "android" ? (
+            <LocalSenderConfigurationRow enabled={localNotificationsEnabled} />
           ) : null}
           {supportsAndroidLiveUpdateSettings() ? (
             <SettingsRow
