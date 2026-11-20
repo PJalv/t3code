@@ -64,6 +64,29 @@ import {
   SpeechPostProcessingPromptSettings,
 } from "./speech.ts";
 
+const GuestLinkBaseUrl = Schema.String.check(
+  Schema.makeFilter(
+    (value) => {
+      if (!/^https:\/\/[^/?#\\\s@]+\/?$/i.test(value)) return false;
+      try {
+        const url = new URL(value);
+        return url.protocol === "https:" && url.host.length > 0;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Expected an HTTPS origin without credentials, path, query, or fragment." },
+  ),
+).pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transform({
+      decode: (value) => new URL(value).origin,
+      encode: (value) => value,
+    }),
+  ),
+);
+
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
 const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
@@ -1526,6 +1549,9 @@ export const ServerSettings = Schema.Struct({
   hideTaggedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: guest links for this machine's threads. Off refuses new links and pauses existing ones. */
   guestSharingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  guestLinkBaseUrl: Schema.NullOr(GuestLinkBaseUrl).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /**
    * Beta: links to the user's other machines, both ways. Off refuses new links, calls over links
    * and tasks on another machine; tasks already running there finish.
@@ -1973,6 +1999,7 @@ export const ServerSettingsPatch = Schema.Struct({
   hiddenThreadTags: Schema.optionalKey(Schema.Array(Schema.String)),
   hideTaggedThreads: Schema.optionalKey(Schema.Boolean),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
+  guestLinkBaseUrl: Schema.optionalKey(Schema.NullOr(GuestLinkBaseUrl)),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   workflowsEnabled: Schema.optionalKey(Schema.Boolean),
   workflowSkippedRunsKept: Schema.optionalKey(WorkflowSkippedRunsKept),
