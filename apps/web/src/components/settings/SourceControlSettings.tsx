@@ -497,6 +497,8 @@ export function SourceControlSettingsPanel() {
     },
   );
   const offeredProviders = environment?.serverConfig?.settings.offeredSourceControlProviders;
+  const gerritConfigured =
+    Object.keys(environment?.serverConfig?.settings.gerritConnections ?? {}).length > 0;
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "save source control providers",
   });
@@ -632,7 +634,11 @@ export function SourceControlSettingsPanel() {
                   key={`provider:${item.kind}`}
                   item={item}
                   offered={{
-                    checked: isSourceControlProviderOffered(offeredProviders, item.kind),
+                    checked: isSourceControlProviderOffered(
+                      offeredProviders,
+                      item.kind,
+                      gerritConfigured,
+                    ),
                     disabled: !canUpdateSettings,
                     onChange: (checked) =>
                       void updateSettings({

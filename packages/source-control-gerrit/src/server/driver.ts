@@ -252,15 +252,30 @@ export const makeDriver = (options: GerritDriverOptions = {}) =>
           label: "Gerrit",
           installHint: "Configure an installation and HTTP credentials in Source Control settings.",
           probeAuth: host.settings.get.pipe(
-            Effect.map((settings) =>
-              providerAuth({
-                status: "unknown",
-                detail:
-                  Object.keys(settings.gerritConnections).length > 0
-                    ? "Configured. Test the connection to verify the current account."
-                    : "No Gerrit connection configured.",
-              }),
-            ),
+            Effect.flatMap((settings) => {
+              const installations = Object.keys(settings.gerritConnections);
+              if (installations.length === 0 || Option.isNone(credentialResolver))
+                return Effect.succeed(
+                  providerAuth({
+                    status: "unauthenticated",
+                    detail: "No Gerrit server connected.",
+                  }),
+                );
+              const resolve = credentialResolver.value;
+              return Effect.forEach(installations, (installation) =>
+                resolve(installation).pipe(Effect.isSuccess),
+              ).pipe(
+                Effect.map((saved) => {
+                  const connected = saved.filter(Boolean).length;
+                  const missing = installations.length - connected;
+                  const servers = `${connected} ${connected === 1 ? "server" : "servers"} connected`;
+                  return providerAuth({
+                    status: connected > 0 ? "authenticated" : "unauthenticated",
+                    detail: missing === 0 ? servers : `${servers}, ${missing} missing credentials`,
+                  });
+                }),
+              );
+            }),
             Effect.orElseSucceed(() =>
               providerAuth({
                 status: "unknown",
