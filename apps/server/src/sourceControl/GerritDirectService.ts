@@ -88,6 +88,17 @@ export class GerritDirectService extends Context.Service<
       readonly cwd: string;
       readonly upload: GerritDirectUploadInput;
     }) => Effect.Effect<Response<GerritDirectUpload.GerritDirectUploadResult>, GerritDirectError>;
+    readonly planUpload: (input: {
+      readonly cwd: string;
+      readonly upload: GerritDirectUploadInput;
+    }) => Effect.Effect<
+      GerritDirectUpload.GerritDirectUploadPlan & {
+        readonly server: string;
+        readonly project: string;
+        readonly kind: GerritDirectUploadInput["kind"];
+      },
+      GerritDirectError
+    >;
   }
 >()("t3/sourceControl/GerritDirectService") {}
 
@@ -313,7 +324,7 @@ const make = Effect.gen(function* () {
       })),
     );
   });
-  const upload = Effect.fn("GerritDirectService.upload")(function* (input: {
+  const prepareUpload = Effect.fn("GerritDirectService.prepareUpload")(function* (input: {
     readonly cwd: string;
     readonly upload: GerritDirectUploadInput;
   }) {
@@ -354,6 +365,21 @@ const make = Effect.gen(function* () {
         .getChangeByNumber({ ...auth, number })
         .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "target", cause })));
     }
+    // Only an upstream on the remote being pushed to names the target; a local branch name never does.
+    const upstream = discovery.upstream;
+    const tracked =
+      upstream.kind === "branch" &&
+      upstream.remoteNames.length === 1 &&
+      upstream.remoteNames[0] === matches[0]!.name &&
+      upstream.mergeBranches.length === 1
+        ? upstream.mergeBranches[0]
+        : undefined;
+    const branch = u.kind === "new" ? (u.branch ?? tracked) : undefined;
+    if (u.kind === "new" && branch === undefined)
+      return yield* new GerritDirectError({
+        reason: "upload",
+        cause: new GerritDirectUpload.GerritDirectUploadError({ reason: "branch-required" }),
+      });
     const options = {
       cwd: input.cwd,
       remote: matches[0]!.name,
@@ -364,20 +390,37 @@ const make = Effect.gen(function* () {
       ...(u.wip === undefined ? {} : { wip: u.wip }),
       ...(u.private === undefined ? {} : { private: u.private }),
     };
-    const result = yield* uploader
-      .upload(
-        u.kind === "new"
-          ? { ...options, kind: "new", branch: u.branch }
-          : {
-              ...options,
-              kind: "patch-set",
-              change: {
-                number: change!.number,
-                branch: change!.key.branch,
-                changeId: change!.key.changeId,
-              },
+    const request: GerritDirectUpload.GerritDirectUploadInput =
+      change === undefined
+        ? { ...options, kind: "new", branch: branch! }
+        : {
+            ...options,
+            kind: "patch-set",
+            change: {
+              number: change.number,
+              branch: change.key.branch,
+              changeId: change.key.changeId,
             },
-      )
+          };
+    return { request, auth, change, server: selected.server, project: selected.project };
+  });
+  const planUpload = Effect.fn("GerritDirectService.planUpload")(function* (input: {
+    readonly cwd: string;
+    readonly upload: GerritDirectUploadInput;
+  }) {
+    const { request, server, project } = yield* prepareUpload(input);
+    const plan = yield* uploader
+      .plan(request)
+      .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "upload", cause })));
+    return { server, project, kind: request.kind, ...plan };
+  });
+  const upload = Effect.fn("GerritDirectService.upload")(function* (input: {
+    readonly cwd: string;
+    readonly upload: GerritDirectUploadInput;
+  }) {
+    const { request, auth, change } = yield* prepareUpload(input);
+    const result = yield* uploader
+      .upload(request)
       .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "upload", cause })));
     const number = result.changeNumber ?? change?.number;
     if (number === undefined) return { result, change: null };
@@ -464,6 +507,13 @@ const make = Effect.gen(function* () {
       .amendSigned(input)
       .pipe(Effect.mapError((cause) => new GerritDirectError({ reason: "upload", cause })));
   });
-  return GerritDirectService.of({ act, upload, amendSigned, fetchPatchSet, fetchBranch });
+  return GerritDirectService.of({
+    act,
+    upload,
+    planUpload,
+    amendSigned,
+    fetchPatchSet,
+    fetchBranch,
+  });
 });
 export const layer = Layer.effect(GerritDirectService, make);
