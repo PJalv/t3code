@@ -32,6 +32,7 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
+import { CustomAcpCommandEditor } from "./components/CustomAcpCommandEditor";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
@@ -74,10 +75,13 @@ export function SettingsProviderAccountsRouteScreen() {
                   </Text>
                 </View>
               ) : (
-                <EnvironmentProviders
-                  environment={environment}
-                  providers={managedProviders(environment, providersByEnvironment)}
-                />
+                <>
+                  <CustomAcpCommandEditor environment={environment} />
+                  <EnvironmentProviders
+                    environment={environment}
+                    providers={managedProviders(environment, providersByEnvironment)}
+                  />
+                </>
               )}
             </SettingsSection>
           ))
