@@ -139,7 +139,11 @@ const uploadOptions = {
   private: Schema.optionalKey(Schema.Boolean),
 };
 export const GerritDirectUploadInput = Schema.Union([
-  strictStruct({ kind: Schema.Literal("new"), branch: NonEmpty, ...uploadOptions }),
+  strictStruct({
+    kind: Schema.Literal("new"),
+    branch: Schema.optionalKey(NonEmpty),
+    ...uploadOptions,
+  }),
   strictStruct({ kind: Schema.Literal("patch-set"), number: PositiveInt, ...uploadOptions }),
   strictStruct({ kind: Schema.Literal("patch-set"), url: NonEmpty, ...uploadOptions }),
 ]);
