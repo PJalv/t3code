@@ -11,7 +11,7 @@ import { isInSideChatPane } from "../../lib/sideChatPane";
 import { getTerminalFocusOwner, type TerminalFocusOwner } from "../../lib/terminalFocus";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
-import { shouldTypeToFocusComposer } from "./composerFocusRedirect";
+import { eventPathContainsSelector, shouldTypeToFocusComposer } from "./composerFocusRedirect";
 import { composerShortcutCommands } from "./composerShortcuts";
 
 /** Returning false lets the key through, except for cycling while a terminal owns focus. */
@@ -77,6 +77,8 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     }
     if (!input.enabled || isCommandPaletteOpen()) return;
     const inSideChatPane = isInSideChatPane(event.target);
+    // A device stream canvas owns its own keys; chat shortcuts must not fire over it.
+    if (eventPathContainsSelector(event, '[role="application"]')) return;
     const terminalFocusOwner = getTerminalFocusOwner();
     if (event.defaultPrevented && terminalFocusOwner === null) return;
     const shortcutContext = input.getShortcutContext(event.target);
