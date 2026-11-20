@@ -18,7 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GerritTarget from "./GerritTarget.ts";
-import * as GerritWatchCompletion from "./GerritWatchCompletion.ts";
+import * as GerritNativeAction from "./GerritNativeAction.ts";
 import * as GerritDirectUpload from "./GerritDirectUpload.ts";
 
 export class GerritDirectError extends Schema.TaggedError<GerritDirectError>()(
@@ -268,11 +268,34 @@ const make = Effect.gen(function* () {
           });
       }
     })();
-    const nativeAction = yield* GerritWatchCompletion.NativeAction;
+    const nativeAction = yield* GerritNativeAction.NativeAction;
+    // A submit also merges the rest of the change's topic and its unmerged ancestors. Reading them
+    // is best effort, so a failed read leaves only this change marked as the caller's.
+    const together =
+      a.kind === "submit"
+        ? yield* http.readSubmittedTogether({ ...auth, number }).pipe(
+            Effect.map(({ changes }) =>
+              changes
+                .filter((change) => change.number !== number)
+                .map((change) => ({ project: change.key.project, number: change.number })),
+            ),
+            Effect.catch((error) =>
+              Effect.logDebug("Gerrit submitted-together read failed", {
+                reason: error.reason,
+              }).pipe(Effect.as([])),
+            ),
+          )
+        : [];
     const write =
       a.kind === "submit" || a.kind === "abandon"
         ? nativeAction(
-            { server: resolved.server, project: resolved.project, number, operation: a.kind },
+            {
+              server: resolved.server,
+              project: resolved.project,
+              number,
+              operation: a.kind,
+              ...(together.length === 0 ? {} : { together }),
+            },
             run,
           )
         : run;

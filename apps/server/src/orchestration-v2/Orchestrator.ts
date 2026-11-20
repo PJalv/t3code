@@ -333,6 +333,11 @@ export class OrchestratorProviderSelectionBusyError extends Schema.TaggedError<O
 
 const isOrchestratorDispatchError = Schema.is(OrchestratorDispatchError);
 
+const PULL_REQUEST_WATCH_MOVED = "The pull request watch ended or restarted while it was read.";
+/** A watch sync refused because the watch it names has since ended or restarted. */
+export const isPullRequestWatchMovedError = (error: unknown) =>
+  isOrchestratorDispatchError(error) && error.cause === PULL_REQUEST_WATCH_MOVED;
+
 /** The ceiling refusal under however many dispatch errors wrapped it on the way out. */
 function runtimePolicyCeilingCause(error: unknown) {
   let current = error;
@@ -4301,8 +4306,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           entry.watch !== null &&
           pullRequestSnapshotEndsWatch(link?.snapshot ?? null, entry.startedAt),
       );
+      if (entries.some(({ entry, link }) => link?.watch?.startedAt !== entry.startedAt)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: PULL_REQUEST_WATCH_MOVED,
+        });
+      }
       if (
-        entries.some(({ entry, link }) => link?.watch?.startedAt !== entry.startedAt) ||
         (wake && inactive) ||
         // One wake cannot drop the news of just some of its pull requests; the sender splits it.
         (entries.length > 1 && outdated.some(Boolean))

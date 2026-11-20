@@ -35,6 +35,8 @@ import {
   ownPullRequestRepositories,
   pullRequestSyncKey,
 } from "../../../pullRequest/pullRequestSyncKey.ts";
+import * as GerritNativeAction from "../../../sourceControl/GerritNativeAction.ts";
+import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import { sourceControlDefinitions } from "../../../sourceControl/sourceControlDefinitions.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -318,6 +320,7 @@ const make = Effect.gen(function* () {
 
   const projects = yield* ProjectService.ProjectService;
   const random = yield* SecureRandom.SecureRandom;
+  const watchCompletion = yield* GerritWatchCompletion.GerritWatchCompletion;
 
   const commandId = (tag: string, threadId: ThreadId) =>
     random.uuidV4().pipe(
@@ -1177,7 +1180,7 @@ const make = Effect.gen(function* () {
             detail: "Pass title, body, ready, state, addLabels, removeLabels, or requestReviewers.",
           });
         }
-        const { target, ref, project } = yield* locate(input);
+        const { thread, target, ref, project } = yield* locate(input);
         if (project.repositoryIdentity?.provider === "gerrit") {
           if (
             input.title !== undefined ||
@@ -1252,7 +1255,12 @@ const make = Effect.gen(function* () {
         if (input.state !== undefined) {
           yield* pullRequests
             .runAction({ ...ref, action: input.state === "closed" ? "close" : "reopen" })
-            .pipe(Effect.mapError(forgeFailure));
+            .pipe(
+              Effect.provideService(GerritNativeAction.NativeAction, (action, write) =>
+                watchCompletion.action(thread.id, action, write),
+              ),
+              Effect.mapError(forgeFailure),
+            );
         }
         return identityOf(target);
       }),

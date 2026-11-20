@@ -21,7 +21,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as Target from "./GerritTarget.ts";
 import * as Upload from "./GerritDirectUpload.ts";
 import * as Direct from "./GerritDirectService.ts";
-import * as GerritWatchCompletion from "./GerritWatchCompletion.ts";
+import * as GerritNativeAction from "./GerritNativeAction.ts";
 
 const server = GerritInstallationId.make("https://review.example/");
 const config = { installation: server, authMode: "http-basic" as const, bindings: [] };
@@ -37,6 +37,7 @@ const fixture = (
     realUpload?: boolean;
     status?: string;
     writeStatus?: string;
+    together?: ReadonlyArray<{ project: string; number: number }> | "unreadable";
   } = {},
 ) => {
   const writes: { path: string; body: unknown }[] = [];
@@ -59,6 +60,17 @@ const fixture = (
           ? Effect.fail(new GerritReadError({ reason: "offline" }))
           : Effect.succeed({ ...change, status: options.status ?? change.status });
       },
+      readSubmittedTogether: () =>
+        options.together === "unreadable"
+          ? Effect.fail(new GerritReadError({ reason: "offline" }))
+          : Effect.succeed({
+              changes: (options.together ?? []).map((sibling) => ({
+                ...change,
+                key: { ...change.key, project: sibling.project },
+                number: sibling.number,
+              })),
+              nonVisibleChanges: 0,
+            }),
       directWrite: (_auth: unknown, path: string, _schema: unknown, write: { body: unknown }) => {
         writes.push({ path, body: write.body });
         return Effect.succeed(
@@ -158,7 +170,7 @@ it.effect.each([
       const completed: unknown[] = [];
       const result = yield* Effect.result(
         service.act({ cwd: "/repo", target: { number: 12 }, action: { kind: operation } }).pipe(
-          Effect.provideService(GerritWatchCompletion.NativeAction, (action, write) =>
+          Effect.provideService(GerritNativeAction.NativeAction, (action, write) =>
             write.pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
@@ -178,6 +190,44 @@ it.effect.each([
     }).pipe(Effect.provide(f.layer));
   },
 );
+it.effect.each([
+  {
+    name: "names the rest of a topic a submit merges",
+    together: [
+      { project: "repo", number: 12 },
+      { project: "repo", number: 13 },
+      { project: "other", number: 14 },
+    ],
+    expected: [
+      { project: "repo", number: 13 },
+      { project: "other", number: 14 },
+    ],
+  },
+  { name: "submits as one change when submitted-together is unreadable", together: "unreadable" },
+] as const)("$name", ({ together, ...rest }) => {
+  const f = fixture({ together });
+  return Effect.gen(function* () {
+    const service = yield* Direct.GerritDirectService;
+    const actions: unknown[] = [];
+    yield* service
+      .act({ cwd: "/repo", target: { number: 12 }, action: { kind: "submit" } })
+      .pipe(
+        Effect.provideService(GerritNativeAction.NativeAction, (action, write) =>
+          Effect.sync(() => void actions.push(action)).pipe(Effect.andThen(write)),
+        ),
+      );
+    expect(actions).toEqual([
+      {
+        server,
+        project: "repo",
+        number: 12,
+        operation: "submit",
+        ...("expected" in rest ? { together: rest.expected } : {}),
+      },
+    ]);
+    expect(f.writes.map((write) => write.path)).toEqual(["changes/12/submit"]);
+  }).pipe(Effect.provide(f.layer));
+});
 it.effect("rejects ambiguous checkout remotes", () => {
   const f = fixture({ urls: [`${server}repo`, `${server}other`] });
   return Effect.gen(function* () {
