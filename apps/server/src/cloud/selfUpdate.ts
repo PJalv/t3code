@@ -26,6 +26,7 @@ import {
   crossesReleaseTrack,
 } from "@t3tools/shared/cliRelease";
 
+import { isGerritBeta, gerritBetaRefusal } from "../buildProfile.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
@@ -49,6 +50,7 @@ export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;
 }): ServerSelfUpdateCapability | null {
+  if (isGerritBeta) return null;
   if (input.desktopManaged) return "desktop-managed" as const;
   return input.launcherManaged ? ("boot-service" as const) : null;
 }
@@ -77,6 +79,7 @@ export class ServerSelfUpdate extends Context.Service<
  */
 export const pruneRuntimesOnStart = Effect.fn("cloud.server_self_update.prune_on_start")(
   function* (input: { readonly baseDir: string; readonly managed: boolean }) {
+    if (isGerritBeta) return [];
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const platform = yield* HostProcess.Platform;
@@ -172,6 +175,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
+    if (isGerritBeta) return yield* failWith(gerritBetaRefusal);
     const policyRefusal = managedUpdateRefusal(
       policy.document,
       capability === "boot-service" ? cliReleaseChannelOf(input.targetVersion.trim()) : undefined,
@@ -296,6 +300,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     update,
     commitDesktopUpdate: Effect.fn("ServerSelfUpdate.commitDesktopUpdate")(
       function (requestId, onHandoffAccepted) {
+        if (isGerritBeta) return Effect.fail(failWith(gerritBetaRefusal));
         return desktopAppUpdate.commit(requestId, onHandoffAccepted);
       },
     ),

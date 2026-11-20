@@ -766,7 +766,7 @@ export function BranchToolbarBranchSelector({
             <span className="flex min-w-0 flex-col items-start">
               <span className="truncate font-medium">
                 {gt(
-                  "Checkout {term, select, mr {merge request} cr {change request} other {pull request}}",
+                  "Checkout {term, select, mr {merge request} cr {change} other {pull request}}",
                   { term: changeRequestTermKind(sourceControlPresentation.terminology) },
                 )}
               </span>

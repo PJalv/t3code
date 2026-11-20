@@ -24,10 +24,10 @@ export function PullRequestContextDetails({ metadata }: { metadata: PullRequestC
       <div className="flex items-center gap-1.5 text-xs font-medium">
         <state.Icon className={cn("size-3.5 shrink-0", state.toneClassName)} />
         <span className="text-foreground">
-          {gt(
-            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}",
-            { term, number: metadata.number },
-          )}
+          {gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number}", {
+            term,
+            number: metadata.number,
+          })}
         </span>
         <span className={state.toneClassName}>{state.label}</span>
       </div>

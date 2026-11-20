@@ -135,7 +135,7 @@ export function combinePullRequestDiffPages(
       parsed.some((page) => page.kind === "raw" || (page.kind === "files" && page.notice !== null))
         ? resolve(
             msg(
-              "Some file contents are unavailable. Open the {term, select, mr {merge request} cr {change request} other {pull request}} on its provider to see the full changes.",
+              "Some file contents are unavailable. Open the {term, select, mr {merge request} cr {change} other {pull request}} on its provider to see the full changes.",
               { term: changeRequestTermKind(terminology) },
             ),
           )

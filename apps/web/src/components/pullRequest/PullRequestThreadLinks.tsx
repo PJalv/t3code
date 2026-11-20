@@ -5,7 +5,6 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { visibleLinkedThreads } from "@t3tools/client-runtime/state/threads";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, PullRequestRef, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { MessageSquareIcon } from "lucide-react";
 import { Branch, msg, T, useGT } from "gt-react";
 import { useState } from "react";
 
@@ -108,13 +107,13 @@ function EnabledPullRequestThreadLinks({
         title: remove
           ? m(
               msg(
-                "Could not unlink the {term, select, mr {merge request} cr {change request} other {pull request}}",
+                "Could not unlink the {term, select, mr {merge request} cr {change} other {pull request}}",
                 { term },
               ),
             )
           : m(
               msg(
-                "Could not link the {term, select, mr {merge request} cr {change request} other {pull request}}",
+                "Could not link the {term, select, mr {merge request} cr {change} other {pull request}}",
                 { term },
               ),
             ),
@@ -208,7 +207,7 @@ function EnabledPullRequestThreadLinks({
             <DialogTitle className="sr-only">
               <T>
                 Link{" "}
-                <Branch branch={term} mr="merge request" cr="change request">
+                <Branch branch={term} mr="merge request" cr="change">
                   pull request
                 </Branch>{" "}
                 to a thread

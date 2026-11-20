@@ -21,6 +21,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as Target from "./GerritTarget.ts";
 import * as Upload from "./GerritDirectUpload.ts";
 import * as Direct from "./GerritDirectService.ts";
+import * as GerritWatchCompletion from "./GerritWatchCompletion.ts";
 
 const server = GerritInstallationId.make("https://review.example/");
 const config = { installation: server, authMode: "http-basic" as const, bindings: [] };
@@ -30,7 +31,13 @@ const change = {
   key: { installation: server, project: "repo", branch: "main", changeId: `I${"a".repeat(40)}` },
 };
 const fixture = (
-  options: { urls?: string[]; failReread?: boolean; realUpload?: boolean; status?: string } = {},
+  options: {
+    urls?: string[];
+    failReread?: boolean;
+    realUpload?: boolean;
+    status?: string;
+    writeStatus?: string;
+  } = {},
 ) => {
   const writes: { path: string; body: unknown }[] = [];
   let reads = 0;
@@ -59,7 +66,12 @@ const fixture = (
             ? "topic"
             : path.endsWith("review")
               ? { labels: { "Code-Review": 2 } }
-              : { _number: 12, project: "repo", branch: "main", status: "MERGED" },
+              : {
+                  _number: 12,
+                  project: "repo",
+                  branch: "main",
+                  status: options.writeStatus ?? "MERGED",
+                },
         );
       },
     } as never),
@@ -132,14 +144,40 @@ it.effect("writes a review vote using a URL target", () => {
     expect(f.writes[0]?.body).toMatchObject({ labels: { "Code-Review": 2 }, notify: "NONE" });
   }).pipe(Effect.provide(f.layer));
 });
-it.effect("submits a change", () => {
-  const f = fixture();
-  return Effect.gen(function* () {
-    const service = yield* Direct.GerritDirectService;
-    yield* service.act({ cwd: "/repo", target: { number: 12 }, action: { kind: "submit" } });
-    expect(f.writes[0]?.path).toBe("changes/12/submit");
-  }).pipe(Effect.provide(f.layer));
-});
+it.effect.each([
+  { operation: "submit", status: "MERGED", success: true },
+  { operation: "abandon", status: "ABANDONED", success: true },
+  { operation: "submit", status: "ABANDONED", success: false },
+  { operation: "abandon", status: "MERGED", success: false },
+] as const)(
+  "records only confirmed $operation provenance ($status)",
+  ({ operation, status, success }) => {
+    const f = fixture({ writeStatus: status, failReread: true });
+    return Effect.gen(function* () {
+      const service = yield* Direct.GerritDirectService;
+      const completed: unknown[] = [];
+      const result = yield* Effect.result(
+        service.act({ cwd: "/repo", target: { number: 12 }, action: { kind: operation } }).pipe(
+          Effect.provideService(GerritWatchCompletion.NativeAction, (action, write) =>
+            write.pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  completed.push(action);
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(Result.isSuccess(result)).toBe(success);
+      expect(completed).toEqual(
+        success ? [{ server, project: "repo", number: 12, operation }] : [],
+      );
+      if (Result.isSuccess(result)) expect(result.success.change).toBeNull();
+      expect(f.writes[0]?.path).toBe(`changes/12/${operation}`);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
 it.effect("rejects ambiguous checkout remotes", () => {
   const f = fixture({ urls: [`${server}repo`, `${server}other`] });
   return Effect.gen(function* () {

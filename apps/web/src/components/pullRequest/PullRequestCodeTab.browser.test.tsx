@@ -82,6 +82,7 @@ const mocks = vi.hoisted(() => ({
   diffCommits: [] as Array<string | undefined>,
   viewedPaths: null as ReadonlySet<string> | null,
   viewedListeners: new Set<() => void>(),
+  command: vi.fn(),
 }));
 
 function deliverViewedPaths(paths: ReadonlySet<string> | null) {
@@ -91,7 +92,7 @@ function deliverViewedPaths(paths: ReadonlySet<string> | null) {
 
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
-  useAtomCommand: (() => vi.fn()) as never,
+  useAtomCommand: (() => mocks.command) as never,
 }));
 vi.mock(import("./usePullRequestFilesViewed"), async () => {
   const { useSyncExternalStore } = await import("react");
@@ -201,6 +202,7 @@ function setup({ paged }: { paged: boolean }) {
   mocks.diffCommits = [];
   mocks.viewedPaths = null;
   mocks.viewedListeners.clear();
+  mocks.command.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
 }
 
 const tab = (
@@ -528,6 +530,123 @@ it("answers a commit's diff link only once that commit's diff is shown", async (
   await screen.rerender(scoped(oid, url));
   await vi.waitFor(() => expect(settled).toHaveBeenCalledWith(url));
 });
+
+it.each([
+  { provider: "gerrit", path: "a.ts" },
+  { provider: "gerrit", path: "removed.ts" },
+  { provider: "github", path: "a.ts" },
+  { provider: "github", path: "removed.ts" },
+])(
+  "guards $provider replies at $path as drafts and permissions change",
+  async ({ provider, path }) => {
+    setup({ paged: false });
+    __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, diffFilesCollapsed: false });
+    using _preferences = {
+      [Symbol.dispose]() {
+        __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
+      },
+    };
+    const container = document.createElement("div");
+    container.className = "flex h-[700px] w-[900px]";
+    const refresh = vi.fn();
+    const anchor = provider === "gerrit" ? { gerrit: { patchSet: 1, revision: null } } : {};
+    const withThread = (isDraft: boolean, canComment = true) => (
+      <PullRequestCodeTab
+        scrollerRef={() => {}}
+        environmentId={EnvironmentId.make("environment")}
+        reference={detail}
+        detail={{
+          ...detail,
+          provider: SourceControlProviderKind.make(provider),
+          ...(provider === "gerrit"
+            ? {
+                gerrit: {
+                  changeId: "I123",
+                  topic: null,
+                  isPrivate: false,
+                  isWip: false,
+                  currentPatchSet: 1,
+                  patchSets: [],
+                  labels: [],
+                  submitRequirements: [],
+                  submittable: null,
+                },
+              }
+            : {}),
+          capabilities: {
+            ...detail.capabilities,
+            review: { ...detail.capabilities.review, reply: true },
+          },
+          viewerPermissions: { ...detail.viewerPermissions, comment: canComment },
+          reviewThreads: [
+            {
+              id: "thread",
+              path,
+              line: 3,
+              side: "right",
+              isResolved: false,
+              isOutdated: false,
+              isDraft,
+              ...anchor,
+              comments: [
+                {
+                  ...anchor,
+                  id: "comment",
+                  author: detail.author,
+                  body: "Discuss this line.",
+                  createdAt: detail.createdAt,
+                  url: null,
+                },
+              ],
+            },
+          ],
+        }}
+        selectedCommitOid={null}
+        onSelectedCommitChange={() => {}}
+        onRefresh={refresh}
+      />
+    );
+    await using screen = await render(withThread(true), { container });
+    if (path !== "a.ts") {
+      await screen.getByRole("button", { name: /Conversations not on the current diff/ }).click();
+    }
+    await expect.element(screen.getByText("Discuss this line.", { exact: true })).toBeVisible();
+    if (path === "a.ts") {
+      await expect
+        .element(screen.getByRole("button", { name: /Conversations not on the current diff/ }))
+        .not.toBeInTheDocument();
+    }
+    const replyButton = screen.getByRole("button", { name: "Reply", exact: true });
+    const editor = screen.getByRole("textbox", { name: "Reply to this conversation" });
+    await expect.element(replyButton).not.toBeInTheDocument();
+    await expect.element(editor).not.toBeInTheDocument();
+    expect(mocks.command).not.toHaveBeenCalled();
+
+    await screen.rerender(withThread(false));
+    await replyButton.click();
+    await editor.fill("Published reply");
+    await replyButton.click();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+    expect(mocks.command).toHaveBeenCalledExactlyOnceWith({
+      environmentId: EnvironmentId.make("environment"),
+      input: { ...detail, threadId: "thread", body: "Published reply" },
+    });
+
+    await replyButton.click();
+    await editor.fill("Unsent reply");
+    await screen.rerender(withThread(false, false));
+    await expect.element(replyButton).not.toBeInTheDocument();
+    await expect.element(editor).not.toBeInTheDocument();
+    expect(mocks.command).toHaveBeenCalledOnce();
+
+    await screen.rerender(withThread(false));
+    await expect.element(editor).toHaveValue("Unsent reply");
+    await screen.rerender(withThread(true));
+    await expect.element(replyButton).not.toBeInTheDocument();
+    await expect.element(editor).not.toBeInTheDocument();
+    expect(mocks.command).toHaveBeenCalledOnce();
+  },
+);
 
 it("hides a resolved conversation behind avatars on its line until they are clicked", async () => {
   setup({ paged: false });

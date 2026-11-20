@@ -79,11 +79,11 @@ export function useLinkedPullRequestActions(input: {
     void run(
       linked
         ? gt(
-            "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change request} other {Couldn't link this pull request}}",
+            "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change} other {Couldn't link this pull request}}",
             { term: changeRequestTermKind(terminology) },
           )
         : gt(
-            "{term, select, mr {Couldn't unlink this merge request} cr {Couldn't unlink this change request} other {Couldn't unlink this pull request}}",
+            "{term, select, mr {Couldn't unlink this merge request} cr {Couldn't unlink this change} other {Couldn't unlink this pull request}}",
             { term: changeRequestTermKind(terminology) },
           ),
       mutation.type === "thread.pull-request.link"
@@ -96,15 +96,15 @@ export function useLinkedPullRequestActions(input: {
     const term = changeRequestTermKind(terminology);
     Dialog.prompt({
       title: gt(
-        "{term, select, mr {Link merge request} cr {Link change request} other {Link pull request}}",
+        "{term, select, mr {Link merge request} cr {Link change} other {Link pull request}}",
         { term },
       ),
       message: gt(
-        "{term, select, mr {Paste a merge request URL, or enter 123 / #123 for this thread's repository.} cr {Paste a change request URL, or enter 123 / #123 for this thread's repository.} other {Paste a pull request URL, or enter 123 / #123 for this thread's repository.}}",
+        "{term, select, mr {Paste a merge request URL, or enter 123 / #123 for this thread's repository.} cr {Paste a change URL, or enter 123 / #123 for this thread's repository.} other {Paste a pull request URL, or enter 123 / #123 for this thread's repository.}}",
         { term },
       ),
       placeholder: gt(
-        "{term, select, mr {Merge request URL or #42} cr {Change request URL or #42} other {Pull request URL or #42}}",
+        "{term, select, mr {Merge request URL or #42} cr {Change URL or #42} other {Pull request URL or #42}}",
         { term },
       ),
       initialValue: "",
@@ -121,11 +121,11 @@ export function useLinkedPullRequestActions(input: {
         if (resolved === null) {
           Dialog.alert(
             gt(
-              "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change request} other {Couldn't link this pull request}}",
+              "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change} other {Couldn't link this pull request}}",
               { term },
             ),
             gt(
-              "{term, select, mr {Use a merge request URL, 123, or #123.} cr {Use a change request URL, 123, or #123.} other {Use a pull request URL, 123, or #123.}}",
+              "{term, select, mr {Use a merge request URL, 123, or #123.} cr {Use a change URL, 123, or #123.} other {Use a pull request URL, 123, or #123.}}",
               { term },
             ),
           );
@@ -134,7 +134,7 @@ export function useLinkedPullRequestActions(input: {
         if ("error" in resolved) {
           Dialog.alert(
             gt(
-              "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change request} other {Couldn't link this pull request}}",
+              "{term, select, mr {Couldn't link this merge request} cr {Couldn't link this change} other {Couldn't link this pull request}}",
               { term },
             ),
             resolved.error,
@@ -187,11 +187,11 @@ export function useLinkedPullRequestActions(input: {
           );
           Dialog.alert(
             gt(
-              "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+              "{term, select, mr {Unable to open MR} cr {Unable to open change} other {Unable to open PR}}",
               { term },
             ),
             gt(
-              "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+              "{term, select, mr {The merge request could not be opened.} cr {The change could not be opened.} other {The pull request could not be opened.}}",
               { term },
             ),
           );

@@ -1,6 +1,5 @@
 import {
   actorDisplayName,
-  capitalizeTerm,
   sourceControlClients,
 } from "@t3tools/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../../lib/changeRequestTerm";
@@ -115,19 +114,16 @@ export const PullRequestListRow = memo(
             accessibilityRole="button"
             accessibilityState={{ selected: props.selected, busy: props.busy }}
             accessibilityLabel={[
-              gt(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} {number}",
-                {
-                  term: changeRequestTermKind(
-                    sourceControlClients.get(item.provider).changeRequest,
-                  ),
-                  number: item.number,
-                },
-              ),
+              gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} {number}", {
+                term: changeRequestTermKind(sourceControlClients.get(item.provider).changeRequest),
+                number: item.number,
+              }),
               item.title,
               status.label,
               conflict ? conflict.label.toLowerCase() : null,
-              gt("by {author}", { author: actorDisplayName(item.author, item.provider) ?? gt("unknown author") }),
+              gt("by {author}", {
+                author: actorDisplayName(item.author, item.provider) ?? gt("unknown author"),
+              }),
               review ? review.accessibleLabel : null,
               checksSpoken,
               item.stack

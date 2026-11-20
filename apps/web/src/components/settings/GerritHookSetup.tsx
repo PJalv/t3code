@@ -1,3 +1,4 @@
+import { T, useGT } from "gt-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
@@ -13,6 +14,7 @@ export function GerritHookSetup({
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
 }) {
+  const gt = useGT();
   const diagnosis = useEnvironmentQuery(
     sourceControlEnvironment.gerritHook({ environmentId, input: { cwd } }),
   );
@@ -24,8 +26,10 @@ export function GerritHookSetup({
   );
   const [busy, setBusy] = useState(false);
   return (
-    <section aria-label="Change-Id hook" className="grid gap-2">
-      <h3 className="text-sm font-medium">Change-Id hook</h3>
+    <section aria-label={gt("Change-Id hook")} className="grid gap-2">
+      <h3 className="text-sm font-medium">
+        <T>Change-Id hook</T>
+      </h3>
       {diagnosis.error ? <p role="alert">{diagnosis.error}</p> : null}
       {diagnosis.data ? (
         <>
@@ -45,7 +49,7 @@ export function GerritHookSetup({
                 setBusy(false);
               }}
             >
-              Install hook
+              <T>Install hook</T>
             </Button>
           ) : null}
         </>

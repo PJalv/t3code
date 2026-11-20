@@ -255,7 +255,7 @@ export function PullRequestReviewersScreen({ route }: StaticScreenProps<PullRequ
               {!allowed ? (
                 <Text className="text-xs text-foreground-muted">
                   {gt(
-                    "Requesting reviews requires write access and an open {term, select, mr {merge request} cr {change request} other {pull request}}.",
+                    "Requesting reviews requires write access and an open {term, select, mr {merge request} cr {change} other {pull request}}.",
                     { term },
                   )}
                 </Text>
@@ -356,7 +356,7 @@ export function PullRequestReviewersScreen({ route }: StaticScreenProps<PullRequ
               <Text className="text-danger-foreground">
                 {detail.error ??
                   gt(
-                    "Couldn't load this {term, select, mr {merge request} cr {change request} other {pull request}}.",
+                    "Couldn't load this {term, select, mr {merge request} cr {change} other {pull request}}.",
                     { term },
                   )}
               </Text>

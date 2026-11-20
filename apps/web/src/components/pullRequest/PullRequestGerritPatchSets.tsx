@@ -1,3 +1,4 @@
+import { T, useGT } from "gt-react";
 import {
   GERRIT_CHANGE_LEVEL_PATH,
   type PullRequestGerritComparison,
@@ -45,6 +46,7 @@ export function PullRequestGerritPatchSets({
   readonly comparison: PullRequestGerritComparison;
   readonly onChange: (comparison: PullRequestGerritComparison) => void;
 }) {
+  const gt = useGT();
   const base = comparison.base;
   const baseValue =
     typeof base === "string"
@@ -54,19 +56,20 @@ export function PullRequestGerritPatchSets({
         : `patchSet:${base.patchSet}`;
   const baseLabel =
     baseValue === "base"
-      ? "Base"
+      ? gt("Base", { $context: "patch set comparison base, noun" })
       : baseValue.startsWith("parent:")
-        ? `Parent ${baseValue.slice(7)}`
-        : `Patch set ${baseValue.slice(9)}`;
+        ? gt("Parent {number}", { number: baseValue.slice(7) })
+        : gt("Patch set {number}", { number: baseValue.slice(9) });
   return (
     <div className="flex min-w-0 items-center gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger
           render={<Button size="xs" variant="secondary" />}
-          aria-label="Select patch set"
+          aria-label={gt("Select patch set")}
         >
-          PS {comparison.patchSet}
-          {comparison.patchSet === detail.currentPatchSet ? " (current)" : ""}{" "}
+          {comparison.patchSet === detail.currentPatchSet
+            ? gt("PS {number} (current)", { number: comparison.patchSet })
+            : gt("PS {number}", { number: comparison.patchSet })}{" "}
           <ChevronDownIcon className="size-3" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
@@ -80,9 +83,10 @@ export function PullRequestGerritPatchSets({
               .toSorted((a, b) => b.number - a.number)
               .map((entry) => (
                 <DropdownMenuRadioItem key={entry.number} value={String(entry.number)} closeOnClick>
-                  Patch set {entry.number}{" "}
-                  {entry.number === detail.currentPatchSet ? "(current)" : ""} ·{" "}
-                  {entry.commit.slice(0, 7)}
+                  {entry.number === detail.currentPatchSet
+                    ? gt("Patch set {number} (current)", { number: entry.number })
+                    : gt("Patch set {number}", { number: entry.number })}{" "}
+                  · {entry.commit.slice(0, 7)}
                 </DropdownMenuRadioItem>
               ))}
           </DropdownMenuRadioGroup>
@@ -91,7 +95,7 @@ export function PullRequestGerritPatchSets({
       <DropdownMenu>
         <DropdownMenuTrigger
           render={<Button size="xs" variant="secondary" />}
-          aria-label="Select comparison base"
+          aria-label={gt("Select comparison base")}
         >
           {baseLabel} <ChevronDownIcon className="size-3" />
         </DropdownMenuTrigger>
@@ -111,14 +115,14 @@ export function PullRequestGerritPatchSets({
             }
           >
             <DropdownMenuRadioItem value="base" closeOnClick>
-              Base
+              <T>Base</T>
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="parent:1" closeOnClick>
-              Parent 1
+              <T>Parent 1</T>
             </DropdownMenuRadioItem>
             {typeof base !== "string" && "parent" in base && base.parent !== 1 ? (
               <DropdownMenuRadioItem value={baseValue} closeOnClick>
-                Parent {base.parent}
+                {gt("Parent {number}", { number: base.parent })}
               </DropdownMenuRadioItem>
             ) : null}
             {detail.patchSets
@@ -130,14 +134,14 @@ export function PullRequestGerritPatchSets({
                   value={`patchSet:${entry.number}`}
                   closeOnClick
                 >
-                  Patch set {entry.number}
+                  {gt("Patch set {number}", { number: entry.number })}
                 </DropdownMenuRadioItem>
               ))}
           </DropdownMenuRadioGroup>
           <label className="flex items-center gap-2 px-2 py-1 text-xs">
-            Parent number{" "}
+            <T>Parent number</T>{" "}
             <input
-              aria-label="Parent number"
+              aria-label={gt("Parent number")}
               className="w-14 rounded border border-border bg-background px-1"
               type="number"
               min={1}

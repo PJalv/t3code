@@ -30,11 +30,11 @@ export function useOpenThreadPullRequests() {
       if (!opened)
         Dialog.alert(
           gt(
-            "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+            "{term, select, mr {Unable to open MR} cr {Unable to open change} other {Unable to open PR}}",
             { term: changeRequestTermKind(pr.changeRequest) },
           ),
           gt(
-            "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+            "{term, select, mr {The merge request could not be opened.} cr {The change could not be opened.} other {The pull request could not be opened.}}",
             {
               term: changeRequestTermKind(pr.changeRequest),
             },

@@ -1,7 +1,9 @@
+import { T, useGT } from "gt-react-native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   gerritConnectionConfigFromFields,
   gerritCredentialSaveMode,
+  gerritTerminalGitCommandTemplate,
 } from "@t3tools/client-runtime/state/source-control";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
@@ -12,12 +14,14 @@ import { Button } from "../../components/ui/Button";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 
 export function GerritConnectionSettings({
   environmentId,
 }: {
   readonly environmentId: EnvironmentId;
 }) {
+  const gt = useGT();
   const connections = useEnvironmentQuery(
     sourceControlEnvironment.gerritConnections({ environmentId, input: {} }),
   );
@@ -82,25 +86,29 @@ export function GerritConnectionSettings({
   return (
     <View className="gap-3 px-4 py-3">
       <Text className="text-sm text-foreground-muted">
-        Credentials and Gerrit servers belong to this environment. A configured server serves all
-        its Gerrit projects. Enter the full server URL for REST access, including its case-sensitive
-        path.
+        <T>
+          Credentials and Gerrit servers belong to this environment. A configured server serves all
+          its Gerrit projects. Enter the full server URL for REST access, including its
+          case-sensitive path.
+        </T>
       </Text>
       {connections.error ? <Text accessibilityRole="alert">{connections.error}</Text> : null}
       {installation.trim().toLowerCase().startsWith("http://") ? (
         <Text accessibilityRole="alert">
-          HTTP does not encrypt credentials or protect the server’s commit hook. Use HTTPS when
-          available.
+          <T>
+            HTTP does not encrypt credentials or protect the server’s commit hook. Use HTTPS when
+            available.
+          </T>
         </Text>
       ) : null}
       {savedConnections.map((connection) => (
         <View key={connection.config.installation} className="gap-2">
           <Text>
             {connection.config.installation} ·{" "}
-            {connection.credentialPresent ? "Credentials saved" : "Credentials missing"}
+            {connection.credentialPresent ? gt("Credentials saved") : gt("Credentials missing")}
           </Text>
           <Button
-            label="Edit connection"
+            label={gt("Edit connection")}
             disabled={!canWrite || busy}
             onPress={() => {
               setInstallation(connection.config.installation);
@@ -110,11 +118,13 @@ export function GerritConnectionSettings({
               setChecksProfile(connection.config.checksProfile ?? "none");
               setUsername("");
               setToken("");
-              setMessage("Leave both HTTP credential fields blank to keep the saved credentials.");
+              setMessage(
+                gt("Leave both HTTP credential fields blank to keep the saved credentials."),
+              );
             }}
           />
           <Button
-            label="Test connection"
+            label={gt("Test connection")}
             disabled={!canWrite || busy}
             onPress={async () => {
               setBusy(true);
@@ -124,14 +134,16 @@ export function GerritConnectionSettings({
               });
               setMessage(
                 result._tag === "Success"
-                  ? `Verified account ${result.value.account._account_id}. Deployment compatibility is unverified.`
-                  : "Connection test failed. Check the server URL and credentials.",
+                  ? gt("Verified account {account}. Deployment compatibility is unverified.", {
+                      account: result.value.account._account_id,
+                    })
+                  : gt("Connection test failed. Check the server URL and credentials."),
               );
               setBusy(false);
             }}
           />
           <Button
-            label="Remove credentials"
+            label={gt("Remove credentials")}
             disabled={!canWrite || busy || !connection.credentialPresent}
             onPress={async () => {
               setBusy(true);
@@ -141,15 +153,15 @@ export function GerritConnectionSettings({
               });
               setMessage(
                 result._tag === "Success"
-                  ? "Credentials removed."
-                  : "Could not remove credentials.",
+                  ? gt("Credentials removed.")
+                  : gt("Could not remove credentials."),
               );
               setBusy(false);
               connections.refresh();
             }}
           />
           <Button
-            label="Remove connection"
+            label={gt("Remove connection")}
             tone="danger"
             disabled={!canWrite || busy}
             onPress={async () => {
@@ -159,36 +171,74 @@ export function GerritConnectionSettings({
                 input: { installation: connection.config.installation },
               });
               setMessage(
-                result._tag === "Success" ? "Connection removed." : "Could not remove connection.",
+                result._tag === "Success"
+                  ? gt("Connection removed.")
+                  : gt("Could not remove connection."),
               );
               setBusy(false);
               connections.refresh();
             }}
           />
+          {connection.credentialPresent &&
+          gerritTerminalGitCommandTemplate(connection.config.installation, environmentId) ? (
+            <View className="gap-2">
+              <Text>
+                <T>Copy saved credential to configured Git</T>
+              </Text>
+              <Text className="text-sm text-foreground-muted">
+                <T>
+                  This is an editable command template, not a ready-to-run command. Replace the
+                  launcher and T3 home from the server’s launch configuration. Packaged install: use
+                  its absolute CLI path. Dev server: use node and that checkout’s
+                  apps/server/src/bin.ts; the home is normally its .t3 directory unless --home-dir
+                  overrides it. Do not use this phone’s installation or home.
+                </T>
+              </Text>
+              <Text className="text-sm text-foreground-muted">
+                <T>
+                  Run in the HTTPS checkout on the T3 server machine as its OS user. Linux libsecret
+                  only, already configured with global credential.useHttpPath=true and an exact
+                  repository username. No Git config or remote changes. Re-run after password
+                  rotation. Removing the T3 connection does not remove the keyring entry.
+                </T>
+              </Text>
+              <GerritCommandTemplateCopy
+                key={environmentId}
+                command={gerritTerminalGitCommandTemplate(
+                  connection.config.installation,
+                  environmentId,
+                )!}
+              />
+            </View>
+          ) : null}
         </View>
       ))}
       {checksProfile === "checks-rest-v1-3.10" ? (
         <View>
-          <Text>This server has a legacy checks integration enabled.</Text>
+          <Text>
+            <T>This server has a legacy checks integration enabled.</T>
+          </Text>
           <Button
-            label="Remove legacy checks integration"
+            label={gt("Remove legacy checks integration")}
             disabled={!canWrite || busy}
             onPress={() => setChecksProfile("none")}
           />
-          <Text>Save the server settings to apply this change.</Text>
+          <Text>
+            <T>Save the server settings to apply this change.</T>
+          </Text>
         </View>
       ) : null}
-      {field("Gerrit server URL", installation, setInstallation)}
-      {field("SSH clone host (optional)", sshHost, setSshHost)}
-      {field("SSH port (optional; default 29418)", sshPort, setSshPort)}
-      {field("SSH username (optional)", sshUsername, setSshUsername)}
+      {field(gt("Gerrit server URL"), installation, setInstallation)}
+      {field(gt("SSH clone host (optional)"), sshHost, setSshHost)}
+      {field(gt("SSH port (optional; default 29418)"), sshPort, setSshPort)}
+      {field(gt("SSH username (optional)"), sshUsername, setSshUsername)}
       <Text>
-        Leave both HTTP credential fields blank to keep saved credentials for this server.
+        <T>Leave both HTTP credential fields blank to keep saved credentials for this server.</T>
       </Text>
-      {field("HTTP username", username, setUsername)}
-      {field("HTTP password or token", token, setToken, true)}
+      {field(gt("HTTP username"), username, setUsername)}
+      {field(gt("HTTP password or token"), token, setToken, true)}
       <Button
-        label="Save connection"
+        label={gt("Save connection")}
         disabled={
           !canWrite ||
           busy ||
@@ -219,8 +269,8 @@ export function GerritConnectionSettings({
           setBusy(false);
           setMessage(
             result._tag === "Success"
-              ? "Saved. Test the connection to verify the account."
-              : "Could not save connection.",
+              ? gt("Saved. Test the connection to verify the account.")
+              : gt("Could not save connection."),
           );
           connections.refresh();
         }}
@@ -235,11 +285,47 @@ export function GerritConnectionSettings({
   );
 }
 
+function GerritCommandTemplateCopy({ command }: { readonly command: string }) {
+  const gt = useGT();
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
+  return (
+    <View className="gap-2">
+      <Button
+        label={gt("Copy command template")}
+        disabled={status === "copying"}
+        onPress={async () => {
+          setStatus("copying");
+          const copied = await tryCopyTextWithHaptic(command, {
+            target: "terminal Git command template",
+          });
+          setStatus(copied ? "copied" : "error");
+        }}
+      />
+      {status === "copying" || status === "copied" ? (
+        <Text accessibilityLiveRegion="polite" className="text-sm text-foreground-muted">
+          {status === "copying" ? gt("Copying command template…") : gt("Command template copied.")}
+        </Text>
+      ) : null}
+      {status === "error" ? (
+        <>
+          <Text accessibilityRole="alert">
+            <T>Could not copy the command template. Select and copy it below, or try again.</T>
+          </Text>
+          <Text selectable accessibilityLabel={gt("Command template")}>
+            {command}
+          </Text>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 function GerritSigningPassphraseSettings({
   environmentId,
 }: {
   readonly environmentId: EnvironmentId;
 }) {
+  const gt = useGT();
   const status = useEnvironmentQuery(
     sourceControlEnvironment.gerritSigningPassphrase({ environmentId, input: {} }),
   );
@@ -259,22 +345,28 @@ function GerritSigningPassphraseSettings({
     setMessage(
       result._tag === "Success"
         ? value === null
-          ? "GPG key passphrase cleared."
-          : "GPG key passphrase saved."
-        : "Could not update the GPG key passphrase.",
+          ? gt("GPG key passphrase cleared.")
+          : gt("GPG key passphrase saved.")
+        : gt("Could not update the GPG key passphrase."),
     );
     status.refresh();
   };
   return (
     <View className="gap-2">
-      <Text className="text-sm text-foreground-muted">GPG key passphrase</Text>
+      <Text className="text-sm text-foreground-muted">
+        <T>GPG key passphrase</T>
+      </Text>
       <Text>
         {present
-          ? "Saved on this environment's server. Used to sign commits when Git has commit.gpgSign enabled. Leave blank to keep it."
-          : "Required to sign commits when Git has commit.gpgSign enabled. Stored on this environment's server."}
+          ? gt(
+              "Saved on this environment's server. Used to sign commits when Git has commit.gpgSign enabled. Leave blank to keep it.",
+            )
+          : gt(
+              "Required to sign commits when Git has commit.gpgSign enabled. Stored on this environment's server.",
+            )}
       </Text>
       <TextInput
-        accessibilityLabel="GPG key passphrase"
+        accessibilityLabel={gt("GPG key passphrase")}
         className="rounded-lg border border-border-subtle px-3 py-2 text-base text-foreground"
         placeholderTextColorClassName="accent-foreground-muted"
         autoCapitalize="none"
@@ -286,12 +378,12 @@ function GerritSigningPassphraseSettings({
         onChangeText={setPassphraseValue}
       />
       <Button
-        label="Save passphrase"
+        label={gt("Save passphrase")}
         disabled={!canWrite || busy || passphrase.length === 0 || /[\r\n]/.test(passphrase)}
         onPress={() => void save(passphrase)}
       />
       <Button
-        label="Clear passphrase"
+        label={gt("Clear passphrase")}
         disabled={!canWrite || busy || !present}
         onPress={() => void save(null)}
       />

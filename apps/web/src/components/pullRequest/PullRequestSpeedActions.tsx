@@ -93,13 +93,14 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
   });
   const actions = pullRequestQuickActions(entry, hostActions);
   const busy = actionPending || closing || sweeping;
+  const gerrit = changeRequestTermKind(terminology) === "cr";
   if (actions.length === 0) return null;
   return (
     <SpeedModeGroup
       busy={busy}
       pending={actionPending || closing}
       label={gt(
-        "Quick actions for {term, select, mr {merge request} cr {change request} other {pull request}} #{number}",
+        "Quick actions for {term, select, mr {merge request} cr {change} other {pull request}} #{number}",
         {
           term: changeRequestTermKind(terminology),
           number: entry.number,
@@ -107,8 +108,9 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
       )}
     >
       {actions.map((action) => {
-        const label = terminology.verbs?.[action] ?? resolve(ACTIONS[action].label);
-        const Icon = ACTIONS[action].Icon;
+        const copy = gerrit ? { ...ACTIONS[action], ...GERRIT_ACTIONS[action] } : ACTIONS[action];
+        const label = resolve(copy.label);
+        const Icon = copy.Icon;
         return (
           <Tooltip key={action}>
             <TooltipTrigger
@@ -117,7 +119,7 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
                   variant={action === "close" ? "destructive-outline" : "outline"}
                   size="xs"
                   disabled={!canWrite || busy || (action === "merge" && entry.stack !== undefined)}
-                  aria-label={resolve(ACTIONS[action].numbered, { number: entry.number })}
+                  aria-label={resolve(copy.numbered, { number: entry.number })}
                   onClick={() => void perform(action)}
                   onPointerDown={(event) => {
                     if (action !== "close" || !event.isPrimary || event.button !== 0) return;
@@ -133,12 +135,14 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
             <TooltipPopup>
               {action === "merge" && entry.stack
                 ? gt(
-                    "Open this {term, select, mr {merge request} cr {change request} other {pull request}} to merge its stack",
+                    "Open this {term, select, mr {merge request} cr {change} other {pull request}} to merge its stack",
                     { term: changeRequestTermKind(terminology) },
                   )
                 : action === "close" && onCloseSweepStart
-                  ? gt("{action} immediately, or drag across rows to {verb} several", { action: label, verb: label.toLowerCase() })
-                  : gt("{action} immediately", { action: label })}
+                  ? gerrit
+                    ? gt("Abandon immediately, or drag across rows to abandon several")
+                    : gt("Close immediately, or drag across rows to close several")
+                  : resolve(copy.immediate)}
             </TooltipPopup>
           </Tooltip>
         );
@@ -212,3 +216,26 @@ const ACTIONS = {
     Icon: PullRequestGlyph.reopen,
   },
 } as const;
+
+/** Gerrit's own verbs for the same actions; `ready` reads the same on every host. */
+const GERRIT_ACTIONS = {
+  close: {
+    label: msg("Abandon", { $context: "verb, abandon a Gerrit change" }),
+    numbered: msg("Abandon #{number}"),
+    immediate: msg("Abandon immediately"),
+  },
+  merge: {
+    label: msg("Submit", { $context: "verb, submit a Gerrit change" }),
+    numbered: msg("Submit #{number}"),
+    immediate: msg("Submit immediately"),
+  },
+  ready: {},
+  reopen: {
+    label: msg("Restore", { $context: "verb, restore an abandoned Gerrit change" }),
+    numbered: msg("Restore #{number}"),
+    immediate: msg("Restore immediately"),
+  },
+} satisfies Record<
+  keyof typeof ACTIONS,
+  { readonly label?: string; readonly numbered?: string; readonly immediate?: string }
+>;

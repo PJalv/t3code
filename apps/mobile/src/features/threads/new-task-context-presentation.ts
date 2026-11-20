@@ -105,7 +105,7 @@ export function resolveNewTaskBranchLabel(
     if (parsed)
       return resolve(
         msg(
-          "{term, select, mr {From MR #{number}} cr {From change request #{number}} other {From PR #{number}}}",
+          "{term, select, mr {From MR #{number}} cr {From change #{number}} other {From PR #{number}}}",
           {
             term: changeRequestTermKind(parsed.definition.changeRequest),
             number: parsed.link.number,

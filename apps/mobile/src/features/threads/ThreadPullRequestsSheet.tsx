@@ -45,7 +45,7 @@ export function ThreadPullRequestsSheet(
   const rowInputs = { lines, actions };
   const term = changeRequestTermKind(actions.terminology);
   const title = gt(
-    "{term, select, mr {Linked merge requests} cr {Linked change requests} other {Linked pull requests}}",
+    "{term, select, mr {Linked merge requests} cr {Linked changes} other {Linked pull requests}}",
     { term },
   );
 
@@ -85,7 +85,7 @@ export function ThreadPullRequestsSheet(
         ListEmptyComponent={
           <Text className="pt-6 text-center text-sm text-foreground-muted">
             {gt(
-              "{term, select, mr {No linked merge requests.} cr {No linked change requests.} other {No linked pull requests.}}",
+              "{term, select, mr {No linked merge requests.} cr {No linked changes.} other {No linked pull requests.}}",
               { term },
             )}
           </Text>
@@ -104,7 +104,7 @@ export function ThreadPullRequestsSheet(
             ? [
                 {
                   accessibilityLabel: gt(
-                    "{term, select, mr {Link merge request} cr {Link change request} other {Link pull request}}",
+                    "{term, select, mr {Link merge request} cr {Link change} other {Link pull request}}",
                     { term },
                   ),
                   icon: "plus",

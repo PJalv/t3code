@@ -7,7 +7,35 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { expect, it } from "vite-plus/test";
 
-import { gerritConnectionConfigFromFields, gerritCredentialSaveMode } from "./gerritReview.ts";
+import {
+  gerritConnectionConfigFromFields,
+  gerritCredentialSaveMode,
+  gerritTerminalGitCommandTemplate,
+} from "./gerritReview.ts";
+
+it("copies an explicit secret-free template with shell-safe arguments and no guessed launcher or home", () => {
+  const template = gerritTerminalGitCommandTemplate("https://review.example/proxy/", "env-1");
+  expect(template).toContain("# TEMPLATE: edit before running");
+  expect(template?.split("\n").at(-1)).toBe(
+    "'<T3-LAUNCHER>' gerrit copy-terminal-credential --base-dir '<T3-HOME>' --installation 'https://review.example/proxy/' --environment-id 'env-1'",
+  );
+  expect(
+    gerritTerminalGitCommandTemplate("https://review.example/a'$(id)/", "env-1")
+      ?.split("\n")
+      .at(-1),
+  ).toBe(
+    "'<T3-LAUNCHER>' gerrit copy-terminal-credential --base-dir '<T3-HOME>' --installation 'https://review.example/a'\\''$(id)/' --environment-id 'env-1'",
+  );
+  for (const installation of [
+    "http://review.example/",
+    "https://alice:secret@review.example/",
+    "https://review.example/?token=secret",
+    "https://review.example/#secret",
+  ]) {
+    expect(gerritTerminalGitCommandTemplate(installation, "env-1")).toBeNull();
+  }
+  expect(gerritTerminalGitCommandTemplate("https://review.example/", "env';echo bad")).toBeNull();
+});
 
 const scope = {
   installation: "https://review.example/Review/",
