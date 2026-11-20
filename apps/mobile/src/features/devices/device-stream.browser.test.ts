@@ -110,3 +110,74 @@ describe("native iOS simulator viewer", () => {
     },
   );
 });
+
+describe("native Android device viewer", () => {
+  it("forwards editing shortcuts and leaves Ctrl+V to the clipboard paste", async () => {
+    vi.useFakeTimers();
+    const sent: unknown[] = [];
+    vi.stubGlobal("VideoDecoder", vi.fn());
+    vi.stubGlobal("EncodedVideoChunk", vi.fn());
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        static OPEN = 1;
+        readyState = 1;
+        send(message: string) {
+          sent.push(JSON.parse(message));
+        }
+        close() {}
+      },
+    );
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(null)));
+    vi.stubGlobal("ReactNativeWebView", { postMessage() {} });
+    try {
+      start({
+        platform: "android",
+        deviceId: "emulator-5554",
+        access: {
+          httpBase: "https://environment.test/api/device-hub",
+          wsBase: "wss://environment.test/api/device-hub",
+          credentials: false,
+          query: {},
+        },
+        colors: {
+          background: "black",
+          foreground: "white",
+          muted: "gray",
+          buttonBackground: "black",
+          buttonForeground: "white",
+          buttonBorder: "gray",
+        },
+        labels: {
+          screen: "Android Emulator screen",
+          reconnectingControls: "Reconnecting device controls...",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const frame = document.querySelector<HTMLElement>('[role="application"]')!;
+      const selectAll = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, cancelable: true });
+      frame.dispatchEvent(selectAll);
+      expect(selectAll.defaultPrevented).toBe(true);
+      const pasteChord = new KeyboardEvent("keydown", {
+        key: "v",
+        ctrlKey: true,
+        cancelable: true,
+      });
+      frame.dispatchEvent(pasteChord);
+      expect(pasteChord.defaultPrevented).toBe(false);
+      frame.dispatchEvent(
+        Object.assign(new Event("paste", { cancelable: true }), {
+          clipboardData: { getData: () => "Clipboard text" },
+        }),
+      );
+      expect(sent).toEqual([
+        { type: "key", keycode: 29, metaState: 0x1000 },
+        { type: "text", text: "Clipboard text" },
+      ]);
+    } finally {
+      stop();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});
