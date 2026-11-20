@@ -517,6 +517,7 @@ export interface DesktopServerExposureState {
   mode: DesktopServerExposureMode;
   endpointUrl: string | null;
   advertisedHost: string | null;
+  preferredLanInterfaceName: string | null;
   tailscaleServeEnabled: boolean;
   tailscaleServePort: number;
 }
@@ -525,6 +526,7 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
   mode: DesktopServerExposureModeSchema,
   endpointUrl: Schema.NullOr(Schema.String),
   advertisedHost: Schema.NullOr(Schema.String),
+  preferredLanInterfaceName: Schema.NullOr(Schema.String),
   tailscaleServeEnabled: Schema.Boolean,
   tailscaleServePort: Schema.Number,
 });
@@ -1182,6 +1184,7 @@ export interface DesktopBridge {
   resolveSshPasswordPrompt: (requestId: string, password: string | null) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  setPreferredLanInterfaceName: (name: string | null) => Promise<DesktopServerExposureState>;
   setTailscaleServeEnabled: (input: {
     readonly enabled: boolean;
     readonly port?: number;
