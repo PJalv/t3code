@@ -1503,7 +1503,7 @@ export const layerAttachmentToolkit = toolkitRegistration(
 export const layerPullRequestsToolkit = toolkitRegistration(
   PullRequestsToolkit,
   PullRequestsHandlers.layer,
-).pipe(Layer.provide(PullRequestWatchService.layer));
+).pipe(Layer.provide(PullRequestWatchService.layer), Layer.provide(GerritWatchCompletion.layer));
 
 const layerIssuesToolkit = toolkitRegistration(IssuesToolkit, IssuesHandlers.layer);
 const layerGerritDirectToolkit = toolkitRegistration(
