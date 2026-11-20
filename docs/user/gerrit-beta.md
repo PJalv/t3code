@@ -57,8 +57,8 @@ local process that changes files after validation. Do not alter state paths whil
 the beta runs.
 
 The optional Linux-only `gerrit copy-terminal-credential` command remains available.
-Use the **Copy template** action in Gerrit settings and the beta executable's full
-path. Keep the template's explicit `--base-dir` pointed at the same beta home;
+Run it with the beta executable's full path, as described in
+[Source control](source-control.md). Keep its explicit `--base-dir` pointed at the same beta home;
 `T3CODE_HOME` and the official default home are not accepted as substitutes. Home
 validation completes before the credential service runs. This command still
 requires the configured system libsecret helper and does not support native Windows.
