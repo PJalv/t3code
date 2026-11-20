@@ -257,7 +257,11 @@ export function pullRequestReviewSummary(
     return {
       title:
         approved.length === 1 && approved[0]?.author
-          ? resolve(msg("Approved by {login}", { login: actorDisplayName(approved[0].author, pr.provider) }))
+          ? resolve(
+              msg("Approved by {login}", {
+                login: actorDisplayName(approved[0].author, pr.provider),
+              }),
+            )
           : resolve(msg("Reviews approved")),
       count: resolve(
         msg("{count, plural, one {{count} approved} other {{count} approved}}", {

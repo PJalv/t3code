@@ -270,38 +270,114 @@ describe("mapGerritActivity", () => {
   it("shows linked discussions instead of duplicate count-only change messages", () => {
     const message = (id: string, body: string) => ({
       id,
-      date: "2025-01-01 10:00:00",
+      date: "2025-01-01 10:00:00.000000000",
+      author: { _account_id: 42 },
       message: body,
     });
+    const linkedComment = (overrides: Record<string, unknown>) =>
+      comment({ author: { _account_id: 42 }, ...overrides });
     const result = mapGerritActivity({
       messages: [
         message("summary", "Patch Set 7:\n\n(2 comments)"),
         message("vote", "Patch Set 7: Code-Review-1\n\n(1 comment)"),
         message("prose", "Patch Set 7:\n\nPlease check the new version.\n\n(1 comment)"),
+        message(
+          "embedded",
+          "Patch Set 3:\n\n(2 comments)\n\nReviewed patch set 3 as a temporary live-test change...",
+        ),
+        message(
+          "user-count",
+          "Patch Set 7: Code-Review+2\n\n(1 comment)\n\nMy estimate:\n\n(1 comment)",
+        ),
         message("missing", "Patch Set 7:\n\n(1 comment)"),
         message("partial", "Patch Set 7:\n\n(2 comments)"),
         message("draft", "Patch Set 7:\n\n(1 comment)"),
       ],
       comments: [
-        comment({ id: "a", changeMessageId: "summary", message: "Which channel?" }),
-        comment({ id: "b", changeMessageId: "summary", inReplyTo: "a", message: "Use stable." }),
-        comment({ id: "c", changeMessageId: "vote" }),
-        comment({ id: "d", changeMessageId: "prose" }),
-        comment({ id: "e", changeMessageId: "partial" }),
+        linkedComment({ id: "a", changeMessageId: "summary", message: "Which channel?" }),
+        linkedComment({
+          id: "b",
+          changeMessageId: "summary",
+          inReplyTo: "a",
+          message: "Use stable.",
+        }),
+        linkedComment({ id: "c", changeMessageId: "vote" }),
+        linkedComment({ id: "d", changeMessageId: "prose" }),
+        linkedComment({ id: "e", changeMessageId: "partial" }),
+        linkedComment({ id: "g", changeMessageId: "embedded", patchSet: 3 }),
+        linkedComment({ id: "h", changeMessageId: "embedded", patchSet: 3 }),
+        linkedComment({ id: "i", changeMessageId: "user-count" }),
       ],
       drafts: [comment({ id: "f", changeMessageId: "draft", visibility: "server-draft" })],
       portedComments: [],
     });
     expect(result.comments.map(({ id, body }) => ({ id, body }))).toEqual([
       { id: "draft", body: "Patch Set 7:\n\n(1 comment)" },
+      {
+        id: "embedded",
+        body: "Patch Set 3:\n\nReviewed patch set 3 as a temporary live-test change...",
+      },
       { id: "missing", body: "Patch Set 7:\n\n(1 comment)" },
       { id: "partial", body: "Patch Set 7:\n\n(2 comments)" },
-      { id: "prose", body: "Patch Set 7:\n\nPlease check the new version." },
+      { id: "prose", body: "Patch Set 7:\n\nPlease check the new version.\n\n(1 comment)" },
+      { id: "user-count", body: "Patch Set 7: Code-Review+2\n\nMy estimate:\n\n(1 comment)" },
       { id: "vote", body: "Patch Set 7: Code-Review-1" },
     ]);
     expect(result.reviewThreads.flatMap((thread) => thread.comments).map((c) => c.body)).toContain(
       "Which channel?",
     );
+    expect(result.comments.find(({ id }) => id === "user-count")).toMatchObject({
+      vote: { label: "Code-Review", value: 2 },
+      reviewState: "DISMISSED",
+    });
+  });
+
+  it("keeps count paragraphs without complete same-publish evidence", () => {
+    const linked = (overrides: Record<string, unknown>) =>
+      comment({ changeMessageId: "m", author: { _account_id: 42 }, ...overrides });
+    const body = "Patch Set 3:\n\n(2 comments)\n\nPlease check the new version.";
+    for (const comments of [
+      [],
+      [linked({ id: "a" })],
+      [linked({ id: "a" }), linked({ id: "a" })],
+      [linked({ id: "a" }), linked({ id: "b", changeMessageId: "other" })],
+      [linked({ id: "a" }), linked({ id: "b", visibility: "server-draft" })],
+      [linked({ id: "a" }), linked({ id: "b", author: null })],
+      [linked({ id: "a" }), linked({ id: "b", author: { _account_id: 43 } })],
+      [linked({ id: "a" }), linked({ id: "b", updated: "2024-12-31 10:00:00" })],
+      [linked({ id: "a" }), linked({ id: "b", message: null })],
+      [
+        linked({ id: "a" }),
+        linked({ id: "b", identity: { kind: "unknown", reason: "missing revision" } }),
+      ],
+      [
+        linked({ id: "a" }),
+        linked({ id: "b", identity: { kind: "contradictory", reason: "revision mismatch" } }),
+      ],
+      [linked({ id: "a" }), linked({ id: "b" }), linked({ id: "c" })],
+    ]) {
+      const result = mapGerritActivity({
+        messages: [
+          {
+            id: "m",
+            author: { _account_id: 42 },
+            date: "2025-01-01 10:00:00.000000000",
+            message: body,
+          },
+        ],
+        comments,
+        drafts: comments.filter((comment) => comment.visibility === "server-draft"),
+        portedComments: [
+          {
+            id: "a",
+            original: comments[0] ?? null,
+            displayAnchor: { path: "a.ts", side: "REVISION" },
+            displayRevision: revision,
+          },
+        ],
+      });
+      expect(result.comments.map((comment) => comment.body)).toEqual([body]);
+    }
   });
 
   it.effect("marks draft-only threads and excludes drafts not supplied by the viewer", () =>

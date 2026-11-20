@@ -202,7 +202,7 @@ export function buildMenuItems(
       commitItem,
       {
         id: "deliver",
-        label: "Upload commit for review",
+        label: resolve(msg("Upload commit for review")),
         disabled: isBusy || !hasBranch,
         icon: "upload",
         kind: "open_dialog",
@@ -234,7 +234,7 @@ export function buildMenuItems(
     {
       id: "pr",
       label: resolve(
-        msg("Create {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Create {term, select, mr {MR} cr {change} other {PR}}", {
           term: changeRequestTermKind(terminology),
         }),
       ),
@@ -296,7 +296,7 @@ export function getMenuActionDisabledReason(
   if (!hasBranch) {
     return resolve(
       msg(
-        "Detached HEAD: check out a branch before creating a {term, select, mr {merge request} cr {change request} other {pull request}}.",
+        "Detached HEAD: check out a branch before creating a {term, select, mr {merge request} cr {change} other {pull request}}.",
         { term: changeRequestTermKind(terminology) },
       ),
     );
@@ -304,7 +304,7 @@ export function getMenuActionDisabledReason(
   if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
     return resolve(
       msg(
-        'Add an "origin" remote before creating a {term, select, mr {merge request} cr {change request} other {pull request}}.',
+        'Add an "origin" remote before creating a {term, select, mr {merge request} cr {change} other {pull request}}.',
         { term: changeRequestTermKind(terminology) },
       ),
     );
@@ -312,7 +312,7 @@ export function getMenuActionDisabledReason(
   if ((gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) <= 0) {
     return resolve(
       msg(
-        "No local commits to include in a {term, select, mr {merge request} cr {change request} other {pull request}}.",
+        "No local commits to include in a {term, select, mr {merge request} cr {change} other {pull request}}.",
         { term: changeRequestTermKind(terminology) },
       ),
     );
@@ -320,14 +320,14 @@ export function getMenuActionDisabledReason(
   if (isBehind) {
     return resolve(
       msg(
-        "Branch is behind upstream. Pull/rebase before creating a {term, select, mr {merge request} cr {change request} other {pull request}}.",
+        "Branch is behind upstream. Pull/rebase before creating a {term, select, mr {merge request} cr {change} other {pull request}}.",
         { term: changeRequestTermKind(terminology) },
       ),
     );
   }
   return resolve(
     msg(
-      "Create {term, select, mr {merge request} cr {change request} other {pull request}} is currently unavailable.",
+      "Create {term, select, mr {merge request} cr {change} other {pull request}} is currently unavailable.",
       { term: changeRequestTermKind(terminology) },
     ),
   );
@@ -382,14 +382,16 @@ export function resolveQuickAction(
   if (isGerritUploadAvailable(gitStatus, true)) {
     if (!hasBranch) {
       return {
-        label: "Upload commit for review",
+        label: resolve(msg("Upload commit for review")),
         disabled: true,
         kind: "show_hint",
-        hint: "Detached HEAD: check out the branch that holds the Gerrit commit first.",
+        hint: resolve(
+          msg("Detached HEAD: check out the branch that holds the Gerrit commit first."),
+        ),
       };
     }
     return {
-      label: "Upload commit for review",
+      label: resolve(msg("Upload commit for review")),
       disabled: false,
       kind: "open_gerrit_delivery",
     };
@@ -402,7 +404,7 @@ export function resolveQuickAction(
       kind: "show_hint",
       hint: resolve(
         msg(
-          "Create and checkout a ref before pushing or opening a {term, select, mr {merge request} cr {change request} other {pull request}}.",
+          "Create and checkout a ref before pushing or opening a {term, select, mr {merge request} cr {change} other {pull request}}.",
           { term: changeRequestTermKind(terminology) },
         ),
       ),
@@ -428,7 +430,7 @@ export function resolveQuickAction(
     }
     return {
       label: resolve(
-        msg("Commit, push & {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Commit, push & {term, select, mr {MR} cr {change} other {PR}}", {
           term: changeRequestTermKind(terminology),
         }),
       ),
@@ -472,7 +474,7 @@ export function resolveQuickAction(
     }
     return {
       label: resolve(
-        msg("Push & create {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Push & create {term, select, mr {MR} cr {change} other {PR}}", {
           term: changeRequestTermKind(terminology),
         }),
       ),
@@ -510,7 +512,7 @@ export function resolveQuickAction(
     }
     return {
       label: resolve(
-        msg("Push & create {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Push & create {term, select, mr {MR} cr {change} other {PR}}", {
           term: changeRequestTermKind(terminology),
         }),
       ),
@@ -532,7 +534,7 @@ export function resolveQuickAction(
   if (hasDefaultBranchDelta && !isDefaultRef) {
     return {
       label: resolve(
-        msg("Create {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Create {term, select, mr {MR} cr {change} other {PR}}", {
           term: changeRequestTermKind(terminology),
         }),
       ),
@@ -591,18 +593,18 @@ export function resolveDefaultBranchActionDialogCopy(
     return {
       title: resolve(
         msg(
-          "Commit, push & create {term, select, mr {MR} cr {change request} other {PR}} from default ref?",
+          "Commit, push & create {term, select, mr {MR} cr {change} other {PR}} from default ref?",
           { term },
         ),
       ),
       description: resolve(
         msg(
-          'This action will commit, push, and create a {term, select, mr {merge request} cr {change request} other {pull request}} on "{branch}". You can continue on this ref or create a feature ref and run the same action there.',
+          'This action will commit, push, and create a {term, select, mr {merge request} cr {change} other {pull request}} on "{branch}". You can continue on this ref or create a feature ref and run the same action there.',
           { term, branch },
         ),
       ),
       continueLabel: resolve(
-        msg("Commit, push & create {term, select, mr {MR} cr {change request} other {PR}}", {
+        msg("Commit, push & create {term, select, mr {MR} cr {change} other {PR}}", {
           term,
         }),
       ),
@@ -610,19 +612,18 @@ export function resolveDefaultBranchActionDialogCopy(
   }
   return {
     title: resolve(
-      msg(
-        "Push & create {term, select, mr {MR} cr {change request} other {PR}} from default ref?",
-        { term },
-      ),
+      msg("Push & create {term, select, mr {MR} cr {change} other {PR}} from default ref?", {
+        term,
+      }),
     ),
     description: resolve(
       msg(
-        'This action will push local commits and create a {term, select, mr {merge request} cr {change request} other {pull request}} on "{branch}". You can continue on this ref or create a feature ref and run the same action there.',
+        'This action will push local commits and create a {term, select, mr {merge request} cr {change} other {pull request}} on "{branch}". You can continue on this ref or create a feature ref and run the same action there.',
         { term, branch },
       ),
     ),
     continueLabel: resolve(
-      msg("Push & create {term, select, mr {MR} cr {change request} other {PR}}", { term }),
+      msg("Push & create {term, select, mr {MR} cr {change} other {PR}}", { term }),
     ),
   };
 }

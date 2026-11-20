@@ -99,7 +99,7 @@ export function PullRequestDetailTabBar<Tab extends string>({
   value,
   onValueChange,
   onTabIntent,
-  label = "Pull request tabs",
+  label,
   inert,
   children,
 }: {
@@ -119,7 +119,7 @@ export function PullRequestDetailTabBar<Tab extends string>({
   return (
     <nav
       className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-border/60 px-4 py-2"
-      aria-label={label}
+      aria-label={label ?? gt("Pull request tabs")}
       inert={inert}
     >
       <ToggleGroup

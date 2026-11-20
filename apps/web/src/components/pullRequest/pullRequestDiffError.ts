@@ -27,7 +27,7 @@ export function describePullRequestDiffError(
     title: resolve(msg("Couldn't load the changes")),
     description: resolve(
       msg(
-        "The environment couldn't load this {term, select, mr {merge request} cr {change request} other {pull request}}'s diff. Try again, or view the changes on {providerName}.",
+        "The environment couldn't load this {term, select, mr {merge request} cr {change} other {pull request}}'s diff. Try again, or view the changes on {providerName}.",
         { term, providerName },
       ),
     ),

@@ -1,11 +1,16 @@
+import { vi } from "vite-plus/test";
+import * as BuildProfile from "../buildProfile.ts";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import {
   DEFAULT_SERVER_SETTINGS,
+  managedUpdatesDenial,
   ProviderDriverKind,
   ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -26,6 +31,31 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
       if (contents !== undefined) yield* fs.writeFileString(file, contents);
       return yield* ManagedPolicy.load(file);
     }).pipe(Effect.scoped);
+
+  it.effect("denies beta UI updates without creating or changing policy files", () =>
+    Effect.gen(function* () {
+      using _beta = vi.spyOn(BuildProfile, "isGerritBeta", "get").mockReturnValue(true);
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "beta-policy-" });
+      const file = path.join(dir, "absent-policy.json");
+      const policy = yield* ManagedPolicy.ManagedPolicy.pipe(
+        Effect.provide(
+          ManagedPolicy.layer.pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({ env: { T3CODE_DEV_MANAGED_POLICY_PATH: file } }),
+              ),
+            ),
+          ),
+        ),
+      );
+      assert.isUndefined(policy.document);
+      assert.isDefined(managedUpdatesDenial(policy.summary));
+      assert.deepEqual(policy.summary?.limits?.updates, { mode: "off" });
+      assert.deepEqual(yield* fs.readDirectory(dir), []);
+    }),
+  );
 
   it.effect("means no policy when the file is missing", () =>
     Effect.gen(function* () {

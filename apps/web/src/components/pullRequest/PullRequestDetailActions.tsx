@@ -125,7 +125,7 @@ export function PullRequestCheckoutMenu({
         <TooltipPopup>
           <T>
             Check out this{" "}
-            <Branch branch={term} mr="merge request" cr="change request">
+            <Branch branch={term} mr="merge request" cr="change">
               pull request
             </Branch>
           </T>

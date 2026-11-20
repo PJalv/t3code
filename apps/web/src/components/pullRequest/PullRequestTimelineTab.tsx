@@ -6,7 +6,6 @@ import {
 import { holdLinkedNodeInView } from "./holdLinkedNodeInView";
 import {
   actorDisplayName,
-  capitalizeTerm,
   sourceControlClients,
 } from "@t3tools/client-runtime/source-control-clients";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -30,7 +29,15 @@ import {
 import { msg, T, useGT, useMessages, Var } from "gt-react";
 
 import { m } from "~/i18n/messages";
-import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -545,7 +552,9 @@ function ReviewThreadEvent({
             onClick={() => setExpanded((current) => !current)}
           >
             {thread.path === null ? (
-              <span className="min-w-0 truncate"><T context="review thread without a file">Overview</T></span>
+              <span className="min-w-0 truncate">
+                <T context="review thread without a file">Overview</T>
+              </span>
             ) : (
               <>
                 {changeLevel ? (
@@ -563,15 +572,27 @@ function ReviewThreadEvent({
               </>
             )}
             <PullRequestDiscussionStatus resolved={thread.isResolved} />
-            {dismissed ? <span className="shrink-0 font-medium"><T>Review dismissed</T></span> : null}
-            {thread.isOutdated ? <span className="shrink-0 font-medium"><T context="review thread state">Outdated</T></span> : null}
+            {dismissed ? (
+              <span className="shrink-0 font-medium">
+                <T>Review dismissed</T>
+              </span>
+            ) : null}
+            {thread.isOutdated ? (
+              <span className="shrink-0 font-medium">
+                <T context="review thread state">Outdated</T>
+              </span>
+            ) : null}
             {expanded ? null : (
               <span className="shrink-0">
                 · {actorDisplayName(event.actor, detail.provider) ?? "ghost"}
                 {replyCount > 0 ? (
                   <>
                     {" "}
-                    · {gt("{count, plural, one {{formatted} reply} other {{formatted} replies}}", { count: replyCount, formatted: replyCount.toLocaleString() })}
+                    ·{" "}
+                    {gt("{count, plural, one {{formatted} reply} other {{formatted} replies}}", {
+                      count: replyCount,
+                      formatted: replyCount.toLocaleString(),
+                    })}
                   </>
                 ) : null}
               </span>
@@ -653,7 +674,11 @@ function CommitEvent({
     <button
       type="button"
       className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left outline-none [contain-intrinsic-block-size:48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      aria-label={isGerrit ? gt("View patch set {sha}", { sha: event.id }) : gt("View commit {sha}", { sha: event.id })}
+      aria-label={
+        isGerrit
+          ? gt("View patch set {sha}", { sha: event.id })
+          : gt("View commit {sha}", { sha: event.id })
+      }
       onClick={() => onOpen(event.id)}
     >
       <ActorTimelineMarker
@@ -696,23 +721,22 @@ function LifecycleEvent({
     event.kind === "opened"
       ? {
           icon: <PullRequestGlyph.pullRequest className="size-3.5" />,
-          label: gt(
-            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} opened",
-            { term },
-          ),
+          label: gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} opened", {
+            term,
+          }),
         }
       : event.kind === "merged"
         ? {
             icon: <PullRequestGlyph.merged className="size-3.5" />,
             label: gt(
-              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} merged",
+              "{term, select, mr {Merge request} cr {Change} other {Pull request}} merged",
               { term },
             ),
           }
         : {
             icon: <PullRequestGlyph.closed className="size-3.5" />,
             label: gt(
-              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} closed",
+              "{term, select, mr {Merge request} cr {Change} other {Pull request}} closed",
               { term },
             ),
           };
@@ -791,30 +815,37 @@ function ReviewVerdictEvent({
               </Badge>
             ) : null}
             {outcome ? (
-            <Tooltip disabled={!stale}>
-              <TooltipTrigger
-                render={
-                  <span
-                    className={cn(
-                      "font-medium lowercase",
-                      stale
-                        ? "text-muted-foreground opacity-70"
-                        : pullRequestReviewOutcomeToneClassName(outcome),
-                    )}
-                  />
-                }
-              >
-                {stale ? (
-                  <>
-                    <span aria-hidden>{pullRequestReviewOutcomeLabel(outcome, resolve)}</span>
-                    <span className="sr-only">{staleReviewOutcomeLabel(outcome, gt)}</span>
-                  </>
-                ) : (
-                  pullRequestReviewOutcomeLabel(outcome, resolve)
-                )}
-              </TooltipTrigger>
-              <TooltipPopup>{pullRequestReviewOutcomeStaleLabel(outcome, resolve)}</TooltipPopup>
-            </Tooltip>
+              <Tooltip disabled={!stale}>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className={cn(
+                        "font-medium lowercase",
+                        stale
+                          ? "text-muted-foreground opacity-70"
+                          : pullRequestReviewOutcomeToneClassName(outcome),
+                      )}
+                    />
+                  }
+                >
+                  {stale ? (
+                    <>
+                      <span aria-hidden>{pullRequestReviewOutcomeLabel(outcome, resolve)}</span>
+                      <span className="sr-only">
+                        {latestRevisionLabel === "commits"
+                          ? staleReviewOutcomeLabel(outcome, gt)
+                          : gt("{outcome}, before the latest {revision}", {
+                              outcome: pullRequestReviewOutcomeLabel(outcome, resolve),
+                              revision: latestRevisionLabel,
+                            })}
+                      </span>
+                    </>
+                  ) : (
+                    pullRequestReviewOutcomeLabel(outcome, resolve)
+                  )}
+                </TooltipTrigger>
+                <TooltipPopup>{pullRequestReviewOutcomeStaleLabel(outcome, resolve)}</TooltipPopup>
+              </Tooltip>
             ) : null}
           </h2>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

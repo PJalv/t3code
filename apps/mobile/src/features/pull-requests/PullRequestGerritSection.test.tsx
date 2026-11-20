@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import type { MessageResolver } from "../../i18n/messages";
 vi.mock("react-native", () => ({ View: () => null }));
 vi.mock("../../components/ui/AppText", () => ({ AppText: () => null, AppTextInput: () => null }));
 vi.mock("../../components/ui/Button", () => ({ Button: () => null }));
@@ -14,6 +15,12 @@ import {
 import { buildReviewParsedDiff } from "../review/reviewModel";
 
 describe("Gerrit presentation", () => {
+  it("resolves requirement labels with the caller’s active locale", () => {
+    const resolve = vi.fn(() => "Erfüllt") as unknown as MessageResolver;
+    expect(gerritRequirementStatus("satisfied", resolve)).toBe("Erfüllt");
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(gerritRequirementStatus("satisfied")).toBe("Satisfied");
+  });
   it("uses only distinct permitted vote values", () => {
     expect(gerritVoteOptions([0, -1, 2, 0])).toEqual([
       { value: "2", label: "+2" },

@@ -1,3 +1,4 @@
+import { T, useGT } from "gt-react-native";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -24,6 +25,7 @@ type GerritDeliveryProps = {
 };
 
 export function GerritDelivery({ environmentId, cwd, threadId }: GerritDeliveryProps) {
+  const gt = useGT();
   const canWrite = useAtomValue(
     composerPullRequests.gerritUploadCommit.permissionAtom(environmentId),
   );
@@ -106,10 +108,10 @@ export function GerritDelivery({ environmentId, cwd, threadId }: GerritDeliveryP
         invalidate({ environmentId, input: {} }),
       ]);
       if (status._tag !== "Success" || reviews._tag !== "Success")
-        setError("Upload succeeded, but git status or reviews could not be refreshed.");
+        setError(gt("Upload succeeded, but git status or reviews could not be refreshed."));
     } else {
       const cause = squashAtomCommandFailure(response);
-      setError(cause instanceof Error ? cause.message : "Could not upload the commit.");
+      setError(cause instanceof Error ? cause.message : gt("Could not upload the commit."));
     }
     setBusy(false);
   };
@@ -129,118 +131,155 @@ export function GerritDelivery({ environmentId, cwd, threadId }: GerritDeliveryP
     <View className="gap-2">
       {!open ? (
         <Button
-          label="Upload commit for review"
+          label={gt("Upload commit for review")}
           disabled={!canWrite}
           onPress={() => setOpen(true)}
         />
       ) : (
         <>
-          <Text className="font-semibold">Upload commit for review</Text>
-          <Text>Upload HEAD as a new change or patch set to Gerrit.</Text>
+          <Text className="font-semibold">
+            <T>Upload commit for review</T>
+          </Text>
+          <Text>
+            <T>Upload HEAD as a new change or patch set to Gerrit.</T>
+          </Text>
           <GerritHookSetup environmentId={environmentId} cwd={cwd} />
           {ready?.kind !== "ready" && result === null ? (
             <>
-              <Text>Destination branch for a new change</Text>
+              <Text>
+                <T>Destination branch for a new change</T>
+              </Text>
               <TextInput
-                accessibilityLabel="Destination branch"
+                accessibilityLabel={gt("Destination branch")}
                 className={inputClass}
                 value={branch}
                 onChangeText={setBranch}
                 editable={!busy}
-                placeholder="Configured branch"
+                placeholder={gt("Configured branch")}
               />
             </>
           ) : null}
           {checkout.error ? (
             <Text accessibilityRole="alert">{checkout.error}</Text>
           ) : checkout.data === null ? (
-            <Text>Reading checkout context…</Text>
+            <Text>
+              <T>Reading checkout context…</T>
+            </Text>
           ) : ready === null ? (
             <Text accessibilityRole="alert">
               {checkout.data.kind === "blocked" || checkout.data.kind === "not-bound"
                 ? checkout.data.detail
-                : "Checkout unavailable."}
+                : gt("Checkout unavailable.")}
             </Text>
           ) : (
             <>
-              <Text>Local branch: {ready.localBranch}</Text>
+              <Text>{gt("Local branch: {branch}", { branch: ready.localBranch })}</Text>
               <Text selectable>
-                HEAD: {ready.head.slice(0, 12)} · {ready.subject}
+                {gt("HEAD: {commit} · {subject}", {
+                  commit: ready.head.slice(0, 12),
+                  subject: ready.subject,
+                })}
               </Text>
               <Text selectable>
-                Change-Id: {ready.kind === "ready" ? ready.change.key.changeId : ready.key.changeId}
+                {gt("Change-Id: {changeId}", {
+                  changeId: ready.kind === "ready" ? ready.change.key.changeId : ready.key.changeId,
+                })}
               </Text>
               <Text>
-                Target:{" "}
                 {ready.kind === "ready"
-                  ? `${ready.change.key.project} #${ready.change.number} · ${ready.change.key.branch}`
-                  : `New change · ${ready.key.branch}`}
+                  ? gt("Target: {project} #{number} · {branch}", {
+                      project: ready.change.key.project,
+                      number: ready.change.number,
+                      branch: ready.change.key.branch,
+                    })
+                  : gt("Target: New change · {branch}", { branch: ready.key.branch })}
               </Text>
               {ready.files.length > 0 ? (
                 <Text accessibilityRole="alert">
-                  The checkout has {ready.files.length} uncommitted{" "}
-                  {ready.files.length === 1 ? "file" : "files"}. Commit or stash the changes before
-                  uploading.
+                  {gt(
+                    "The checkout has {count, plural, one {{count} uncommitted file} other {{count} uncommitted files}}. Commit or stash the changes before uploading.",
+                    { count: ready.files.length },
+                  )}
                 </Text>
               ) : sameCommit && ready.kind === "ready" ? (
                 <Text>
-                  HEAD is already patch set {ready.change.revision.patchSet} of #
-                  {ready.change.number}. Amend or add a commit to upload a new patch set.
+                  {gt(
+                    "HEAD is already patch set {patchSet} of #{number}. Amend or add a commit to upload a new patch set.",
+                    { patchSet: ready.change.revision.patchSet, number: ready.change.number },
+                  )}
                 </Text>
               ) : null}
             </>
           )}
           {result === null ? (
             <>
-              <Text>Topic (optional)</Text>
+              <Text>
+                <T>Topic (optional)</T>
+              </Text>
               <TextInput
-                accessibilityLabel="Topic"
+                accessibilityLabel={gt("Topic", { $context: "Gerrit topic, noun" })}
                 className={inputClass}
                 value={topic}
                 onChangeText={setTopic}
                 maxLength={1024}
                 editable={!busy}
               />
-              <Text>Topics cannot contain whitespace, % or , or start with -.</Text>
-              <Text>Reviewers (optional)</Text>
+              <Text>
+                <T>Topics cannot contain whitespace, % or , or start with -.</T>
+              </Text>
+              <Text>
+                <T>Reviewers (optional)</T>
+              </Text>
               <TextInput
-                accessibilityLabel="Reviewers"
+                accessibilityLabel={gt("Reviewers")}
                 className={inputClass}
                 value={reviewers}
                 onChangeText={setReviewers}
                 editable={!busy}
-                placeholder="Accounts or email addresses, separated by commas"
+                placeholder={gt("Accounts or email addresses, separated by commas")}
               />
-              <Text>CC (optional)</Text>
+              <Text>
+                <T>CC (optional)</T>
+              </Text>
               <TextInput
-                accessibilityLabel="CC"
+                accessibilityLabel={gt("CC")}
                 className={inputClass}
                 value={cc}
                 onChangeText={setCc}
                 editable={!busy}
-                placeholder="Accounts or email addresses, separated by commas"
+                placeholder={gt("Accounts or email addresses, separated by commas")}
               />
               <View className="flex-row items-center gap-2">
                 <Switch
-                  accessibilityLabel="Mark work in progress"
+                  accessibilityLabel={gt("Mark work in progress")}
                   value={wip}
                   onValueChange={setWip}
                   disabled={busy}
                 />
-                <Text>Mark work in progress</Text>
+                <Text>
+                  <T>Mark work in progress</T>
+                </Text>
               </View>
               <View className="flex-row items-center gap-2">
                 <Switch
-                  accessibilityLabel="Mark private"
+                  accessibilityLabel={gt("Mark private")}
                   value={privateChange}
                   onValueChange={setPrivateChange}
                   disabled={busy}
                 />
-                <Text>Mark private</Text>
+                <Text>
+                  <T>Mark private</T>
+                </Text>
               </View>
-              <Text>Unchecked options leave existing WIP and private flags unchanged.</Text>
+              <Text>
+                <T>Unchecked options leave existing WIP and private flags unchanged.</T>
+              </Text>
               <Button
-                label={busy ? "Uploading…" : "Upload"}
+                label={
+                  busy
+                    ? gt("Uploading…")
+                    : gt("Upload", { $context: "upload a commit for Gerrit review, verb" })
+                }
                 disabled={!canUpload}
                 onPress={() => void submit()}
               />
@@ -248,14 +287,17 @@ export function GerritDelivery({ environmentId, cwd, threadId }: GerritDeliveryP
           ) : (
             <>
               <Text>
-                Upload complete
+                {gt("Upload complete.")}
                 {(result.result.changeNumber ?? result.change?.number)
-                  ? ` · Change #${result.result.changeNumber ?? result.change?.number}`
-                  : ""}
+                  ? gt(" Change #{number}", {
+                      number: result.result.changeNumber ?? result.change?.number,
+                    })
+                  : null}
                 {(result.result.patchSet ?? result.change?.currentPatchSet)
-                  ? ` · Patch set ${result.result.patchSet ?? result.change?.currentPatchSet}`
-                  : ""}
-                .
+                  ? gt(" Patch set {number}", {
+                      number: result.result.patchSet ?? result.change?.currentPatchSet,
+                    })
+                  : null}
               </Text>
               {result.result.url ? <Text selectable>{result.result.url}</Text> : null}
               {result.rereadError ? <Text>{result.rereadError}</Text> : null}
@@ -263,7 +305,11 @@ export function GerritDelivery({ environmentId, cwd, threadId }: GerritDeliveryP
             </>
           )}
           {error ? <Text accessibilityRole="alert">{error}</Text> : null}
-          <Button label={result ? "Done" : "Close"} disabled={busy} onPress={close} />
+          <Button
+            label={result ? gt("Done", { $context: "dismiss dialog, verb" }) : gt("Close")}
+            disabled={busy}
+            onPress={close}
+          />
         </>
       )}
     </View>

@@ -1,3 +1,4 @@
+import { isGerritBeta, gerritBetaRefusal } from "./buildProfile.ts";
 import { doctorCommand } from "./cli/doctor.ts";
 import { policyCommand } from "./cli/policy.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -12,6 +13,7 @@ import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { acpMcpBridgeCommand, acpMcpCallCommand } from "./cli/acpMcpBridge.ts";
 import { authCommand } from "./cli/auth.ts";
+import { gerritCommand } from "./cli/gerrit.ts";
 import { environmentCommand } from "./cli/environment.ts";
 import { appCommand } from "./cli/app.ts";
 import { browserCommand } from "./cli/browser.ts";
@@ -72,53 +74,77 @@ const connectUnavailableCommand = Command.make("connect", {
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
   Command.make("t3", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription(
-      "Run T3 Code in this terminal and open it in your browser. To use it from your other devices, run `t3 up`.",
+      isGerritBeta
+        ? gerritBetaRefusal
+        : "Run T3 Code in this terminal and open it in your browser. To use it from your other devices, run `t3 up`.",
     ),
-    Command.withHandler(runDefaultServerCommand),
-    Command.withSubcommands([
-      Command.make("help").pipe(
-        Command.withDescription("Show command help."),
-        Command.withHandler(() =>
-          Effect.fail(new CliError.ShowHelp({ commandPath: ["t3"], errors: [] })),
-        ),
-      ),
-      acpMcpBridgeCommand,
-      acpMcpCallCommand,
-      startCommand,
-      serveCommand,
-      appCommand,
-      pairCommand,
-      authCommand,
-      environmentCommand,
-      browserCommand,
-      projectCommand,
-      threadCommand,
-      feedbackCommand,
-      workflowCommand,
-      upCommand,
-      statusCommand,
-      serviceCommand,
-      updateCommand,
-      installCommand,
-      uninstallCommand,
-      // bin.ts runs the bare service invocation; this keeps flags and help working like other commands.
-      Command.make("__service-launcher").pipe(
-        Command.unlisted,
-        // The launcher owns shutdown until its child exits; `runMain` would interrupt that shutdown.
-        Command.withHandler(() => Effect.sync(() => void runServiceLauncherCli())),
-      ),
-      claudeHistoryCommand,
-      speechWorkerCommand,
-      sshHelperCommand,
+    Command.withHandler(
+      isGerritBeta
+        ? () =>
+            Effect.fail(
+              new CliError.UserError({
+                cause: gerritBetaRefusal,
+                userMessage: `${gerritBetaRefusal} Run serve --base-dir <absolute-beta-home> --host 127.0.0.1 --port 4773.`,
+              }),
+            )
+        : runDefaultServerCommand,
+    ),
+    Command.withSubcommands(
+      isGerritBeta
+        ? [
+            serveCommand,
+            gerritCommand,
+            acpMcpBridgeCommand,
+            acpMcpCallCommand,
+            claudeHistoryCommand,
+            speechWorkerCommand,
+          ]
+        : [
+            Command.make("help").pipe(
+              Command.withDescription("Show command help."),
+              Command.withHandler(() =>
+                Effect.fail(new CliError.ShowHelp({ commandPath: ["t3"], errors: [] })),
+              ),
+            ),
+            acpMcpBridgeCommand,
+            acpMcpCallCommand,
+            startCommand,
+            serveCommand,
+            appCommand,
+            pairCommand,
+            authCommand,
+            gerritCommand,
+            environmentCommand,
+            browserCommand,
+            projectCommand,
+            threadCommand,
+            feedbackCommand,
+            workflowCommand,
+            upCommand,
+            statusCommand,
+            serviceCommand,
+            updateCommand,
+            installCommand,
+            uninstallCommand,
+            // bin.ts runs the bare service invocation; this keeps flags and help working like other commands.
+            Command.make("__service-launcher").pipe(
+              Command.unlisted,
+              // The launcher owns shutdown until its child exits; `runMain` would interrupt that shutdown.
+              Command.withHandler(() => Effect.sync(() => void runServiceLauncherCli())),
+            ),
+            claudeHistoryCommand,
+            speechWorkerCommand,
+            sshHelperCommand,
 
-      servicePreflightCommand,
-      themeCommand,
-      traceCommand,
-      doctorCommand,
-      policyCommand,
-      triageCommand,
-      cloudEnabled ? connectCommand : connectUnavailableCommand,
-    ]),
+            servicePreflightCommand,
+            themeCommand,
+            traceCommand,
+            doctorCommand,
+            policyCommand,
+            triageCommand,
+            cloudEnabled ? connectCommand : connectUnavailableCommand,
+          ],
+    ),
   );
 
 export const cli = makeCli();
@@ -126,13 +152,17 @@ export const cli = makeCli();
 export function runCli() {
   extendConnectionAttemptTimeout();
   keepOutboundFetchOnHttp1();
-  offerCliInstall({
-    args: process.argv.slice(2),
-    // A child started over IPC (a service launcher) has no one to answer.
-    interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) && process.send === undefined,
-    foreground: inTerminalForeground,
-    confirm: confirmCliInstall,
-  }).pipe(
+  (isGerritBeta
+    ? Effect.succeed(true)
+    : offerCliInstall({
+        args: process.argv.slice(2),
+        // A child started over IPC (a service launcher) has no one to answer.
+        interactive:
+          Boolean(process.stdin.isTTY && process.stdout.isTTY) && process.send === undefined,
+        foreground: inTerminalForeground,
+        confirm: confirmCliInstall,
+      })
+  ).pipe(
     // The offer handles its own errors; even an unexpected defect must not stop the command.
     Effect.catchDefect(() => Effect.succeed(true)),
     Effect.flatMap((proceed) =>

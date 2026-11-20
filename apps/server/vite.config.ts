@@ -19,6 +19,10 @@ import {
 export { shouldBundleCliDependency };
 
 const repoEnv = loadRepoEnv();
+const buildProfile = process.env.T3CODE_BUILD_PROFILE?.trim() || "standard";
+if (buildProfile !== "standard" && buildProfile !== "gerrit-beta") {
+  throw new Error("T3CODE_BUILD_PROFILE must be standard or gerrit-beta.");
+}
 const serverManifestPath = NodePath.join(import.meta.dirname, "package.json");
 // The desktop packager passes APP_VERSION; it can equal the manifest at a commit tagged otherwise.
 const buildVersion =
@@ -150,6 +154,7 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
+        __T3CODE_BUILD_PROFILE__: JSON.stringify(buildProfile),
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),

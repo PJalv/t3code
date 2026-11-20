@@ -202,11 +202,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     const prUrl = gitStatus.data?.pr?.state === "open" ? gitStatus.data.pr.url : null;
     if (!prUrl) {
       Dialog.alert(
-        gt("{term, select, mr {No open MR} cr {No open change request} other {No open PR}}", {
+        gt("{term, select, mr {No open MR} cr {No open change} other {No open PR}}", {
           term,
         }),
         gt(
-          "{term, select, mr {This branch does not have an open merge request.} cr {This branch does not have an open change request.} other {This branch does not have an open pull request.}}",
+          "{term, select, mr {This branch does not have an open merge request.} cr {This branch does not have an open change.} other {This branch does not have an open pull request.}}",
           { term },
         ),
       );
@@ -215,11 +215,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     if (!(await openPullRequest(prUrl))) {
       Dialog.alert(
         gt(
-          "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+          "{term, select, mr {Unable to open MR} cr {Unable to open change} other {Unable to open PR}}",
           { term },
         ),
         gt(
-          "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+          "{term, select, mr {The merge request could not be opened.} cr {The change could not be opened.} other {The pull request could not be opened.}}",
           { term },
         ),
       );
@@ -308,7 +308,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     }
     if (item.kind === "open_pr" && status.pr?.number != null) {
       return gt(
-        "{term, select, mr {MR #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}} cr {change request #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}} other {PR #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}}}",
+        "{term, select, mr {MR #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}} cr {change #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}} other {PR #{number} {state, select, open {open} closed {closed} merged {merged} other {{state}}}}}",
         {
           term,
           number: status.pr.number,

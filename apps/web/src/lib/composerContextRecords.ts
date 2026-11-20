@@ -223,34 +223,32 @@ export function pullRequestContextKindLabel(
     switch (state) {
       case null:
         return resolve(
-          msg("{term, select, mr {Merge request} cr {Change request} other {Pull request}}"),
+          msg("{term, select, mr {Merge request} cr {Change} other {Pull request}}"),
           variables,
         );
       case "open":
         return resolve(
-          msg(
-            "{term, select, mr {Open merge request} cr {Open change request} other {Open pull request}}",
-          ),
+          msg("{term, select, mr {Open merge request} cr {Open change} other {Open pull request}}"),
           variables,
         );
       case "draft":
         return resolve(
           msg(
-            "{term, select, mr {Draft merge request} cr {Draft change request} other {Draft pull request}}",
+            "{term, select, mr {Draft merge request} cr {Draft change} other {Draft pull request}}",
           ),
           variables,
         );
       case "merged":
         return resolve(
           msg(
-            "{term, select, mr {Merged merge request} cr {Merged change request} other {Merged pull request}}",
+            "{term, select, mr {Merged merge request} cr {Merged change} other {Merged pull request}}",
           ),
           variables,
         );
       case "closed":
         return resolve(
           msg(
-            "{term, select, mr {Closed merge request} cr {Closed change request} other {Closed pull request}}",
+            "{term, select, mr {Closed merge request} cr {Closed change} other {Closed pull request}}",
           ),
           variables,
         );

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import type { MessageResolver } from "~/i18n/messages";
 import {
   gerritCommitMessageParts,
   gerritRequirementStatus,
@@ -9,6 +10,12 @@ import {
 } from "./PullRequestGerritSummary";
 
 describe("Gerrit presentation", () => {
+  it("resolves requirement labels with the caller’s active locale", () => {
+    const resolve = vi.fn(() => "Erfüllt") as unknown as MessageResolver;
+    expect(gerritRequirementStatus("satisfied", resolve)).toBe("Erfüllt");
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(gerritRequirementStatus("satisfied")).toBe("Satisfied");
+  });
   it("gates topic and privacy on both permissions and normalizes cleared topics", () => {
     const permissions = {
       setTopic: true,
