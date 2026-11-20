@@ -753,7 +753,6 @@ describe("fix findings handoff", () => {
       author: { login: id, name: null, avatarUrl: null, isBot: false },
       body,
       createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: null,
       url: null,
       path: null,
       reviewState: "COMMENTED",

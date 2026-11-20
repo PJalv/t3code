@@ -5,7 +5,6 @@ import { useNavigation } from "@react-navigation/native";
 import type { PullRequestAction, PullRequestDetail } from "@t3tools/contracts";
 import {
   actorDisplayName,
-  capitalizeTerm,
   sourceControlClients,
 } from "@t3tools/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../../lib/changeRequestTerm";
@@ -71,7 +70,7 @@ export function PullRequestStatusMenu(props: RowProps) {
     <Pressable
       accessibilityRole={actions.length ? "button" : undefined}
       accessibilityLabel={gt(
-        "{term, select, mr {Merge request} cr {Change request} other {Pull request}} status, {status}",
+        "{term, select, mr {Merge request} cr {Change} other {Pull request}} status, {status}",
         { term, status: status.label },
       )}
       disabled={!actions.length}
@@ -87,10 +86,9 @@ export function PullRequestStatusMenu(props: RowProps) {
   if (!actions.length) return trigger;
   return (
     <Menu
-      title={gt(
-        "{term, select, mr {Merge request} cr {Change request} other {Pull request}} status",
-        { term },
-      )}
+      title={gt("{term, select, mr {Merge request} cr {Change} other {Pull request}} status", {
+        term,
+      })}
       actions={actions.map((id) => ({
         id,
         title: pullRequestActionLabel(id, terminology, m),
@@ -106,7 +104,7 @@ export function PullRequestStatusMenu(props: RowProps) {
             selected,
             pullRequestActionLabel("revert", terminology, m),
             gt(
-              "Open a new {term, select, mr {merge request} cr {change request} other {pull request}} that reverses these changes?",
+              "Open a new {term, select, mr {merge request} cr {change} other {pull request}} that reverses these changes?",
               { term },
             ),
           );
@@ -168,7 +166,7 @@ export function PullRequestChecksRow(props: RowProps) {
                   "approve-workflows",
                   gt("Approve workflows"),
                   gt(
-                    "Allow this {term, select, mr {merge request} cr {change request} other {pull request}}''s workflows to run? Review the workflow changes first.",
+                    "Allow this {term, select, mr {merge request} cr {change} other {pull request}}''s workflows to run? Review the workflow changes first.",
                     { term: changeRequestTermKind(definition.changeRequest) },
                   ),
                 )
@@ -368,13 +366,15 @@ export function PullRequestReviewersRow(props: RowProps) {
             .map((reviewer) => (
               <View
                 key={reviewer.login}
-                accessibilityLabel={gt("{login}, Review requested", { login: actorDisplayName(reviewer, props.pr.provider) || gt("Unknown reviewer") })}
+                accessibilityLabel={gt("{login}, Review requested", {
+                  login: actorDisplayName(reviewer, props.pr.provider) || gt("Unknown reviewer"),
+                })}
                 className="min-h-14 flex-row items-center gap-3 px-4 py-2"
               >
                 <SymbolView name="clock" size={18} tintColorClassName="accent-icon-muted" />
                 <PullRequestAvatar actor={reviewer} size={32} />
                 <Text className="min-w-0 flex-1 text-sm font-t3-medium" numberOfLines={1}>
-                  {actorDisplayName(reviewer, props.pr.provider) || "Unknown reviewer"}
+                  {actorDisplayName(reviewer, props.pr.provider) || gt("Unknown reviewer")}
                 </Text>
               </View>
             ))}

@@ -86,12 +86,12 @@ const actionSuccessLabels = (term: ChangeRequestTermKind): Record<PullRequestAct
   ready: m(msg("Marked ready for review")),
   draft: m(msg("Converted to draft")),
   close: m(
-    msg("{term, select, mr {Merge request} cr {Change request} other {Pull request}} closed", {
+    msg("{term, select, mr {Merge request} cr {Change} other {Pull request}} closed", {
       term,
     }),
   ),
   reopen: m(
-    msg("{term, select, mr {Merge request} cr {Change request} other {Pull request}} reopened", {
+    msg("{term, select, mr {Merge request} cr {Change} other {Pull request}} reopened", {
       term,
     }),
   ),
@@ -99,10 +99,9 @@ const actionSuccessLabels = (term: ChangeRequestTermKind): Record<PullRequestAct
   "enable-auto-merge": m(msg("Auto-merge enabled")),
   "disable-auto-merge": m(msg("Auto-merge disabled")),
   revert: m(
-    msg(
-      "Revert {term, select, mr {merge request} cr {change request} other {pull request}} opened",
-      { term },
-    ),
+    msg("Revert {term, select, mr {merge request} cr {change} other {pull request}} opened", {
+      term,
+    }),
   ),
   "delete-branch": m(msg("Branch deleted")),
   "approve-workflows": m(msg("Workflows approved")),
@@ -111,7 +110,7 @@ const actionSuccessLabels = (term: ChangeRequestTermKind): Record<PullRequestAct
 const actionFailureLabels = (term: ChangeRequestTermKind): Record<PullRequestAction, string> => ({
   merge: m(
     msg(
-      "Could not merge this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not merge this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -119,13 +118,13 @@ const actionFailureLabels = (term: ChangeRequestTermKind): Record<PullRequestAct
   draft: m(msg("Could not convert this to a draft")),
   close: m(
     msg(
-      "Could not close this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not close this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
   reopen: m(
     msg(
-      "Could not reopen this {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not reopen this {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -134,7 +133,7 @@ const actionFailureLabels = (term: ChangeRequestTermKind): Record<PullRequestAct
   "disable-auto-merge": m(msg("Could not disable auto-merge")),
   revert: m(
     msg(
-      "Could not open a revert {term, select, mr {merge request} cr {change request} other {pull request}}",
+      "Could not open a revert {term, select, mr {merge request} cr {change} other {pull request}}",
       { term },
     ),
   ),
@@ -169,7 +168,7 @@ const actionFailureHints = (term: ChangeRequestTermKind): Record<PullRequestActi
   ),
   revert: m(
     msg(
-      "The host refused it. Check that you have write access and that this {term, select, mr {merge request} cr {change request} other {pull request}} was merged on the host.",
+      "The host refused it. Check that you have write access and that this {term, select, mr {merge request} cr {change} other {pull request}} was merged on the host.",
       { term },
     ),
   ),
@@ -403,7 +402,7 @@ export function usePullRequestHandoffs({
           ? m(msg("The question is in the composer. Read it over, then send."))
           : m(
               msg(
-                "The {term, select, mr {merge request} cr {change request} other {pull request}} is in the composer. Type your question, then send.",
+                "The {term, select, mr {merge request} cr {change} other {pull request}} is in the composer. Type your question, then send.",
                 {
                   term: changeRequestTermKind(terminology),
                 },
@@ -426,7 +425,7 @@ export function usePullRequestHandoffs({
       type: "loading",
       title: m(
         msg(
-          "Preparing the {term, select, mr {merge request} cr {change request} other {pull request}} checkout...",
+          "Preparing the {term, select, mr {merge request} cr {change} other {pull request}} checkout...",
           { term: changeRequestTermKind(terminology) },
         ),
       ),
@@ -470,7 +469,7 @@ export function usePullRequestHandoffs({
         type: "error",
         title: m(
           msg(
-            "Could not prepare the {term, select, mr {merge request} cr {change request} other {pull request}} checkout",
+            "Could not prepare the {term, select, mr {merge request} cr {change} other {pull request}} checkout",
             { term: changeRequestTermKind(terminology) },
           ),
         ),
@@ -525,7 +524,7 @@ export function usePullRequestHandoffs({
                 mode === "local"
                   ? m(
                       msg(
-                        "This repository is on the {term, select, mr {merge request} cr {change request} other {pull request}}'s branch, with a thread open on it.",
+                        "This repository is on the {term, select, mr {merge request} cr {change} other {pull request}}'s branch, with a thread open on it.",
                         {
                           term: changeRequestTermKind(terminology),
                         },
@@ -533,7 +532,7 @@ export function usePullRequestHandoffs({
                     )
                   : m(
                       msg(
-                        "The {term, select, mr {merge request} cr {change request} other {pull request}} is in its own worktree, with a thread open on it.",
+                        "The {term, select, mr {merge request} cr {change} other {pull request}} is in its own worktree, with a thread open on it.",
                         {
                           term: changeRequestTermKind(terminology),
                         },

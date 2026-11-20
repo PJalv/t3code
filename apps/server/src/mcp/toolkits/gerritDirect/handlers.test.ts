@@ -18,6 +18,7 @@ import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as GerritDirectRead from "../../../sourceControl/GerritDirectRead.ts";
 import * as GerritDirectService from "../../../sourceControl/GerritDirectService.ts";
+import * as GerritWatchCompletion from "../../../sourceControl/GerritWatchCompletion.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Testkit from "../../McpToolAccess.testkit.ts";
@@ -58,6 +59,10 @@ const harness = Effect.fn("GerritDirectTest.harness")(function* (
   const deps = Layer.mergeAll(
     NodeCrypto.layer,
     Layer.mock(Orchestrator.OrchestratorV2)({
+      getThreadShell: (threadId) => {
+        expect(threadId).toBe(id);
+        return Effect.succeed(thread);
+      },
       dispatch: (command) => {
         commands.push(command);
         if (failLink)
@@ -89,10 +94,24 @@ const harness = Effect.fn("GerritDirectTest.harness")(function* (
     }),
     Layer.mock(GerritDirectService.GerritDirectService)({
       act: (input) =>
-        Effect.succeed({
-          result: input.action.kind === "topic" ? undefined : input,
-          change: { key: { installation: "secret" } },
-        } as never),
+        Effect.gen(function* () {
+          const nativeAction = yield* GerritWatchCompletion.NativeAction;
+          if (input.action.kind === "submit") {
+            yield* nativeAction(
+              {
+                server: "https://review.example/",
+                project: "team/repo",
+                number: 12,
+                operation: "submit",
+              },
+              Effect.void,
+            );
+          }
+          return {
+            result: input.action.kind === "topic" ? undefined : input,
+            change: { key: { installation: "secret" } },
+          } as never;
+        }).pipe(Effect.orDie),
       upload: (input) =>
         Effect.succeed({
           result: input,
@@ -104,7 +123,12 @@ const harness = Effect.fn("GerritDirectTest.harness")(function* (
     }),
   );
   const toolkit = yield* GerritDirectToolkit.pipe(
-    Effect.provide(McpToolAccess.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(deps))),
+    Effect.provide(
+      McpToolAccess.HandlersLayer.layer(Handlers.layer).pipe(
+        Layer.provide(GerritWatchCompletion.layer),
+        Layer.provide(deps),
+      ),
+    ),
   );
   const call = <Name extends keyof typeof GerritDirectToolkit.tools>(
     name: Name,

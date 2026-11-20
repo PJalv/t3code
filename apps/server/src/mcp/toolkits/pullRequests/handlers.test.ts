@@ -12,6 +12,7 @@ import {
   type PullRequestActivity,
   type PullRequestListInput,
   type PullRequestDetail,
+  type PullRequestGerritDetail,
   type PullRequestRef,
   type PullRequestReviewGuideResult,
   type ThreadPullRequestLink,
@@ -885,6 +886,29 @@ describe("source control tools", () => {
       url: "https://github.com/t3tools/t3code/pull/42",
     },
   };
+  const gerritProject = makeProject({
+    canonicalKey: "review.example/acme/app",
+    locator: {
+      source: "git-remote",
+      remoteName: "origin",
+      remoteUrl: "ssh://review.example:29418/acme/app",
+    },
+    provider: SourceControlProviderKind.make("gerrit"),
+    displayName: "acme/app",
+    owner: "acme",
+    name: "app",
+  });
+  const gerrit: PullRequestGerritDetail = {
+    changeId: "I123",
+    topic: null,
+    isPrivate: false,
+    isWip: false,
+    currentPatchSet: 3,
+    patchSets: [{ number: 3, commit: "abc123", createdAt: "2026-11-01T00:00:00Z" }],
+    labels: [{ name: "Code-Review", votes: [], permittedValues: [-1, 0, 1] }],
+    submitRequirements: [{ name: "Review", status: "unsatisfied" }],
+    submittable: false,
+  };
   const detail = {
     title: "Add tools",
     body: "Adds tools.",
@@ -1016,6 +1040,191 @@ describe("source control tools", () => {
     }),
   );
 
+  it.effect("keeps Gerrit anchors and native requirements but never returns private drafts", () =>
+    Effect.gen(function* () {
+      const anchor = {
+        patchSet: 1,
+        revision: "old-head",
+        parent: 2,
+        range: { start_line: 1, start_character: 0, end_line: 2, end_character: 4 },
+      };
+      const published = {
+        id: "published-comment",
+        author: null,
+        body: "Old parent-side feedback",
+        createdAt: "2026-11-01T00:00:00Z",
+        url: null,
+        gerrit: anchor,
+        isDraft: false,
+      };
+      const draft = { ...published, id: "draft", body: "PRIVATE", isDraft: true };
+      const harness = yield* makeHarness({
+        thread: branchThread,
+        pullRequests: {
+          detail: () => Effect.succeed({ ...detail, gerrit }),
+          activity: () =>
+            Effect.succeed({
+              ...activity,
+              comments: [{ ...draft, kind: "review-comment", path: "a.ts", reviewState: null }],
+              commentsTruncated: true,
+              reviewThreads: [
+                { ...reviewThread("private", false), isDraft: true, comments: [draft] },
+                {
+                  ...reviewThread("mixed", false),
+                  side: "left",
+                  gerrit: anchor,
+                  canResolve: false,
+                  comments: [published, draft],
+                  nextCommentsCursor: "rest",
+                },
+              ],
+            }),
+          threadComments: () =>
+            Effect.succeed({ comments: [draft, { ...published, id: "reply" }], nextCursor: null }),
+        },
+      });
+      const result = yield* harness.call("pull_request_read", {
+        include: ["summary", "conversation"],
+      });
+      expect(result.summary?.gerrit).toEqual(gerrit);
+      expect(result.summary?.next).toContain("read_gerrit");
+      expect(JSON.stringify(result)).not.toContain("PRIVATE");
+      expect(result.conversation).toMatchObject({
+        comments: [],
+        truncated: true,
+        nextCursor: null,
+        reviewThreads: [
+          {
+            id: "mixed",
+            side: "left",
+            gerrit: anchor,
+            canResolve: false,
+            comments: [
+              { id: "published-comment", gerrit: anchor, isDraft: false },
+              { id: "reply", gerrit: anchor },
+            ],
+            moreComments: false,
+          },
+        ],
+      });
+      expect(result.conversation?.reviewThreads).toHaveLength(1);
+      const bounded = yield* makeHarness({
+        thread: branchThread,
+        pullRequests: {
+          detail: () =>
+            Effect.succeed({
+              ...detail,
+              gerrit: {
+                ...gerrit,
+                patchSets: Array.from({ length: 70 }, (_, index) => ({
+                  ...gerrit.patchSets[0]!,
+                  number: index + 1,
+                })),
+                currentPatchSet: 70,
+              },
+            }),
+        },
+      });
+      const summary = (yield* bounded.call("pull_request_read", { include: ["summary"] })).summary;
+      expect(summary?.gerritTruncated).toBe(true);
+      expect(summary?.gerrit?.patchSets).toHaveLength(50);
+      expect(summary?.gerrit?.patchSets.at(-1)?.number).toBe(70);
+    }),
+  );
+
+  it.effect(
+    "routes unsupported Gerrit operations before any write, while retaining supported updates",
+    () =>
+      Effect.gen(function* () {
+        const calls: Array<string> = [];
+        let actions: PullRequestDetail["viewerPermissions"]["actions"] = [
+          "ready",
+          "draft",
+          "close",
+          "reopen",
+        ];
+        const harness = yield* makeHarness({
+          project: gerritProject,
+          thread: branchThread,
+          git: { createPullRequest: () => Effect.die("must use upload_gerrit") },
+          pullRequests: {
+            detail: () =>
+              Effect.sync(() => ({
+                ...detail,
+                gerrit,
+                capabilities: {
+                  ...detail.capabilities,
+                  actions: ["ready", "draft", "close", "reopen"],
+                  reviewers: { request: true, listCandidates: true },
+                },
+                viewerPermissions: { ...detail.viewerPermissions, actions, requestReviewers: true },
+              })),
+            update: () => Effect.sync(() => void calls.push("update")),
+            setLabels: () => Effect.sync(() => void calls.push("labels")),
+            submitReview: () => Effect.sync(() => void calls.push("review")),
+            runAction: (input) => Effect.sync(() => void calls.push(input.action)),
+            reviewerCandidates: () =>
+              Effect.succeed({
+                candidates: [{ id: "101", kind: "user", login: "reviewer" }],
+              } as never),
+            requestReviewers: () => Effect.sync(() => void calls.push("reviewers")),
+          },
+        });
+        expect(
+          (yield* harness.call("pull_request_create", { title: "x", body: "x" }).pipe(Effect.flip))
+            .message,
+        ).toContain("upload_gerrit");
+        for (const unsupported of [
+          { title: "x" },
+          { body: "x" },
+          { addLabels: ["Code-Review"] },
+          { removeLabels: ["Verified"] },
+        ]) {
+          const error = yield* harness
+            .call("pull_request_update", {
+              ...unsupported,
+              ready: true,
+              requestReviewers: ["reviewer"],
+            })
+            .pipe(Effect.flip);
+          expect(error.message).toContain("act_gerrit");
+        }
+        expect(
+          (yield* harness
+            .call("pull_request_respond", {
+              reviewThreadId: "gerrit:comment",
+              body: "reply",
+              resolved: true,
+            })
+            .pipe(Effect.flip)).message,
+        ).toContain("act_gerrit");
+        expect(
+          (yield* harness.call("pull_request_review", { verdict: "approve" }).pipe(Effect.flip))
+            .message,
+        ).toContain("act_gerrit");
+        expect(
+          (yield* harness
+            .call("pull_request_merge", { expectedHeadSha: "abc123", auto: true })
+            .pipe(Effect.flip)).message,
+        ).toContain("act_gerrit");
+        expect(calls).toEqual([]);
+        actions = ["ready"];
+        const denied = yield* harness
+          .call("pull_request_update", { ready: true, state: "closed" })
+          .pipe(Effect.flip);
+        expect(denied.message).toContain("close");
+        expect(calls).toEqual([]);
+        actions = ["ready", "draft", "close", "reopen"];
+        yield* harness.call("pull_request_update", {
+          ready: true,
+          state: "closed",
+          requestReviewers: ["reviewer"],
+        });
+        yield* harness.call("pull_request_update", { ready: false, state: "open" });
+        expect(calls).toEqual(["reviewers", "ready", "close", "draft", "reopen"]);
+      }),
+  );
+
   it.effect("pages a long conversation and the PR list through the cursors they return", () =>
     Effect.gen(function* () {
       const comment = (body: string) =>
@@ -1034,6 +1243,7 @@ describe("source control tools", () => {
             Effect.sync(() => ({
               ...activity,
               reviewThreads: [
+                { ...long("private"), isDraft: true },
                 {
                   ...long("first"),
                   isResolved: firstResolved,
@@ -1350,6 +1560,7 @@ describe("source control tools", () => {
   it.effect("places review comments by the diff page that shows their line", () =>
     Effect.gen(function* () {
       const reviews: Array<PullRequestSubmitReviewInput> = [];
+      let rangeComment = true;
       const pages: Record<string, PullRequestDiffResult> = {
         first: {
           patch:
@@ -1369,6 +1580,20 @@ describe("source control tools", () => {
         pullRequests: {
           diff: (input) => Effect.succeed(pages[input.cursor ?? "first"]!),
           submitReview: (input) => Effect.sync(() => void reviews.push(input)),
+          detail: () =>
+            Effect.succeed({
+              ...detail,
+              capabilities: {
+                ...detail.capabilities,
+                review: {
+                  inlineComment: true,
+                  rangeComment,
+                  reply: true,
+                  resolve: true,
+                  verdicts: ["comment", "approve", "request-changes"],
+                },
+              },
+            }),
         },
       });
       yield* harness.call("pull_request_review", {
@@ -1403,6 +1628,21 @@ describe("source control tools", () => {
         })
         .pipe(Effect.flip);
       expect(error.message).toContain("a.ts line 40 (new side) is not in this PR's diff");
+      const backwards = yield* harness
+        .call("pull_request_review", {
+          verdict: "comment",
+          comments: [{ path: "b.ts", line: 9, startLine: 10, body: "Range" }],
+        })
+        .pipe(Effect.flip);
+      expect(backwards.message).toContain("startLine must not be after line");
+      rangeComment = false;
+      const unsupported = yield* harness
+        .call("pull_request_review", {
+          verdict: "comment",
+          comments: [{ path: "b.ts", line: 10, startLine: 9, body: "Range" }],
+        })
+        .pipe(Effect.flip);
+      expect(unsupported.message).toContain("does not support multiline");
       expect(reviews).toHaveLength(1);
     }),
   );

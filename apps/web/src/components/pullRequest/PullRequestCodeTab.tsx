@@ -949,7 +949,7 @@ function PullRequestCodeTab({
                 .join(",")}:${metadata.threads
                 .map(
                   (thread) =>
-                    `${thread.id}:${thread.isResolved ? "r" : ""}:${
+                    `${thread.id}:${thread.isResolved ? "r" : ""}:${thread.isDraft ? "d" : ""}:${
                       thread.isOutdated ? "o" : ""
                     }:${thread.comments
                       .map(
@@ -1307,7 +1307,7 @@ function PullRequestCodeTab({
       thread={thread}
       provider={detail.provider}
       workspaceRoot={detail.workspaceRoot}
-      canReply={review.reply}
+      canReply={review.reply && !thread.isDraft}
       canResolve={review.resolve && canResolvePullRequestThread(detail, thread)}
       canReact={detail.capabilities.reactions === true}
       environmentId={environmentId}
@@ -1334,14 +1334,15 @@ function PullRequestCodeTab({
         }
         return result.value;
       }}
-      onReply={(body) =>
-        runThreadCommand(m(msg("Reply could not be posted")), () =>
+      onReply={async (body) => {
+        if (!review.reply || thread.isDraft) return false;
+        return runThreadCommand(m(msg("Reply could not be posted")), () =>
           replyToThread({
             environmentId,
             input: { ...reference, threadId: thread.id, body },
           }),
-        )
-      }
+        );
+      }}
       canEditComment={(comment) =>
         canEditPullRequestComment(detail, {
           author: comment.author,
@@ -1927,7 +1928,7 @@ function PullRequestCodeTab({
       <p className="px-4 py-5 text-sm text-muted-foreground">
         {commit === null
           ? gt(
-              "This {term, select, mr {merge request} cr {change request} other {pull request}} has no file changes.",
+              "This {term, select, mr {merge request} cr {change} other {pull request}} has no file changes.",
               { term },
             )
           : gt("This commit has no file changes.")}
@@ -1983,7 +1984,7 @@ function PullRequestCodeTab({
                       <TooltipTrigger
                         render={
                           <p className="truncate px-3 text-xs text-muted-foreground">
-                            {isGerritFilePath(path) ? path : "Change-level conversation"}
+                            {isGerritFilePath(path) ? path : <T>Change-level conversation</T>}
                           </p>
                         }
                       />
@@ -2001,7 +2002,9 @@ function PullRequestCodeTab({
                             ),
                           ].map((patchSet) => (
                             <p key={patchSet} className="px-3 text-xs text-muted-foreground">
-                              From patch set {patchSet}
+                              <T>
+                                From patch set <Var>{patchSet}</Var>
+                              </T>
                             </p>
                           ))}
                           {thread.line === null ? null : (
@@ -2083,7 +2086,7 @@ function PullRequestCodeTab({
           >
             <DiffFileTree
               ariaLabel={gt(
-                "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number} files",
+                "{term, select, mr {Merge request} cr {Change} other {Pull request}} #{number} files",
                 {
                   term,
                   number: detail.number,

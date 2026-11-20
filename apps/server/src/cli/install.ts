@@ -11,6 +11,7 @@ import { Command, Prompt } from "effect/cli";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
+import { isGerritBeta, gerritBetaRefusal } from "../buildProfile.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import {
   generatedWindowsShimTarget,
@@ -45,6 +46,7 @@ const standaloneRuntime = Effect.gen(function* () {
 
 /** Installs this runtime as the `t3` command the way the install scripts do, replacing only our own launcher. */
 export const installCli = Effect.fn("cli.install.install")(function* () {
+  if (isGerritBeta) return yield* new CliInstallError({ reason: gerritBetaRefusal });
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;

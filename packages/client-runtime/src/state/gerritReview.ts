@@ -1,7 +1,29 @@
-import { GerritConnectionConfig } from "@t3tools/contracts";
+import { GerritConnectionConfig, GerritInstallationId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const parseGerritConnectionConfig = Schema.decodeUnknownOption(GerritConnectionConfig);
+const isInstallation = Schema.is(GerritInstallationId);
+
+export function gerritTerminalGitCommandTemplate(
+  installation: string,
+  environmentId: string,
+): string | null {
+  if (
+    !isInstallation(installation) ||
+    !installation.startsWith("https://") ||
+    !/^[A-Za-z0-9_-]+$/.test(environmentId)
+  )
+    return null;
+  const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+  return [
+    "# TEMPLATE: edit before running in the HTTPS checkout on the T3 server machine.",
+    "# Replace the whole quoted '<T3-LAUNCHER>' token with the quoted absolute CLI path for that installation.",
+    "# For a dev server, replace that whole token (including quotes) with: node '/absolute/server-checkout/apps/server/src/bin.ts'",
+    "# Replace <T3-HOME> with the server's base directory (the parent of userdata).",
+    "# A dev worktree normally uses /absolute/server-checkout/.t3; honor any --home-dir override.",
+    `'<T3-LAUNCHER>' gerrit copy-terminal-credential --base-dir '<T3-HOME>' --installation ${quote(installation)} --environment-id ${quote(environmentId)}`,
+  ].join("\n");
+}
 
 export function gerritCredentialSaveMode(input: {
   readonly installation: string | null;

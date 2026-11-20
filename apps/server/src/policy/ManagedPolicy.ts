@@ -25,6 +25,7 @@ import {
   readManagedPolicyFile,
 } from "@t3tools/shared/managedPolicyFile";
 
+import { isGerritBeta } from "../buildProfile.ts";
 import { telemetryChannel } from "../config.ts";
 import * as ManagedLimits from "./managedLimits.ts";
 import * as ManagedProviders from "./managedProviders.ts";
@@ -204,7 +205,18 @@ const make = Effect.gen(function* () {
       lockedSettings: policy.summary.lockedSettings,
     });
   }
-  return policy;
+  // Reuse the client update-denial contract without installing a machine-wide policy.
+  return isGerritBeta
+    ? {
+        ...policy,
+        summary: {
+          ...policy.summary,
+          organization: policy.summary?.organization ?? "Gerrit portable beta",
+          lockedSettings: policy.summary?.lockedSettings ?? [],
+          limits: { ...policy.summary?.limits, updates: { mode: "off" as const } },
+        },
+      }
+    : policy;
 });
 
 // A single-executable server resolves packages on disk only through `require`.

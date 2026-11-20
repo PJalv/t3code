@@ -143,14 +143,13 @@ export function PullRequestActionToolbar(props: {
   );
   const threadLabel = agent.threads.length
     ? gt("Continue thread")
-    : gt("Work on {term, select, mr {MR} cr {change request} other {PR}}", { term });
+    : gt("Work on {term, select, mr {MR} cr {change} other {PR}}", { term });
   const primaryLabel = pendingReview
     ? gt("Submit review · {count}", { count: draft.comments.length })
     : threadLabel;
-  const agentActionsLabel = gt(
-    "{term, select, mr {MR} cr {change request} other {PR}} agent actions",
-    { term },
-  );
+  const agentActionsLabel = gt("{term, select, mr {MR} cr {change} other {PR}} agent actions", {
+    term,
+  });
   const chooseThread = agent.chooseThread;
   const agentActions = agent.actions.filter((action) => action.task !== "ask");
   const open = (mode: "review" | "comment") =>

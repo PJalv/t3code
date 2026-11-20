@@ -36,6 +36,7 @@ import {
   sourceControlProviderSummary,
 } from "./components/SourceControlProvidersSection";
 import { AppSignInRow } from "./components/SourceControlSignInSection";
+import { GerritConnectionSettings } from "./GerritConnectionSettings";
 import type { SettingsTarget } from "./settings-environment-filter";
 
 /** The environment a detail page edits, once it is connected, and whether this session may. */
@@ -97,6 +98,24 @@ export function SettingsSourceControlProviderRouteScreen({
   const credentials = definition?.credentials;
   const appSignIn = item?.appSignIn === true ? credentials?.appSignIn : undefined;
   const disabled = !canWrite || !canUpdate;
+  if (kind === "gerrit") {
+    return (
+      <DetailPage
+        title={
+          definition?.label ??
+          gt("Provider", { $context: "settings page of one source control provider" })
+        }
+      >
+        {environment?.serverConfig.environment.capabilities.gerrit === true ? (
+          <SettingsSection title={gt("Credentials")}>
+            <GerritConnectionSettings key={environmentId} environmentId={environmentId} />
+          </SettingsSection>
+        ) : (
+          <Unavailable />
+        )}
+      </DetailPage>
+    );
+  }
   return (
     <DetailPage
       title={

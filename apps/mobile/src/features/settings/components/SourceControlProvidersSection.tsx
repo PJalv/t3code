@@ -160,7 +160,10 @@ function EnvironmentProviders(props: {
             description={sourceControlProviderSummary(item, messages)}
             ready={sourceControlProviderReady(item)}
             separated={index > 0}
-            {...(definition?.credentials || definition?.settings
+            {...((item.kind === "gerrit" &&
+              environment.serverConfig.environment.capabilities.gerrit === true) ||
+            definition?.credentials ||
+            definition?.settings
               ? {
                   onPress: () =>
                     navigation.navigate("SettingsSourceControlProvider", {

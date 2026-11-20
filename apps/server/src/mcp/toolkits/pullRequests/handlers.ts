@@ -2,6 +2,7 @@ import {
   CommandId,
   NonNegativeInt,
   type PullRequestActivity,
+  type PullRequestGerritDetail,
   PullRequestListCursors,
   type PullRequestRef,
   type PullRequestReviewCommentDraft,
@@ -117,6 +118,39 @@ const THREAD_COMMENT_PAGES = 4;
 /** Diff pages searched for review comment lines; a PR past this is too big to review by line. */
 const REVIEW_DIFF_PAGES = 10;
 
+function nativeSummary(gerrit: PullRequestGerritDetail) {
+  const bounded = {
+    ...gerrit,
+    topic: gerrit.topic?.slice(0, 1_000) ?? null,
+    patchSets: gerrit.patchSets.slice(-50),
+    labels: gerrit.labels.slice(0, 50).map((label) => ({
+      ...label,
+      votes: label.votes.slice(0, 50),
+      permittedValues: label.permittedValues.slice(0, 50),
+      ...(label.valueDescriptions === undefined
+        ? {}
+        : {
+            valueDescriptions: Object.fromEntries(
+              Object.entries(label.valueDescriptions)
+                .slice(0, 50)
+                .map(([key, value]) => [key, value.slice(0, 1_000)]),
+            ),
+          }),
+    })),
+    submitRequirements: gerrit.submitRequirements.slice(0, 50).map((requirement) => ({
+      ...requirement,
+      ...(requirement.description === undefined
+        ? {}
+        : { description: requirement.description.slice(0, 1_000) }),
+    })),
+  };
+  return {
+    gerrit: bounded,
+    gerritTruncated: JSON.stringify(bounded) !== JSON.stringify(gerrit),
+    next: "Use read_gerrit for full native requirements, permitted label scores, and patch-set anchors; act_gerrit for votes and submit; upload_gerrit for patch sets. Private drafts are excluded here.",
+  };
+}
+
 function conversationPage(
   activity: PullRequestActivity,
   start: { readonly threads: number | null; readonly comments: number | null },
@@ -140,22 +174,35 @@ function conversationPage(
   // Review threads come first: they hold the feedback an agent acts on.
   while (thread !== null && thread < reviewThreads.length) {
     const next = reviewThreads[thread]!;
-    if (includeResolved || !next.isResolved) {
-      if (!fits(next)) break;
-      pageThreads.push(next);
+    if (next.isDraft !== true && (includeResolved || !next.isResolved)) {
+      const published = {
+        ...next,
+        comments: next.comments.filter((comment) => comment.isDraft !== true),
+      };
+      if (!fits(published)) break;
+      pageThreads.push(published);
     }
     thread += 1;
   }
   const threadsDone = thread === null || thread === reviewThreads.length;
   if (threadsDone) {
-    while (comment !== null && comment < comments.length && fits(comments[comment])) {
-      pageComments.push(comments[comment++]!);
+    while (comment !== null && comment < comments.length) {
+      const next = comments[comment]!;
+      if (next.isDraft !== true) {
+        if (!fits(next)) break;
+        pageComments.push(next);
+      }
+      comment += 1;
     }
   }
   const done = threadsDone && (comment === null || comment === comments.length);
   return {
     threads: pageThreads,
     comments: pageComments,
+    hiddenResolvedThreads: includeResolved
+      ? 0
+      : reviewThreads.filter((candidate) => candidate.isDraft !== true && candidate.isResolved)
+          .length,
     next: done ? null : { threads: thread, comments: comment, includeResolved },
   };
 }
@@ -475,6 +522,24 @@ const make = Effect.gen(function* () {
     ref: PullRequestRef,
     comments: ReadonlyArray<ReviewLineComment>,
   ) {
+    if (
+      comments.some(
+        (comment) => comment.startLine !== undefined && comment.startLine > comment.line,
+      )
+    ) {
+      return yield* new PullRequestForgeError({ detail: "startLine must not be after line." });
+    }
+    if (comments.some((comment) => comment.startLine !== undefined)) {
+      const detail = yield* pullRequests
+        .detail({ ...ref, allowStale: false })
+        .pipe(Effect.mapError(forgeFailure));
+      if (detail.capabilities.review.rangeComment !== true) {
+        return yield* new PullRequestForgeError({
+          detail:
+            "This host does not support multiline review comments. Omit startLine for a single-line comment; for Gerrit ranges use read_gerrit and act_gerrit.",
+        });
+      }
+    }
     const placed = new Map<ReviewLineComment, PullRequestReviewCommentDraft>();
     const unplaced = () => comments.filter((comment) => !placed.has(comment));
     let cursor: string | undefined;
@@ -572,7 +637,7 @@ const make = Effect.gen(function* () {
         .threadComments({ ...ref, threadId: thread.id, cursor })
         .pipe(Effect.option);
       if (Option.isNone(read)) break;
-      comments.push(...read.value.comments);
+      comments.push(...read.value.comments.filter((comment) => comment.isDraft !== true));
       cursor = read.value.nextCursor ?? undefined;
     }
     return { comments, moreComments: cursor !== undefined };
@@ -599,8 +664,8 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     ).pipe(Effect.mapError(forgeFailure));
-    const wantsThreads = wants("threads");
-    const wantsComments = wants("comments");
+    const wantsThreads = wants("threads") || wants("conversation");
+    const wantsComments = wants("comments") || wants("conversation");
     const page =
       wantsThreads || wantsComments
         ? Option.some(
@@ -631,6 +696,9 @@ const make = Effect.gen(function* () {
       behindBy: detail.behindBy ?? null,
       autoMergeEnabled: detail.autoMergeEnabled ?? null,
       checks: checksSummary(detail.checks),
+      ...(wants("summary") && detail.gerrit !== undefined
+        ? { summary: nativeSummary(detail.gerrit) }
+        : {}),
       unresolvedThreads: activity.reviewThreads.filter((thread) => !thread.isResolved).length,
       ...(activity.reviewThreadsTruncated === true ? { unresolvedThreadsTruncated: true } : {}),
       ...(wants("body") ? { body: detail.body } : {}),
@@ -644,10 +712,17 @@ const make = Effect.gen(function* () {
                       id: thread.id,
                       path: thread.path,
                       line: thread.line,
+                      side: thread.side,
+                      ...(thread.gerrit === undefined ? {} : { gerrit: thread.gerrit }),
+                      ...(thread.isDraft === undefined ? {} : { isDraft: thread.isDraft }),
+                      ...(thread.canResolve === undefined ? {} : { canResolve: thread.canResolve }),
                       isResolved: thread.isResolved,
                       isOutdated: thread.isOutdated,
                       comments: [...thread.comments, ...threadRests[index]!.comments].map(
                         (comment) => ({
+                          id: comment.id,
+                          ...(comment.gerrit === undefined ? {} : { gerrit: comment.gerrit }),
+                          ...(comment.isDraft === undefined ? {} : { isDraft: comment.isDraft }),
                           author: comment.author?.login ?? null,
                           body: comment.body,
                           createdAt: comment.createdAt,
@@ -661,6 +736,8 @@ const make = Effect.gen(function* () {
                 ? {
                     comments: page.value.comments.map((comment) => ({
                       id: comment.id,
+                      ...(comment.gerrit === undefined ? {} : { gerrit: comment.gerrit }),
+                      ...(comment.isDraft === undefined ? {} : { isDraft: comment.isDraft }),
                       kind: comment.kind,
                       author: comment.author?.login ?? null,
                       body: comment.body,
@@ -670,6 +747,7 @@ const make = Effect.gen(function* () {
                     })),
                   }
                 : {}),
+              hiddenResolvedThreads: page.value.hiddenResolvedThreads,
               truncated:
                 (wantsComments && activity.commentsTruncated) ||
                 (wantsThreads && activity.reviewThreadsTruncated === true),
@@ -1050,6 +1128,12 @@ const make = Effect.gen(function* () {
         if (project === undefined) {
           return yield* new PullRequestProjectNotFoundError({ repository: "" });
         }
+        if (project.repositoryIdentity?.provider === "gerrit") {
+          return yield* new PullRequestForgeError({
+            detail:
+              "Gerrit changes are uploaded commits, not branch PRs. Use upload_gerrit (new or patch-set).",
+          });
+        }
         const created = yield* git
           .createPullRequest({
             cwd: thread.worktreePath ?? project.workspaceRoot,
@@ -1093,7 +1177,46 @@ const make = Effect.gen(function* () {
             detail: "Pass title, body, ready, state, addLabels, removeLabels, or requestReviewers.",
           });
         }
-        const { target, ref } = yield* locate(input);
+        const { target, ref, project } = yield* locate(input);
+        if (project.repositoryIdentity?.provider === "gerrit") {
+          if (
+            input.title !== undefined ||
+            input.body !== undefined ||
+            input.addLabels !== undefined ||
+            input.removeLabels !== undefined
+          ) {
+            return yield* new PullRequestForgeError({
+              detail:
+                "Gerrit title/body are the commit message and labels are scored votes. Use read_gerrit then act_gerrit for commit messages or label votes; upload_gerrit for patch sets. No updates were made.",
+            });
+          }
+          const detail = yield* pullRequests
+            .detail({ ...ref, allowStale: false })
+            .pipe(Effect.mapError(forgeFailure));
+          const actions = [
+            ...(input.ready === undefined
+              ? []
+              : [input.ready ? ("ready" as const) : ("draft" as const)]),
+            ...(input.state === undefined
+              ? []
+              : [input.state === "closed" ? ("close" as const) : ("reopen" as const)]),
+          ];
+          const denied = actions.find(
+            (action) =>
+              !detail.capabilities.actions.includes(action) ||
+              !detail.viewerPermissions.actions.includes(action),
+          );
+          if (
+            denied !== undefined ||
+            (input.requestReviewers !== undefined &&
+              (!detail.capabilities.reviewers.request ||
+                !detail.viewerPermissions.requestReviewers))
+          ) {
+            return yield* new PullRequestForgeError({
+              detail: `Gerrit does not permit ${denied ?? "requesting reviewers"} on this change. Use read_gerrit to inspect available actions. No updates were made.`,
+            });
+          }
+        }
         if (input.title !== undefined || input.body !== undefined) {
           yield* pullRequests
             .update({
@@ -1149,7 +1272,16 @@ const make = Effect.gen(function* () {
             detail: "resolved needs reviewThreadId.",
           });
         }
-        const { target, ref } = yield* locate(input);
+        const { target, ref, project } = yield* locate(input);
+        if (
+          project.repositoryIdentity?.provider === "gerrit" &&
+          input.reviewThreadId !== undefined
+        ) {
+          return yield* new PullRequestForgeError({
+            detail:
+              "Use read_gerrit to select the native comment ID and patch-set/side anchor, then act_gerrit to reply or change resolution. No reply was posted.",
+          });
+        }
         const reviewThreadId = input.reviewThreadId;
         if (input.body !== undefined) {
           yield* (
@@ -1182,7 +1314,13 @@ const make = Effect.gen(function* () {
     ),
     pull_request_review: McpToolAccess.writesWithCapability((input) =>
       Effect.gen(function* () {
-        const { target, ref } = yield* locate(input);
+        const { target, ref, project } = yield* locate(input);
+        if (project.repositoryIdentity?.provider === "gerrit") {
+          return yield* new PullRequestForgeError({
+            detail:
+              "Gerrit reviews use explicit label scores and patch-set anchors, not generic verdicts. Use read_gerrit for permitted scores and comments, then act_gerrit to review.",
+          });
+        }
         const comments = yield* reviewComments(ref, input.comments ?? []);
         yield* pullRequests
           .submitReview({ ...ref, verdict: input.verdict, body: input.body ?? "", comments })
@@ -1192,7 +1330,13 @@ const make = Effect.gen(function* () {
     ),
     pull_request_merge: McpToolAccess.writesWithCapability((input) =>
       Effect.gen(function* () {
-        const { target, ref } = yield* locate(input);
+        const { target, ref, project } = yield* locate(input);
+        if (project.repositoryIdentity?.provider === "gerrit") {
+          return yield* new PullRequestForgeError({
+            detail:
+              "Gerrit uses native submit requirements, not generic merge strategies, stack merges, or auto-merge. Use read_gerrit to check requirements, then act_gerrit to submit.",
+          });
+        }
         const stack = input.stack === true ? yield* stackMergeScope(ref, input) : {};
         yield* pullRequests
           .runAction({
