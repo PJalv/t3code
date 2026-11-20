@@ -3,6 +3,7 @@ import { SNAP_SHOT_MODIFIERS, type SnapShotModifier } from "@t3tools/contracts";
 
 import { loadWindowsForegroundApi } from "../electron/WindowsForeground.ts";
 import { WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS } from "./snapShot.ts";
+import { sendWorkerMessage } from "./WorkerIpc.ts";
 
 const POLL_INTERVAL_MS = 50;
 
@@ -121,16 +122,14 @@ async function poll() {
   // A key typed since the pair was last fully up means the overlap came from typing (rolled
   // Shifts for consecutive capitals), not a deliberate press, so it does not trigger.
   let typed = false;
-  process.send?.("ready");
+  sendWorkerMessage("ready");
   const timer = setInterval(() => {
     if (drainTyping()) typed = true;
     const leftDown = api.isKeyDown(left);
     const rightDown = api.isKeyDown(right);
     const pressed = leftDown && rightDown;
     if (pressed && !active && !typed) {
-      try {
-        process.send?.("trigger");
-      } catch {}
+      sendWorkerMessage("trigger");
     }
     active = pressed;
     if (!leftDown && !rightDown) typed = false;
