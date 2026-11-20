@@ -191,6 +191,7 @@ const layerDesktopServerExposure = Layer.succeed(DesktopServerExposure.DesktopSe
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
   setMode: () => Effect.die("unexpected setMode"),
+  setPreferredLanInterfaceName: () => Effect.die("unexpected preferred LAN interface change"),
   setTailscaleServeEnabled: () => Effect.die("unexpected setTailscaleServeEnabled"),
   getAdvertisedEndpoints: Effect.die("unexpected getAdvertisedEndpoints"),
 } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
@@ -280,6 +281,7 @@ function layerTest(input: {
         return { settings: desktopSettings, changed };
       }),
     setServerExposureMode: () => Effect.die("unexpected server exposure update"),
+    setPreferredLanInterfaceName: () => Effect.die("unexpected preferred LAN interface update"),
     setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
     setUpdateChannel: () => Effect.die("unexpected update channel change"),
     setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
