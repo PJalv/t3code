@@ -67,13 +67,6 @@ export interface ChangeRequestTerminology {
   readonly singular: string;
   readonly plural: string;
   readonly latestRevisionLabel?: string;
-  readonly verbs?: {
-    readonly merge: string;
-    readonly close: string;
-    readonly reopen: string;
-    readonly draft: string;
-    readonly ready: string;
-  };
 }
 
 export interface ChangeRequestUrlInput {
