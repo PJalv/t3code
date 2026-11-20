@@ -43,8 +43,13 @@ const make = Effect.gen(function* () {
     const request = yield* decode(input.request).pipe(
       Effect.mapError(() => new GerritReadError({ reason: "invalid-input" })),
     );
+    // A change URL names its own server and project, so reading it needs no matching checkout.
     const resolved = yield* target.resolve(
-      request.mode === "search" ? { cwd: input.cwd } : { cwd: input.cwd, ...request.target },
+      request.mode === "search"
+        ? { cwd: input.cwd }
+        : "url" in request.target
+          ? request.target
+          : { cwd: input.cwd, ...request.target },
     );
     const credentials = yield* target.credentials(resolved.server);
     const installation = GerritInstallationId.make(resolved.server);
@@ -58,11 +63,12 @@ const make = Effect.gen(function* () {
         (request.cursor !== undefined && !/^(0|[1-9]\d*)$/.test(request.cursor))
       )
         return yield* new GerritReadError({ reason: "invalid-input" });
+      const rawQuery = request.query?.trim();
       const result = yield* http.searchChanges({
         ...auth,
-        status: "open",
+        status: rawQuery ? "all" : "open",
         project: resolved.project,
-        ...(request.query ? { search: request.query } : {}),
+        ...(rawQuery ? { rawQuery } : {}),
         limit: Math.min(request.limit ?? 25, 100),
         offset,
       });
