@@ -1,6 +1,9 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { afterEach, assert, beforeEach, it, vi } from "@effect/vitest";
+
+beforeEach(() => vi.stubEnv("T3_DISABLE_CHECKPOINTS", undefined));
+afterEach(() => vi.unstubAllEnvs());
 import {
   CheckpointRef,
   CheckpointScopeId,
@@ -36,6 +39,127 @@ const layerNoTrackedFolders = Layer.merge(
     submodules: () => Effect.succeed([]),
   }),
 );
+
+it.effect("disables baseline and completion snapshots without invoking Git", () => {
+  vi.stubEnv("T3_DISABLE_CHECKPOINTS", "1");
+  return Effect.gen(function* () {
+    const scope: OrchestrationV2CheckpointScope = {
+      id: CheckpointScopeId.make("scope:disabled"),
+      threadId: ThreadId.make("thread:disabled"),
+      runId: RunId.make("run:disabled"),
+      nodeId: NodeId.make("node:disabled"),
+      parentScopeId: null,
+      providerThreadId: ProviderThreadId.make("provider:disabled"),
+      kind: "root_run",
+      ordinalWithinParent: 0,
+      advancesAppRunCount: true,
+      cwd: "/repo",
+      createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+    };
+    const testLayer = CheckpointService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          layerNoTrackedFolders,
+          NodeCrypto.layer,
+          Layer.mock(CheckpointStore.CheckpointStore)({
+            isGitRepository: () => Effect.die("disabled checkpoints must not invoke Git"),
+            hasCheckpointRef: () => Effect.die("disabled checkpoints must not look up refs"),
+            captureCheckpoint: () => Effect.die("disabled checkpoints must not capture"),
+            diffCheckpoints: () => Effect.die("disabled checkpoints must not diff"),
+            listAuthoredPaths: () => Effect.die("disabled checkpoints must not list paths"),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+      yield* checkpoints.captureBaseline({ scope, ordinalWithinScope: 0 });
+      const baseline = yield* checkpoints.materializeBaselineCheckpoint({
+        scope,
+        ordinalWithinScope: 0,
+        nodeId: scope.nodeId!,
+        capturedAt: scope.createdAt,
+      });
+      const completion = yield* checkpoints.capture({
+        scope,
+        ordinalWithinScope: 1,
+        runId: scope.runId!,
+        nodeId: scope.nodeId!,
+        appRunOrdinal: 1,
+        capturedAt: scope.createdAt,
+      });
+      assert.equal(baseline.status, "missing");
+      assert.equal(completion.status, "missing");
+      assert.deepEqual(completion.files, []);
+    }).pipe(Effect.provide(testLayer));
+  });
+});
+
+it.effect("captures baseline and completion snapshots when the opt-out is absent", () => {
+  assert.isUndefined(process.env.T3_DISABLE_CHECKPOINTS);
+  return Effect.gen(function* () {
+    const scope: OrchestrationV2CheckpointScope = {
+      id: CheckpointScopeId.make("scope:enabled"),
+      threadId: ThreadId.make("thread:enabled"),
+      runId: RunId.make("run:enabled"),
+      nodeId: NodeId.make("node:enabled"),
+      parentScopeId: null,
+      providerThreadId: ProviderThreadId.make("provider:enabled"),
+      kind: "root_run",
+      ordinalWithinParent: 0,
+      advancesAppRunCount: true,
+      cwd: "/repo",
+      createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+    };
+    const refs = new Set<string>();
+    const captureCheckpoint = vi.fn((input: CheckpointStore.CaptureCheckpointInput) =>
+      Effect.sync(() => {
+        refs.add(input.checkpointRef);
+      }),
+    );
+    const testLayer = CheckpointService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          layerNoTrackedFolders,
+          NodeCrypto.layer,
+          Layer.mock(CheckpointStore.CheckpointStore)({
+            isGitRepository: () => Effect.succeed(true),
+            hasCheckpointRef: (input) => Effect.succeed(refs.has(input.checkpointRef)),
+            captureCheckpoint,
+            diffCheckpoints: () => Effect.succeed("2\t1\tsrc/example.ts\0"),
+            listAuthoredPaths: () => Effect.succeed(null),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+      yield* checkpoints.captureBaseline({ scope, ordinalWithinScope: 0 });
+      const baseline = yield* checkpoints.materializeBaselineCheckpoint({
+        scope,
+        ordinalWithinScope: 0,
+        nodeId: scope.nodeId!,
+        capturedAt: scope.createdAt,
+      });
+      const completion = yield* checkpoints.capture({
+        scope,
+        ordinalWithinScope: 1,
+        runId: scope.runId!,
+        nodeId: scope.nodeId!,
+        appRunOrdinal: 1,
+        capturedAt: scope.createdAt,
+      });
+      assert.equal(baseline.status, "ready");
+      assert.equal(completion.status, "ready");
+      assert.equal(captureCheckpoint.mock.calls.length, 2);
+      assert.deepEqual(completion.files, [
+        { path: "src/example.ts", kind: "modified", additions: 2, deletions: 1 },
+      ]);
+    }).pipe(Effect.provide(testLayer));
+  });
+});
 
 it.effect(
   "skips unsupported baseline and turn checkpoints without swallowing capture failures",
