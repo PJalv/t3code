@@ -1074,31 +1074,31 @@ export function PullRequestTimelineTab({
   // the page. The connector line is drawn by the content container, behind the rows.
   return (
     <TimelineProvider value={detail.provider}>
-    <LegendList<PullRequestTimelineRow>
-      ref={(list: LegendListRef | null) => {
-        listRef.current = list;
-        scrollerRef(list?.getScrollableNode() ?? null);
-      }}
-      data={rows}
-      extraData={{ editable, reactions, newestCommitAt }}
-      keyExtractor={rowKey}
-      renderItem={renderRow}
-      estimatedItemSize={140}
-      tabIndex={-1}
-      data-workspace-focus-default
-      className="scrollbar-gutter-both h-full px-4 outline-none"
-      contentContainerClassName="relative mx-auto w-full max-w-3xl before:absolute before:bottom-10 before:left-[15px] before:top-6 before:w-px before:bg-border/45"
-      ListHeaderComponent={
-        anchor !== null && targetIndex < 0 && revealUrl === undefined ? (
-          <p role="status" className="py-4 text-xs text-muted-foreground">
-            <T>The linked item is not in the loaded activity.</T>
-          </p>
-        ) : (
-          <div className="h-5" />
-        )
-      }
-      ListFooterComponent={<div className="h-5" />}
-    />
+      <LegendList<PullRequestTimelineRow>
+        ref={(list: LegendListRef | null) => {
+          listRef.current = list;
+          scrollerRef(list?.getScrollableNode() ?? null);
+        }}
+        data={rows}
+        extraData={{ editable, reactions, newestCommitAt }}
+        keyExtractor={rowKey}
+        renderItem={renderRow}
+        estimatedItemSize={140}
+        tabIndex={-1}
+        data-workspace-focus-default
+        className="scrollbar-gutter-both h-full px-4 outline-none"
+        contentContainerClassName="relative mx-auto w-full max-w-3xl before:absolute before:bottom-10 before:left-[15px] before:top-6 before:w-px before:bg-border/45"
+        ListHeaderComponent={
+          anchor !== null && targetIndex < 0 && revealUrl === undefined ? (
+            <p role="status" className="py-4 text-xs text-muted-foreground">
+              <T>The linked item is not in the loaded activity.</T>
+            </p>
+          ) : (
+            <div className="h-5" />
+          )
+        }
+        ListFooterComponent={<div className="h-5" />}
+      />
     </TimelineProvider>
   );
 }

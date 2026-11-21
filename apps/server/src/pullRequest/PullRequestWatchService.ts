@@ -125,6 +125,7 @@ const make = Effect.gen(function* () {
       watching: false,
       wasWatching,
       state,
+      ownAccountCommentsIgnored: true,
     });
     // A closed snapshot still gets a read below, since the PR may have reopened.
     if (watching && before?.snapshot?.state === "merged") return alreadyEnded("merged");
