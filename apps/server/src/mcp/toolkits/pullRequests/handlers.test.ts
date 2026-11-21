@@ -1075,6 +1075,8 @@ describe("source control tools", () => {
                 currentPatchSet: 70,
               },
             }),
+          // The read always lists activity; only the summary assertions matter here.
+          activity: () => Effect.succeed(activity),
         },
       });
       const summary = (yield* bounded.call("pull_request_read", { include: ["summary"] })).summary;
