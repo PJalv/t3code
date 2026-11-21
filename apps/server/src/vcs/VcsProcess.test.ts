@@ -508,7 +508,8 @@ describe("VcsProcess.run", () => {
       expect(JSON.parse(result.stdout)).toEqual({
         home: null,
         token: "supplied",
-        count: "1",
+        // Upstream's serverGitConfigEnv adds safe.bareRepository, maintenance.auto and gc.auto.
+        count: "3",
         key: "safe.bareRepository",
         value: "explicit",
       });

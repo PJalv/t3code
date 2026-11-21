@@ -73,7 +73,7 @@ export const reconcileGerritMigration = Effect.fn("reconcileGerritMigration")(fu
         [97, "GerritPendingClones"] as const,
       ];
       if (
-        (throughId !== undefined && throughId < 103) ||
+        (throughId !== undefined && throughId < 111) ||
         history.length !== expected.length ||
         !history.every(
           (row, index) =>
@@ -83,19 +83,19 @@ export const reconcileGerritMigration = Effect.fn("reconcileGerritMigration")(fu
         return yield* new Migrator.MigrationError({
           kind: "BadState",
           message:
-            "Cannot upgrade legacy Gerrit migration 97 without its exact history and migrations through 103.",
+            "Cannot upgrade legacy Gerrit migration 97 without its exact history and migrations through 111.",
         });
       }
       yield* assertLegacyGerritSchema();
-      // Never move 97 straight to 103: the migrator would then skip upstream 97-102.
+      // Never move 97 straight to 111: the migrator would then skip upstream 97-110.
       // Keep removal and replay atomic so a failed upgrade restores the old ledger and schema.
       yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 97 AND name = 'GerritPendingClones'`;
       const executed = yield* replay;
       // Migrator can swallow a ledger conflict as "already running"; never commit just the delete.
-      if (executed.length !== 7 || executed[6]?.[0] !== 103) {
+      if (executed.length !== 15 || executed[14]?.[0] !== 111) {
         return yield* new Migrator.MigrationError({
           kind: "BadState",
-          message: "Legacy Gerrit migration replay did not complete migrations 97 through 103.",
+          message: "Legacy Gerrit migration replay did not complete migrations 97 through 111.",
         });
       }
       return executed;
