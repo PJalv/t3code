@@ -235,8 +235,8 @@ const makeMigrationLoader = (throughId?: number, legacyGerrit = false) =>
         .filter(([id]) => throughId === undefined || id <= throughId)
         .map(([id, name, migration]) => [
           `${id}_${name}`,
-          // Legacy 97 already created exactly 103's tables; validate instead of recreating them.
-          legacyGerrit && id === 103 ? assertLegacyGerritSchema() : migration,
+          // Legacy 97 already created exactly 106's tables; validate instead of recreating them.
+          legacyGerrit && id === 106 ? assertLegacyGerritSchema() : migration,
         ]),
     ),
   );
@@ -322,7 +322,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const gerritMigrations = hasPending
     ? yield* reconcileGerritMigration(
         migrationManifest,
-        run({ loader: makeMigrationLoader(103, true) }),
+        run({ loader: makeMigrationLoader(106, true) }),
         toMigrationInclusive,
       )
     : [];
