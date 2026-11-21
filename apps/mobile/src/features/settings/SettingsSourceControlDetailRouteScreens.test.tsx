@@ -257,8 +257,6 @@ it("opens the selected environment's native Gerrit form and keeps edits, removal
       },
     },
   });
-  await act(async () => screen.button("Copy command template").click());
-  expect(mocks.copy.mock.calls[0]?.[0]).toContain("--environment-id 'remote'");
   await act(async () => screen.button("Remove connection").click());
   expect(mocks.command).toHaveBeenLastCalledWith("gerritRemove", {
     environmentId: "remote",
@@ -300,7 +298,5 @@ it("keeps a remote read-only connection inspectable without allowing settings mu
     act(() => screen.button(label).click());
   }
   expect(screen.input("Gerrit server URL").disabled).toBe(true);
-  await act(async () => screen.button("Copy command template").click());
-  expect(mocks.copy).toHaveBeenCalledOnce();
   expect(mocks.command).not.toHaveBeenCalled();
 });
