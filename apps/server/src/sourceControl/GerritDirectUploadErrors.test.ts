@@ -42,8 +42,14 @@ it.effect("rejects missing or duplicate Change-Id footers without modifying the 
     run("init", "--initial-branch=main");
     run("config", "user.name", "Fixture");
     run("config", "user.email", "fixture@example.invalid");
+    run("commit", "--allow-empty", "-m", "Base");
+    const base = run("rev-parse", "HEAD").trim();
     run("commit", "--allow-empty", "-m", "Missing");
     const missing = run("rev-parse", "HEAD").trim();
+    // The upload resolves the base and the push remote before it validates footers, so give it both.
+    run("update-ref", "refs/remotes/origin/main", base);
+    run("init", "--bare", "receiver");
+    run("remote", "add", "origin", `${cwd}/receiver`);
     const service = yield* Direct.GerritDirectUpload;
     const error = yield* service.upload({ cwd, kind: "new", branch: "main" }).pipe(Effect.flip);
     expect(error.reason).toBe("change-id");
@@ -51,6 +57,7 @@ it.effect("rejects missing or duplicate Change-Id footers without modifying the 
     expect(run("rev-parse", "HEAD").trim()).toBe(missing);
     const id = `I${"a".repeat(40)}`;
     run("commit", "--allow-empty", "-m", `Duplicate\n\nChange-Id: ${id}\nChange-Id: ${id}`);
+    run("update-ref", "refs/remotes/origin/main", missing);
     const duplicate = yield* service.upload({ cwd, kind: "new", branch: "main" }).pipe(Effect.flip);
     expect(duplicate.reason).toBe("change-id");
   }).pipe(Effect.scoped, Effect.provide(layer)),
@@ -69,7 +76,11 @@ it.effect("reports Gerrit's no new changes rejection as an error", () =>
     run("init", "--initial-branch=main");
     run("config", "user.name", "Fixture");
     run("config", "user.email", "fixture@example.invalid");
+    run("commit", "--allow-empty", "-m", "Base");
+    const base = run("rev-parse", "HEAD").trim();
     run("commit", "--allow-empty", "-m", `Subject\n\nChange-Id: I${"a".repeat(40)}`);
+    // The upload resolves the base before it pushes, so give it one.
+    run("update-ref", "refs/remotes/origin/main", base);
     run("init", "--bare", "receiver");
     run("remote", "add", "origin", `${cwd}/receiver`);
     yield* fs.writeFileString(
