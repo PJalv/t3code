@@ -547,6 +547,8 @@ export const ReadPullRequestResult = Schema.Struct({
     failed: Schema.Array(Schema.String),
     incomplete: Schema.optional(Schema.Literal(true)).annotate({
       description: "The host could not list some checks; checkRuns says which.",
+    }),
+  }),
   summary: Schema.optional(
     Schema.Struct({
       gerrit: Schema.optional(PullRequestGerritDetail),
@@ -554,8 +556,6 @@ export const ReadPullRequestResult = Schema.Struct({
       next: Schema.optional(Schema.String),
     }),
   ),
-    }),
-  }),
   unresolvedThreads: Schema.Int,
   unresolvedThreadsTruncated: Schema.optional(Schema.Literal(true)).annotate({
     description: "unresolvedThreads is a lower bound.",
@@ -592,7 +592,7 @@ export const ReadPullRequestResult = Schema.Struct({
           }),
         ),
       ),
-      ),
+      hiddenResolvedThreads: Schema.optional(Schema.Int),
       truncated: Schema.Boolean,
       nextCursor: Schema.NullOr(Schema.String),
     }),
