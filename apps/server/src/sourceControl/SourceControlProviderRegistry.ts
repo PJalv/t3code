@@ -371,6 +371,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
             remoteName: selected.remote.name,
             remoteUrl: selected.remote.url,
           };
+    });
     const refineContext = Effect.fn("SourceControlProviderRegistry.refineContext")(function* (
       cwd: string,
       context: SourceControlProvider.SourceControlProviderContext | null,
@@ -443,8 +444,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PROVIDER_DETECTION_CACHE_TTL : Duration.zero),
     });
 
-    const settingsChanges = yield* serverSettings.subscribeChanges;
-    yield* Stream.runForEach(settingsChanges, () =>
+    const connectionChanges = yield* serverSettings.subscribeChanges;
+    yield* Stream.runForEach(connectionChanges, () =>
       Effect.all(
         [Cache.invalidateAll(unknownRemoteCache), Cache.invalidateAll(providerContextCache)],
         { discard: true },
