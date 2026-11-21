@@ -57,7 +57,11 @@ it.effect("uses the saved passphrase to sign a direct push certificate", () =>
     run("git", ["config", "user.name", "Fixture"]);
     run("git", ["config", "user.email", "fixture@example.invalid"]);
     run("git", ["config", "user.signingkey", "fixture@example.invalid"]);
+    run("git", ["commit", "--allow-empty", "-m", "Base"]);
+    const base = run("git", ["rev-parse", "HEAD"]).trim();
     run("git", ["commit", "--allow-empty", "-m", `Subject\n\nChange-Id: I${"a".repeat(40)}`]);
+    // The upload resolves the base before it signs, so give it one.
+    run("git", ["update-ref", "refs/remotes/origin/main", base]);
     run("git", ["init", "--bare", "receiver"]);
     run("git", ["--git-dir=receiver", "config", "receive.certNonceSeed", "fixture"]);
     run("git", ["remote", "add", "origin", `${cwd}/receiver`]);
