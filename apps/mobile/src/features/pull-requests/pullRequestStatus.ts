@@ -232,7 +232,16 @@ export function pullRequestReviewSummary(
   );
   const reviews = [
     ...[...latest.values()].filter((review) => review.reviewState !== "DISMISSED"),
-    ...[...comments.entries()].filter(([key]) => !latest.has(key)).map(([, review]) => review),
+    ...[...comments.entries()]
+      .filter(([key, review]) => {
+        const verdict = latest.get(key);
+        return (
+          !verdict ||
+          (verdict.reviewState === "DISMISSED" &&
+            Date.parse(review.createdAt) > Date.parse(verdict.createdAt))
+        );
+      })
+      .map(([, review]) => review),
   ].map((review) => ({
     ...review,
     outdated: review.reviewState === "APPROVED" && Date.parse(review.createdAt) < newestCommit,
