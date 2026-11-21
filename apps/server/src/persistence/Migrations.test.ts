@@ -186,8 +186,8 @@ describe("runMigrations", () => {
   it.effect("adds pending clone recovery tables", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 102 });
-      assert.deepStrictEqual(yield* runMigrations(), [[103, "GerritPendingClones"]]);
+      yield* runMigrations({ toMigrationInclusive: 105 });
+      assert.deepStrictEqual(yield* runMigrations(), [[106, "GerritPendingClones"]]);
       const tables = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_schema WHERE name IN ('gerrit_pending_clones', 'gerrit_pending_clone_attempts') ORDER BY name
       `;
