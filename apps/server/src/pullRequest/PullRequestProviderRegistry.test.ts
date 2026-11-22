@@ -3,6 +3,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import * as GerritHttp from "@t3tools/source-control-gerrit/server/GerritHttp";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as HttpClient from "effect/http/HttpClient";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as Layer from "effect/Layer";
@@ -23,6 +24,7 @@ it.effect("returns the Gerrit driver's pull request API", () =>
         Layer.mergeAll(
           NodeCrypto.layer,
           NodeServices.layer,
+          FeatureFlags.layerTest(),
           SourceControlRateLimit.layer,
           Layer.succeed(
             HttpClient.HttpClient,
