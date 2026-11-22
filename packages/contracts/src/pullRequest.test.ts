@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
-  type PullRequestDetail,
+  PullRequestDetail,
   PullRequestListResult,
   PullRequestOperationError,
   resolvePullRequestAuthorFilter,

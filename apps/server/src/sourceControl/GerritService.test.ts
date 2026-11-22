@@ -8,6 +8,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as GerritHttp from "@t3tools/source-control-gerrit/server/GerritHttp";
@@ -114,6 +115,7 @@ const serviceTestLayer = (
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(NodeCrypto.layer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(FeatureFlags.layerTest()),
   );
 const testLayer = serviceTestLayer();
 const json = (response: NodeHttp.ServerResponse, value: unknown) => {
