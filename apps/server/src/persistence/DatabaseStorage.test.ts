@@ -26,7 +26,11 @@ const freePages = Effect.map(
 );
 
 const storageLayer = <E>(
-  config: Layer.Layer<ServerConfig.ServerConfig, E, FileSystem.FileSystem | Path.Path>,
+  config: Layer.Layer<
+    ServerConfig.ServerConfig,
+    E,
+    FileSystem.FileSystem | Path.Path
+  >,
 ) =>
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),
@@ -35,7 +39,9 @@ const storageLayer = <E>(
     Layer.provide(NodeServices.layer),
   );
 
-const testConfig = ServerConfig.layerTest(process.cwd(), { prefix: "database-storage-" });
+const testConfig = ServerConfig.layerTest(process.cwd(), {
+  prefix: "database-storage-",
+});
 
 it.effect("a new database returns freed pages online without losing data", () =>
   Effect.gen(function* () {
@@ -57,7 +63,10 @@ it.effect("a new database returns freed pages online without losing data", () =>
         return span;
       },
     });
-    yield* storage.reclaim.pipe(Effect.withTracer(tracer), Effect.withTracerEnabled(true));
+    yield* storage.reclaim.pipe(
+      Effect.withTracer(tracer),
+      Effect.withTracerEnabled(true),
+    );
     assert.equal(before - (yield* freePages), 1024);
     assert.lengthOf(spans, 1);
     assert.deepEqual(
@@ -67,7 +76,9 @@ it.effect("a new database returns freed pages online without losing data", () =>
     assert.equal(spans[0]?.attributes.get("db.reclaimed_pages"), 1024);
     yield* storage.reclaim;
     assert.equal(yield* freePages, 0);
-    assert.deepEqual(yield* sql`SELECT value FROM retained`, [{ value: "keep" }]);
+    assert.deepEqual(yield* sql`SELECT value FROM retained`, [
+      { value: "keep" },
+    ]);
   }).pipe(Effect.provide(storageLayer(testConfig))),
 );
 
@@ -99,7 +110,10 @@ it.effect("remembers completion only after the paced pass finishes", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const config = yield* ServerConfig.ServerConfig;
-    const timestampPath = path.join(path.dirname(config.dbPath), "compacted-at");
+    const timestampPath = path.join(
+      path.dirname(config.dbPath),
+      "compacted-at",
+    );
     const betweenPagesReached = yield* Deferred.make<void>();
     const completed = yield* Deferred.make<void>();
     const timestampWritten = yield* Deferred.make<void>();
@@ -123,7 +137,10 @@ it.effect("remembers completion only after the paced pass finishes", () =>
       yield* TestClock.adjust(1);
       yield* Deferred.await(timestampWritten);
       assert.isTrue(yield* Deferred.isDone(completed));
-      assert.equal(Number(yield* fs.readFileString(timestampPath)), startupTime + minute + 300);
+      assert.equal(
+        Number(yield* fs.readFileString(timestampPath)),
+        startupTime + minute + 300,
+      );
     }).pipe(
       Effect.provide(compactionLayer(compact)),
       Effect.provideService(FileSystem.FileSystem, {
@@ -131,10 +148,14 @@ it.effect("remembers completion only after the paced pass finishes", () =>
         writeFileString: (file, content, options) =>
           fs
             .writeFileString(file, content, options)
-            .pipe(Effect.ensuring(Deferred.succeed(timestampWritten, undefined))),
+            .pipe(
+              Effect.ensuring(Deferred.succeed(timestampWritten, undefined)),
+            ),
       }),
     );
-  }).pipe(Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer)))),
+  }).pipe(
+    Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer))),
+  ),
 );
 
 // NONE is a database from before automatic shrinking, which the repair converts.
@@ -169,10 +190,15 @@ it.effect(
         (storage) => storage.requestReclaim,
       );
       const restarted = yield* Deferred.make<void>();
-      const restart = Deferred.succeed(restarted, undefined).pipe(Effect.asVoid);
+      const restart = Deferred.succeed(restarted, undefined).pipe(
+        Effect.asVoid,
+      );
 
       // Nothing starts a server run by hand again, so it keeps pointing at the command.
-      const unsupervised = yield* request.pipe(Effect.flip, Effect.provide(reclaimLayer(null)));
+      const unsupervised = yield* request.pipe(
+        Effect.flip,
+        Effect.provide(reclaimLayer(null)),
+      );
       assert.equal(unsupervised._tag, "DatabaseReclaimError");
       // A database that already shrinks on its own (or a stale dialog after another client's
       // repair) has nothing to reclaim, so it must not restart.
@@ -200,8 +226,13 @@ it.effect(
       }).pipe(Effect.provide(reclaimLayer(restart)));
       assert.isTrue(yield* fs.exists(files.request));
       assert.isFalse(yield* fs.exists(files.failure));
-      assert.isFalse(yield* Deferred.isDone(restarted), "the reply must go out before the restart");
+      assert.isFalse(
+        yield* Deferred.isDone(restarted),
+        "the reply must go out before the restart",
+      );
       yield* TestClock.adjust(500);
       yield* Deferred.await(restarted);
-    }).pipe(Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer)))),
+    }).pipe(
+      Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer))),
+    ),
 );

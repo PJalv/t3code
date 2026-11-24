@@ -133,6 +133,8 @@ import Migration0118 from "./Migrations/118_GerritPendingClones.ts";
 
 const GERRIT_MIGRATION_ID = 118;
 
+const GERRIT_MIGRATION_ID = 112;
+
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -318,8 +320,6 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(
   },
 );
 
-const GERRIT_MIGRATION_ID = 112;
-
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
 // Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
@@ -362,10 +362,15 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const hasPending = yield* hasPendingMigrations();
   if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
   const includesV2 =
-  const includesV2 =
     toMigrationInclusive === undefined ||
     toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
-  if (hasPending) yield* reconcileGerritMigration(GERRIT_MIGRATION_ID);
+  if (hasPending) {
+    yield* reconcileGerritMigration(
+      GERRIT_MIGRATION_ID,
+      includesV2 ? assertV2MigrationsCanRun(toMigrationInclusive) : Effect.void,
+      toMigrationInclusive,
+    );
+  }
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
   const previewMigrations =
     includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
@@ -390,10 +395,8 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   );
   // One transaction per migration: an index build on a large database can take minutes, and a
   // restart then resumes after the last finished migration instead of rolling all of them back.
-<<<<<<< HEAD
   const executedMigrations: Array<readonly [id: number, name: string]> = [
     ...previewMigrations,
-    ...gerritMigrations,
   ];
   yield* Effect.gen(function* () {
     for (const [index, [id, name]] of pending.entries()) {
@@ -415,16 +418,6 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       }
       executedMigrations.push(
         ...(yield* run({ loader: makeMigrationLoader(id) })),
-=======
-  const executedMigrations: Array<readonly [id: number, name: string]> = [...previewMigrations];
-  for (const [index, [id, name]] of pending.entries()) {
-    if (latestRecordedId > 0) {
-      yield* Effect.log(DATABASE_MIGRATION_PROGRESS_MESSAGE).pipe(
-        Effect.annotateLogs({
-          migration: `${id}_${name}`,
-          progress: `${index + 1} of ${pending.length}`,
-        }),
->>>>>>> 87329b5ce8 (fix(gerrit): start on databases that recorded GerritPendingClones at an upstream id)
       );
     }
   }).pipe(

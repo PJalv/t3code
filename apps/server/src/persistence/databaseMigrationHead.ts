@@ -4,7 +4,9 @@ import * as NodeSqlite from "node:sqlite";
 
 import { migrationManifest } from "./Migrations.ts";
 
-export const BUILD_MIGRATION_HEAD = Math.max(...migrationManifest.map(([id]) => id));
+export const BUILD_MIGRATION_HEAD = Math.max(
+  ...migrationManifest.map(([id]) => id),
+);
 
 /** Migrations the database records, read-only. A missing or new database records none; one that
  * exists but cannot be read is null, since its history is unknown. */
@@ -25,7 +27,9 @@ export function recordedMigrations(
       .get();
     if (hasTable === undefined) return [];
     return db
-      .prepare("SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id")
+      .prepare(
+        "SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id",
+      )
       .all()
       .map((row) => ({ id: Number(row.migration_id), name: String(row.name) }));
   } catch {
@@ -41,7 +45,9 @@ export function recordedMigrations(
 
 /** Highest migration the database holds once this build's startup migrations have run. A newer
  * build may have recorded more than this build knows. Undefined when the database is unreadable. */
-export function databaseMigrationHead(databasePath: string): number | undefined {
+export function databaseMigrationHead(
+  databasePath: string,
+): number | undefined {
   const recorded = recordedMigrations(databasePath);
   return recorded === null
     ? undefined

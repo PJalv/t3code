@@ -89,9 +89,13 @@ export class DiskSpaceCheckError extends Schema.TaggedError<DiskSpaceCheckError>
   }
 }
 
-type LegacyOnlyRecords = { readonly projects: number; readonly threads: number };
+type LegacyOnlyRecords = {
+  readonly projects: number;
+  readonly threads: number;
+};
 
-export type DatabaseCompactStep = "prune-events" | "vacuum" | "rebuild-search" | "checkpoint";
+export type DatabaseCompactStep =
+  "prune-events" | "vacuum" | "rebuild-search" | "checkpoint";
 
 export class DatabaseMaintenance extends Context.Service<
   DatabaseMaintenance,
@@ -128,17 +132,23 @@ export class DatabaseMaintenance extends Context.Service<
       databasePath: string,
     ) => Effect.Effect<
       void,
-      DatabaseInUseError | LegacyDatabaseRemoveError | LegacyDatabaseHasUnmigratedRecordsError
+      | DatabaseInUseError
+      | LegacyDatabaseRemoveError
+      | LegacyDatabaseHasUnmigratedRecordsError
     >;
   }
 >()("t3/persistence/DatabaseMaintenance") {}
 
-const isDomainError = Schema.is(Schema.Union([DatabaseMissingError, DatabaseInUseError]));
+const isDomainError = Schema.is(
+  Schema.Union([DatabaseMissingError, DatabaseInUseError]),
+);
 
 const readStorage = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const pages = yield* sql<{ readonly page_count: number }>`PRAGMA page_count`;
-  const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
+  const free = yield* sql<{
+    readonly freelist_count: number;
+  }>`PRAGMA freelist_count`;
   const size = yield* sql<{ readonly page_size: number }>`PRAGMA page_size`;
   const mode = yield* sql<{ readonly auto_vacuum: number }>`PRAGMA auto_vacuum`;
   const pageSize = size[0]?.page_size ?? 0;
@@ -154,21 +164,21 @@ const readStorage = Effect.gen(function* () {
  * refused while any other connection has the file open, even an idle one,
  * which is how a running server or desktop app is detected.
  */
-const lockExclusively = Effect.fn("DatabaseMaintenance.lockExclusively")(function* (
-  databasePath: string,
-) {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`PRAGMA busy_timeout = 0`;
-  yield* sql`PRAGMA main.locking_mode = EXCLUSIVE`;
-  yield* sql`BEGIN EXCLUSIVE`.pipe(
-    Effect.mapError((cause) =>
-      isSqlError(cause) && cause.reason._tag === "LockTimeoutError"
-        ? new DatabaseInUseError({ path: databasePath, cause })
-        : cause,
-    ),
-  );
-  yield* sql`COMMIT`;
-});
+const lockExclusively = Effect.fn("DatabaseMaintenance.lockExclusively")(
+  function* (databasePath: string) {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA busy_timeout = 0`;
+    yield* sql`PRAGMA main.locking_mode = EXCLUSIVE`;
+    yield* sql`BEGIN EXCLUSIVE`.pipe(
+      Effect.mapError((cause) =>
+        isSqlError(cause) && cause.reason._tag === "LockTimeoutError"
+          ? new DatabaseInUseError({ path: databasePath, cause })
+          : cause,
+      ),
+    );
+    yield* sql`COMMIT`;
+  },
+);
 
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -176,15 +186,17 @@ const make = Effect.gen(function* () {
   const legacyPath = (databasePath: string) =>
     path.join(path.dirname(databasePath), "state.sqlite");
 
-  const locate = Effect.fn("DatabaseMaintenance.locate")(function* (databasePath: string) {
+  const locate = Effect.fn("DatabaseMaintenance.locate")(function* (
+    databasePath: string,
+  ) {
     if (!(yield* fs.exists(databasePath))) {
       return yield* new DatabaseMissingError({ path: databasePath });
     }
   });
 
-  const readLegacyOnlyRecords = Effect.fn("DatabaseMaintenance.readLegacyOnlyRecords")(function* (
-    databasePath: string,
-  ) {
+  const readLegacyOnlyRecords = Effect.fn(
+    "DatabaseMaintenance.readLegacyOnlyRecords",
+  )(function* (databasePath: string) {
     const sql = yield* SqlClient.SqlClient;
     const currentUri = `${NodeURL.pathToFileURL(databasePath).href}?mode=ro`;
     yield* sql`ATTACH DATABASE ${currentUri} AS current_v2`;
@@ -201,7 +213,10 @@ const make = Effect.gen(function* () {
             WHERE current.thread_id = legacy.thread_id
           )) AS threads
     `;
-    if (!counts) return yield* Effect.die(new Error("Missing result from legacy database counts"));
+    if (!counts)
+      return yield* Effect.die(
+        new Error("Missing result from legacy database counts"),
+      );
     return counts;
   });
 
@@ -209,7 +224,9 @@ const make = Effect.gen(function* () {
     function* (databasePath: string) {
       yield* locate(databasePath);
       const storage = yield* readStorage.pipe(
-        Effect.provide(NodeSqliteClient.layer({ filename: databasePath, readonly: true })),
+        Effect.provide(
+          NodeSqliteClient.layer({ filename: databasePath, readonly: true }),
+        ),
       );
       const legacy = legacyPath(databasePath);
       const legacyDatabaseBytes = (yield* fs.exists(legacy))
@@ -219,7 +236,9 @@ const make = Effect.gen(function* () {
         legacyDatabaseBytes === null
           ? null
           : yield* readLegacyOnlyRecords(databasePath).pipe(
-              Effect.provide(NodeSqliteClient.layer({ filename: legacy, readonly: true })),
+              Effect.provide(
+                NodeSqliteClient.layer({ filename: legacy, readonly: true }),
+              ),
               Effect.orElseSucceed(() => null),
             );
       return { ...storage, legacyDatabaseBytes, legacyOnlyRecords };
@@ -227,7 +246,9 @@ const make = Effect.gen(function* () {
     (effect, databasePath) =>
       effect.pipe(
         Effect.mapError((cause) =>
-          isDomainError(cause) ? cause : new DatabaseInspectError({ path: databasePath, cause }),
+          isDomainError(cause)
+            ? cause
+            : new DatabaseInspectError({ path: databasePath, cause }),
         ),
       ),
   );
@@ -235,14 +256,16 @@ const make = Effect.gen(function* () {
   const compact = Effect.fn("DatabaseMaintenance.compact")(
     function* (
       databasePath: string,
-      onStep: (step: DatabaseCompactStep) => Effect.Effect<void> = () => Effect.void,
+      onStep: (step: DatabaseCompactStep) => Effect.Effect<void> = () =>
+        Effect.void,
     ) {
       yield* locate(databasePath);
       const beforeBytes = Number((yield* fs.stat(databasePath)).size);
       const result = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* lockExclusively(databasePath);
-        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const maintenance =
+          yield* ProjectionMaintenance.ProjectionMaintenanceV2;
         yield* onStep("prune-events");
         const summary = yield* maintenance.pruneEventStore();
         yield* onStep("vacuum");
@@ -257,7 +280,9 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.provide(
           ProjectionMaintenance.layer.pipe(
-            Layer.provideMerge(NodeSqliteClient.layer({ filename: databasePath })),
+            Layer.provideMerge(
+              NodeSqliteClient.layer({ filename: databasePath }),
+            ),
           ),
         ),
       );
@@ -272,12 +297,16 @@ const make = Effect.gen(function* () {
     (effect, databasePath) =>
       effect.pipe(
         Effect.mapError((cause) =>
-          isDomainError(cause) ? cause : new DatabaseCompactError({ path: databasePath, cause }),
+          isDomainError(cause)
+            ? cause
+            : new DatabaseCompactError({ path: databasePath, cause }),
         ),
       ),
   );
 
-  const removeLegacyDatabase = Effect.fn("DatabaseMaintenance.removeLegacyDatabase")(
+  const removeLegacyDatabase = Effect.fn(
+    "DatabaseMaintenance.removeLegacyDatabase",
+  )(
     function* (databasePath: string) {
       const legacy = legacyPath(databasePath);
       if (!(yield* fs.exists(legacy))) return;
@@ -301,7 +330,10 @@ const make = Effect.gen(function* () {
         yield* check.pipe(Effect.provide(connection));
         yield* removeFiles;
       } else {
-        yield* check.pipe(Effect.andThen(removeFiles), Effect.provide(connection));
+        yield* check.pipe(
+          Effect.andThen(removeFiles),
+          Effect.provide(connection),
+        );
       }
     },
     (effect, databasePath) =>
@@ -310,7 +342,10 @@ const make = Effect.gen(function* () {
           cause._tag === "DatabaseInUseError" ||
           cause._tag === "LegacyDatabaseHasUnmigratedRecordsError"
             ? cause
-            : new LegacyDatabaseRemoveError({ path: legacyPath(databasePath), cause }),
+            : new LegacyDatabaseRemoveError({
+                path: legacyPath(databasePath),
+                cause,
+              }),
         ),
       ),
   );
@@ -327,14 +362,18 @@ export const reclaimFiles = (path: Path.Path, databasePath: string) => ({
 });
 
 /** Runs a repair that Settings requested. The server calls this on exit, once its database is closed. */
-export const runRequestedReclaim = Effect.fn("DatabaseMaintenance.runRequestedReclaim")(
+export const runRequestedReclaim = Effect.fn(
+  "DatabaseMaintenance.runRequestedReclaim",
+)(
   function* (databasePath: string) {
     const fs = yield* FileSystem.FileSystem;
     const files = reclaimFiles(yield* Path.Path, databasePath);
     if (!(yield* fs.exists(files.request))) return;
     // One attempt per request, so a repair killed midway (it rolls back) cannot delay later exits.
     yield* fs.remove(files.request, { force: true });
-    yield* Effect.logInfo("Reclaiming database space before the restart. This can take minutes.");
+    yield* Effect.logInfo(
+      "Reclaiming database space before the restart. This can take minutes.",
+    );
     const maintenance = yield* DatabaseMaintenance;
     yield* maintenance.compact(databasePath).pipe(
       // Worker threads and agent processes can hold the file for a moment after the server stops.
@@ -347,7 +386,11 @@ export const runRequestedReclaim = Effect.fn("DatabaseMaintenance.runRequestedRe
         onSuccess: (result) =>
           fs
             .remove(files.failure, { force: true })
-            .pipe(Effect.andThen(Effect.logInfo("Reclaimed database space", result))),
+            .pipe(
+              Effect.andThen(
+                Effect.logInfo("Reclaimed database space", result),
+              ),
+            ),
         onFailure: (error) =>
           fs
             .writeFileString(
@@ -357,12 +400,18 @@ export const runRequestedReclaim = Effect.fn("DatabaseMaintenance.runRequestedRe
                 : error.message,
             )
             .pipe(
-              Effect.andThen(Effect.logWarning("Database space reclamation failed", { error })),
+              Effect.andThen(
+                Effect.logWarning("Database space reclamation failed", {
+                  error,
+                }),
+              ),
             ),
       }),
     );
   },
-  Effect.catchCause((cause) => Effect.logWarning("Database space reclamation failed", { cause })),
+  Effect.catchCause((cause) =>
+    Effect.logWarning("Database space reclamation failed", { cause }),
+  ),
 );
 
 // SQLite's search order for its temporary files (unixTempFileDir in os_unix.c).
@@ -370,13 +419,23 @@ const sqliteTempDirectory = Effect.gen(function* () {
   if ((yield* HostProcess.Platform) === "win32") return NodeOS.tmpdir();
   const fs = yield* FileSystem.FileSystem;
   const env = yield* HostProcess.Environment;
-  for (const directory of [env.SQLITE_TMPDIR, env.TMPDIR, "/var/tmp", "/usr/tmp", "/tmp"]) {
+  for (const directory of [
+    env.SQLITE_TMPDIR,
+    env.TMPDIR,
+    "/var/tmp",
+    "/usr/tmp",
+    "/tmp",
+  ]) {
     if (directory === undefined || directory === "") continue;
     const info = yield* fs.stat(directory).pipe(Effect.option);
     if (Option.isNone(info) || info.value.type !== "Directory") continue;
     // SQLite skips directories it cannot write to and search: osAccess(zDir, 03).
     const usable = yield* Effect.tryPromise({
-      try: () => NodeFSP.access(directory, NodeFSP.constants.W_OK | NodeFSP.constants.X_OK),
+      try: () =>
+        NodeFSP.access(
+          directory,
+          NodeFSP.constants.W_OK | NodeFSP.constants.X_OK,
+        ),
       catch: (cause) => new DiskSpaceCheckError({ path: directory, cause }),
     }).pipe(
       Effect.as(true),
@@ -397,25 +456,29 @@ const freeBytes = (directory: string) =>
  * VACUUM copies the live pages to a temporary file, then writes them again to the WAL.
  * Returns the free space the repair needs when either file system has less, else null.
  */
-export const reclaimSpaceShortfall = Effect.fn("DatabaseMaintenance.reclaimSpaceShortfall")(
-  function* (databasePath: string, liveBytes: number) {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const databaseDirectory = path.dirname(databasePath);
-    const tempDirectory = yield* sqliteTempDirectory;
-    const copyBytes = Math.ceil(liveBytes * 1.1);
-    const [databaseFree, tempFree, databaseDevice, tempDevice] = yield* Effect.all([
+export const reclaimSpaceShortfall = Effect.fn(
+  "DatabaseMaintenance.reclaimSpaceShortfall",
+)(function* (databasePath: string, liveBytes: number) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const databaseDirectory = path.dirname(databasePath);
+  const tempDirectory = yield* sqliteTempDirectory;
+  const copyBytes = Math.ceil(liveBytes * 1.1);
+  const [databaseFree, tempFree, databaseDevice, tempDevice] =
+    yield* Effect.all([
       freeBytes(databaseDirectory),
       freeBytes(tempDirectory),
       fs.stat(databaseDirectory).pipe(Effect.map((info) => info.dev)),
       fs.stat(tempDirectory).pipe(Effect.map((info) => info.dev)),
     ]);
-    if (databaseDevice === tempDevice) {
-      return databaseFree < 2 * copyBytes
-        ? { neededBytes: 2 * copyBytes, freeBytes: databaseFree }
-        : null;
-    }
-    if (databaseFree < copyBytes) return { neededBytes: copyBytes, freeBytes: databaseFree };
-    return tempFree < copyBytes ? { neededBytes: copyBytes, freeBytes: tempFree } : null;
-  },
-);
+  if (databaseDevice === tempDevice) {
+    return databaseFree < 2 * copyBytes
+      ? { neededBytes: 2 * copyBytes, freeBytes: databaseFree }
+      : null;
+  }
+  if (databaseFree < copyBytes)
+    return { neededBytes: copyBytes, freeBytes: databaseFree };
+  return tempFree < copyBytes
+    ? { neededBytes: copyBytes, freeBytes: tempFree }
+    : null;
+});

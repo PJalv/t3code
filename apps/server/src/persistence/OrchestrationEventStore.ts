@@ -38,11 +38,12 @@ import {
 export const EVENT_LOG_PRUNED_THROUGH = "event-log-pruned-through";
 export const EVENT_LOG_PRUNE_MARK = "event-log-prune-mark";
 
-export type UnsequencedProjectEvent = ApplicationProjectEvent extends infer Event
-  ? Event extends ApplicationProjectEvent
-    ? Omit<Event, "sequence">
-    : never
-  : never;
+export type UnsequencedProjectEvent =
+  ApplicationProjectEvent extends infer Event
+    ? Event extends ApplicationProjectEvent
+      ? Omit<Event, "sequence">
+      : never
+    : never;
 
 export class OrchestrationEventStore extends Context.Service<
   OrchestrationEventStore,
@@ -54,7 +55,10 @@ export class OrchestrationEventStore extends Context.Service<
     readonly appendAgentEvents: (input: {
       readonly commandId?: CommandId;
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
-    }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, OrchestrationEventStoreError>;
+    }) => Effect.Effect<
+      ReadonlyArray<OrchestrationV2StoredEvent>,
+      OrchestrationEventStoreError
+    >;
 
     /** Unknown event types fail unless skipUnknownEventTypes logs and drops them; only client replay may opt in. */
     readonly readAgentEvents: (input?: {
@@ -65,7 +69,10 @@ export class OrchestrationEventStore extends Context.Service<
       readonly eventType?: OrchestrationV2DomainEvent["type"];
       readonly limit?: number;
       readonly skipUnknownEventTypes?: boolean;
-    }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestrationEventStoreError>;
+    }) => Stream.Stream<
+      OrchestrationV2StoredEvent,
+      OrchestrationEventStoreError
+    >;
 
     readonly getAgentReplayStats: (input: {
       readonly threadId: ThreadId;
@@ -96,10 +103,16 @@ export class OrchestrationEventStore extends Context.Service<
       threadId?: ThreadId,
     ) => Effect.Effect<number, OrchestrationEventStoreError>;
 
-    readonly latestApplicationSequence: Effect.Effect<number, OrchestrationEventStoreError>;
+    readonly latestApplicationSequence: Effect.Effect<
+      number,
+      OrchestrationEventStoreError
+    >;
 
     /** Replay from a cursor below this misses pruned events; resync from a snapshot instead. */
-    readonly prunedThroughSequence: Effect.Effect<number, OrchestrationEventStoreError>;
+    readonly prunedThroughSequence: Effect.Effect<
+      number,
+      OrchestrationEventStoreError
+    >;
 
     /** Unknown event types fail unless skipUnknownEventTypes logs and drops them; only client replay may opt in. */
     readonly readApplicationEvents: (input: {
@@ -116,7 +129,9 @@ export class OrchestrationEventStore extends Context.Service<
     readonly streamApplicationEvents: (input?: {
       readonly afterSequence?: number;
     }) => Stream.Stream<ApplicationStoredEvent, OrchestrationEventStoreError>;
-    readonly streamProjectedApplicationEvents: <A extends { readonly sequence: number }>(input: {
+    readonly streamProjectedApplicationEvents: <
+      A extends { readonly sequence: number },
+    >(input: {
       readonly afterSequence?: number;
       readonly project: (event: ApplicationStoredEvent) => A;
       readonly filter?: (event: ApplicationStoredEvent) => boolean;
@@ -127,7 +142,9 @@ export class OrchestrationEventStore extends Context.Service<
 const encodeProjectIcon = Schema.encodeSync(StoredProjectIcon);
 const decodeProjectEvent = Schema.decodeUnknownEffect(ApplicationProjectEvent);
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
-const EventMetadataFromJsonString = Schema.fromJsonString(ApplicationEventMetadata);
+const EventMetadataFromJsonString = Schema.fromJsonString(
+  ApplicationEventMetadata,
+);
 const ProjectEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
@@ -179,14 +196,22 @@ interface ApplicationEventRow {
   readonly correlation_id: string | null;
 }
 
-const decodeV2EventJson = Schema.decodeUnknownEffect(OrchestrationV2DomainEventJson);
+const decodeV2EventJson = Schema.decodeUnknownEffect(
+  OrchestrationV2DomainEventJson,
+);
 const encodeV2EventJson = Schema.encodeEffect(OrchestrationV2DomainEventJson);
-const decodeV2StoredEvent = Schema.decodeUnknownEffect(OrchestrationV2StoredEvent);
+const decodeV2StoredEvent = Schema.decodeUnknownEffect(
+  OrchestrationV2StoredEvent,
+);
 // decodeV2EventJson already validated the event; decoding it again here is the hot cost in replay.
 const decodeV2StoredEventHeader = Schema.decodeUnknownEffect(
-  OrchestrationV2StoredEvent.mapFields(({ event: _event, ...fields }) => fields),
+  OrchestrationV2StoredEvent.mapFields(
+    ({ event: _event, ...fields }) => fields,
+  ),
 );
-const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 // Same result as decodeJson; only malformed input pays for the schema's error.
 const parseJson = (json: string) => {
@@ -198,7 +223,9 @@ const parseJson = (json: string) => {
   }
 };
 
-function metadataForV2Event(event: OrchestrationV2DomainEvent): Record<string, unknown> {
+function metadataForV2Event(
+  event: OrchestrationV2DomainEvent,
+): Record<string, unknown> {
   return {
     ...(event.runId === undefined ? {} : { runId: event.runId }),
     ...(event.nodeId === undefined ? {} : { nodeId: event.nodeId }),
@@ -211,11 +238,15 @@ function metadataForV2Event(event: OrchestrationV2DomainEvent): Record<string, u
 }
 
 // Replay decodes rows one by one; a span per row would trace every replayed event.
-const rowToV2StoredEvent = Effect.fnUntraced(function* (row: ApplicationEventRow) {
+const rowToV2StoredEvent = Effect.fnUntraced(function* (
+  row: ApplicationEventRow,
+) {
   const payload = yield* parseJson(row.payload_json);
   const metadata = yield* parseJson(row.metadata_json);
   const values =
-    typeof metadata === "object" && metadata !== null ? (metadata as Record<string, unknown>) : {};
+    typeof metadata === "object" && metadata !== null
+      ? (metadata as Record<string, unknown>)
+      : {};
   const event = yield* decodeV2EventJson({
     id: row.event_id,
     threadId: row.stream_id,
@@ -228,7 +259,9 @@ const rowToV2StoredEvent = Effect.fnUntraced(function* (row: ApplicationEventRow
     ...(values.providerInstanceId === undefined
       ? {}
       : { providerInstanceId: values.providerInstanceId }),
-    ...(values.rawEventId === undefined ? {} : { rawEventId: values.rawEventId }),
+    ...(values.rawEventId === undefined
+      ? {}
+      : { rawEventId: values.rawEventId }),
   });
   const { sequence, commandId } = yield* decodeV2StoredEventHeader({
     sequence: row.sequence,
@@ -237,7 +270,9 @@ const rowToV2StoredEvent = Effect.fnUntraced(function* (row: ApplicationEventRow
   return { sequence, commandId, event };
 });
 
-const rowToProjectEvent = Effect.fnUntraced(function* (row: ApplicationEventRow) {
+const rowToProjectEvent = Effect.fnUntraced(function* (
+  row: ApplicationEventRow,
+) {
   return yield* decodeProjectEvent({
     sequence: row.sequence,
     eventId: row.event_id,
@@ -256,7 +291,9 @@ const rowToProjectEvent = Effect.fnUntraced(function* (row: ApplicationEventRow)
 function rowToApplicationStoredEvent(
   row: ApplicationEventRow,
 ): Effect.Effect<ApplicationStoredEvent, Schema.SchemaError> {
-  return row.aggregate_kind === "project" ? rowToProjectEvent(row) : rowToV2StoredEvent(row);
+  return row.aggregate_kind === "project"
+    ? rowToProjectEvent(row)
+    : rowToV2StoredEvent(row);
 }
 
 const isKnownProjectEventType = Schema.is(ProjectEventType);
@@ -268,11 +305,14 @@ const keepKnownEventTypeRow = (row: ApplicationEventRow) =>
       : isKnownOrchestrationV2EventType(row.event_type)
   )
     ? Effect.succeed(true)
-    : Effect.logWarning("Skipping an application event row with an unknown event type", {
-        aggregateKind: row.aggregate_kind,
-        sequence: row.sequence,
-        eventTypeLength: row.event_type.length,
-      }).pipe(Effect.as(false));
+    : Effect.logWarning(
+        "Skipping an application event row with an unknown event type",
+        {
+          aggregateKind: row.aggregate_kind,
+          sequence: row.sequence,
+          eventTypeLength: row.event_type.length,
+        },
+      ).pipe(Effect.as(false));
 
 function inferActorKind(event: UnsequencedProjectEvent): typeof ActorKind.Type {
   if (event.commandId !== null && event.commandId.startsWith("provider:")) {
@@ -294,7 +334,10 @@ function inferActorKind(event: UnsequencedProjectEvent): typeof ActorKind.Type {
   return "client";
 }
 
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
+function toPersistenceSqlOrDecodeError(
+  sqlOperation: string,
+  decodeOperation: string,
+) {
   return (cause: unknown): OrchestrationEventStoreError =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
@@ -378,30 +421,34 @@ const makeEventStore = Effect.gen(function* () {
       `,
   });
 
-  const appendProjectEvent: OrchestrationEventStore["Service"]["appendProjectEvent"] = (event) =>
-    appendProjectEventRow({
-      eventId: event.eventId,
-      streamId: event.aggregateId,
-      type: event.type,
-      causationEventId: event.causationEventId,
-      correlationId: event.correlationId,
-      actorKind: inferActorKind(event),
-      occurredAt: event.occurredAt,
-      commandId: event.commandId,
-      payloadJson:
-        event.type === "project.deleted" || !event.payload.projectIcon
-          ? event.payload
-          : { ...event.payload, projectIcon: encodeProjectIcon(event.payload.projectIcon) },
-      metadataJson: event.metadata,
-    }).pipe(
-      Effect.flatMap((row) => decodeProjectEvent(row)),
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "OrchestrationEventStore.appendProjectEvent:insert",
-          "OrchestrationEventStore.appendProjectEvent:decode",
+  const appendProjectEvent: OrchestrationEventStore["Service"]["appendProjectEvent"] =
+    (event) =>
+      appendProjectEventRow({
+        eventId: event.eventId,
+        streamId: event.aggregateId,
+        type: event.type,
+        causationEventId: event.causationEventId,
+        correlationId: event.correlationId,
+        actorKind: inferActorKind(event),
+        occurredAt: event.occurredAt,
+        commandId: event.commandId,
+        payloadJson:
+          event.type === "project.deleted" || !event.payload.projectIcon
+            ? event.payload
+            : {
+                ...event.payload,
+                projectIcon: encodeProjectIcon(event.payload.projectIcon),
+              },
+        metadataJson: event.metadata,
+      }).pipe(
+        Effect.flatMap((row) => decodeProjectEvent(row)),
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "OrchestrationEventStore.appendProjectEvent:insert",
+            "OrchestrationEventStore.appendProjectEvent:decode",
+          ),
         ),
-      ),
-    );
+      );
 
   const readApplicationRows = (input: {
     readonly afterSequence: number;
@@ -446,44 +493,56 @@ const makeEventStore = Effect.gen(function* () {
           }
         )
         AND ${sql.and([
-          ...(input.threadId === undefined ? [] : [sql`stream_id = ${input.threadId}`]),
-          ...(input.commandId === undefined ? [] : [sql`command_id = ${input.commandId}`]),
-          ...(input.eventType === undefined ? [] : [sql`event_type = ${input.eventType}`]),
+          ...(input.threadId === undefined
+            ? []
+            : [sql`stream_id = ${input.threadId}`]),
+          ...(input.commandId === undefined
+            ? []
+            : [sql`command_id = ${input.commandId}`]),
+          ...(input.eventType === undefined
+            ? []
+            : [sql`event_type = ${input.eventType}`]),
         ])}
       ORDER BY sequence ASC
       LIMIT ${input.limit}
     `.pipe(NodeSqliteClient.readOnly);
 
-  const appendAgentEvents: OrchestrationEventStore["Service"]["appendAgentEvents"] = (input) =>
-    Effect.forEach(
-      input.events,
-      (event) =>
-        Effect.gen(function* () {
-          const encoded = yield* encodeV2EventJson(event);
-          const subagent =
-            encoded.type === "subagent.updated"
-              ? encoded.payload
-              : encoded.type === "turn-item.updated" && encoded.payload.type === "subagent"
+  const appendAgentEvents: OrchestrationEventStore["Service"]["appendAgentEvents"] =
+    (input) =>
+      Effect.forEach(
+        input.events,
+        (event) =>
+          Effect.gen(function* () {
+            const encoded = yield* encodeV2EventJson(event);
+            const subagent =
+              encoded.type === "subagent.updated"
                 ? encoded.payload
-                : undefined;
-          const promptKey = subagent === undefined ? undefined : `${event.type}:${subagent.id}`;
-          const hint = promptKey === undefined ? undefined : promptHints.get(promptKey);
-          const payloadJson = yield* encodeJson(encoded.payload);
-          // Deduplicate repeated progress prompts via anchor rows; pruning keeps anchors that retained rows reference.
-          const storedPayload =
-            hint !== undefined && subagent !== undefined
-              ? sql`CASE WHEN EXISTS (
+                : encoded.type === "turn-item.updated" &&
+                    encoded.payload.type === "subagent"
+                  ? encoded.payload
+                  : undefined;
+            const promptKey =
+              subagent === undefined
+                ? undefined
+                : `${event.type}:${subagent.id}`;
+            const hint =
+              promptKey === undefined ? undefined : promptHints.get(promptKey);
+            const payloadJson = yield* encodeJson(encoded.payload);
+            // Deduplicate repeated progress prompts via anchor rows; pruning keeps anchors that retained rows reference.
+            const storedPayload =
+              hint !== undefined && subagent !== undefined
+                ? sql`CASE WHEN EXISTS (
                   SELECT 1 FROM orchestration_events
                   WHERE sequence = ${hint}
                     AND json_type(payload_json, '$.promptSequence') IS NULL
                     AND json_extract(payload_json, '$.prompt') = ${subagent.prompt}
                 ) THEN json_set(${payloadJson}, '$.prompt', '', '$.promptSequence', CAST(${hint} AS INTEGER))
                 ELSE ${payloadJson} END`
-              : sql`${payloadJson}`;
-          const rows = yield* sql<{
-            readonly sequence: number;
-            readonly stores_full_prompt?: number;
-          }>`
+                : sql`${payloadJson}`;
+            const rows = yield* sql<{
+              readonly sequence: number;
+              readonly stores_full_prompt?: number;
+            }>`
             INSERT INTO orchestration_events (
               event_id,
               aggregate_kind,
@@ -527,92 +586,116 @@ const makeEventStore = Effect.gen(function* () {
                 : sql`, json_type(payload_json, '$.promptSequence') IS NULL AS stores_full_prompt`
             }
           `;
-          const row = rows[0];
-          if (promptKey !== undefined && row !== undefined) {
-            promptHints.delete(promptKey);
-            promptHints.set(
-              promptKey,
-              hint === undefined || row.stores_full_prompt === 1 ? row.sequence : hint,
-            );
-            if (promptHints.size > 4096) {
-              const oldest = promptHints.keys().next().value;
-              if (oldest !== undefined) promptHints.delete(oldest);
+            const row = rows[0];
+            if (promptKey !== undefined && row !== undefined) {
+              promptHints.delete(promptKey);
+              promptHints.set(
+                promptKey,
+                hint === undefined || row.stores_full_prompt === 1
+                  ? row.sequence
+                  : hint,
+              );
+              if (promptHints.size > 4096) {
+                const oldest = promptHints.keys().next().value;
+                if (oldest !== undefined) promptHints.delete(oldest);
+              }
             }
-          }
-          return yield* decodeV2StoredEvent({
-            sequence: rows[0]?.sequence,
-            commandId: input.commandId ?? null,
-            event,
-          });
-        }),
-      { concurrency: 1 },
-    ).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "OrchestrationEventStore.appendAgentEvents:insert",
-          "OrchestrationEventStore.appendAgentEvents:decode",
-        ),
-      ),
-    );
-
-  const readAgentEvents: OrchestrationEventStore["Service"]["readAgentEvents"] = (input) => {
-    const totalLimit =
-      input?.limit === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.floor(input.limit));
-    if (totalLimit === 0) {
-      return Stream.empty;
-    }
-    return Stream.paginate(
-      { cursor: input?.afterSequence ?? 0, remaining: totalLimit },
-      ({ cursor, remaining }) => {
-        const pageLimit = Math.min(remaining, READ_PAGE_SIZE);
-        return readApplicationRows({
-          afterSequence: cursor,
-          ...(input?.throughSequence === undefined
-            ? {}
-            : { throughSequence: input.throughSequence }),
-          ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
-          ...(input?.commandId === undefined ? {} : { commandId: input.commandId }),
-          ...(input?.eventType === undefined ? {} : { eventType: input.eventType }),
-          onlyAgentEvents: true,
-          limit: pageLimit,
-        }).pipe(
-          Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.readAgentEvents:query")),
-          Effect.map((rows) => {
-            const last = rows.at(-1);
-            const nextRemaining = remaining - rows.length;
-            return [
-              rows,
-              last === undefined ||
-              rows.length < pageLimit ||
-              nextRemaining <= 0 ||
-              (input?.throughSequence !== undefined && last.sequence >= input.throughSequence)
-                ? Option.none()
-                : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
-            ] as const;
+            return yield* decodeV2StoredEvent({
+              sequence: rows[0]?.sequence,
+              commandId: input.commandId ?? null,
+              event,
+            });
           }),
-        );
-      },
-    ).pipe(
-      // Query the next page on the reader while this one decodes.
-      Stream.bufferArray({ capacity: 1 }),
-      input?.skipUnknownEventTypes === true ? Stream.filterEffect(keepKnownEventTypeRow) : identity,
-      Stream.mapEffect((row) =>
-        rowToV2StoredEvent(row).pipe(
-          Effect.mapError(
-            toPersistenceDecodeError("OrchestrationEventStore.readAgentEvents:decode"),
+        { concurrency: 1 },
+      ).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "OrchestrationEventStore.appendAgentEvents:insert",
+            "OrchestrationEventStore.appendAgentEvents:decode",
           ),
         ),
-      ),
-      Stream.withSpan("OrchestrationEventStore.readAgentEvents"),
-    );
-  };
+      );
 
-  const getAgentReplayStats: OrchestrationEventStore["Service"]["getAgentReplayStats"] = (input) =>
-    sql<{
-      readonly eventCount: number;
-      readonly rawPayloadBytes: number;
-      readonly hasCreateEvent: number;
-    }>`
+  const readAgentEvents: OrchestrationEventStore["Service"]["readAgentEvents"] =
+    (input) => {
+      const totalLimit =
+        input?.limit === undefined
+          ? Number.MAX_SAFE_INTEGER
+          : Math.max(0, Math.floor(input.limit));
+      if (totalLimit === 0) {
+        return Stream.empty;
+      }
+      return Stream.paginate(
+        { cursor: input?.afterSequence ?? 0, remaining: totalLimit },
+        ({ cursor, remaining }) => {
+          const pageLimit = Math.min(remaining, READ_PAGE_SIZE);
+          return readApplicationRows({
+            afterSequence: cursor,
+            ...(input?.throughSequence === undefined
+              ? {}
+              : { throughSequence: input.throughSequence }),
+            ...(input?.threadId === undefined
+              ? {}
+              : { threadId: input.threadId }),
+            ...(input?.commandId === undefined
+              ? {}
+              : { commandId: input.commandId }),
+            ...(input?.eventType === undefined
+              ? {}
+              : { eventType: input.eventType }),
+            onlyAgentEvents: true,
+            limit: pageLimit,
+          }).pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                "OrchestrationEventStore.readAgentEvents:query",
+              ),
+            ),
+            Effect.map((rows) => {
+              const last = rows.at(-1);
+              const nextRemaining = remaining - rows.length;
+              return [
+                rows,
+                last === undefined ||
+                rows.length < pageLimit ||
+                nextRemaining <= 0 ||
+                (input?.throughSequence !== undefined &&
+                  last.sequence >= input.throughSequence)
+                  ? Option.none()
+                  : Option.some({
+                      cursor: last.sequence,
+                      remaining: nextRemaining,
+                    }),
+              ] as const;
+            }),
+          );
+        },
+      ).pipe(
+        // Query the next page on the reader while this one decodes.
+        Stream.bufferArray({ capacity: 1 }),
+        input?.skipUnknownEventTypes === true
+          ? Stream.filterEffect(keepKnownEventTypeRow)
+          : identity,
+        Stream.mapEffect((row) =>
+          rowToV2StoredEvent(row).pipe(
+            Effect.mapError(
+              toPersistenceDecodeError(
+                "OrchestrationEventStore.readAgentEvents:decode",
+              ),
+            ),
+          ),
+        ),
+        Stream.withSpan("OrchestrationEventStore.readAgentEvents"),
+      );
+    };
+
+  const getAgentReplayStats: OrchestrationEventStore["Service"]["getAgentReplayStats"] =
+    (input) =>
+      sql<{
+        readonly eventCount: number;
+        readonly rawPayloadBytes: number;
+        readonly hasCreateEvent: number;
+      }>`
       SELECT
         COUNT(*) AS "eventCount",
         COALESCE(SUM(octet_length(payload_json)), 0) AS "rawPayloadBytes",
@@ -629,16 +712,22 @@ const makeEventStore = Effect.gen(function* () {
         LIMIT ${Math.max(0, Math.floor(input.maxEvents)) + 1}
       )
     `.pipe(
-      NodeSqliteClient.readOnly,
-      Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.getAgentReplayStats:query")),
-      Effect.map((rows) => ({
-        eventCount: rows[0]?.eventCount ?? 0,
-        rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
-        hasCreateEvent: (rows[0]?.hasCreateEvent ?? 0) !== 0,
-      })),
-    );
+        NodeSqliteClient.readOnly,
+        Effect.mapError(
+          toPersistenceSqlError(
+            "OrchestrationEventStore.getAgentReplayStats:query",
+          ),
+        ),
+        Effect.map((rows) => ({
+          eventCount: rows[0]?.eventCount ?? 0,
+          rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
+          hasCreateEvent: (rows[0]?.hasCreateEvent ?? 0) !== 0,
+        })),
+      );
 
-  const getReplayStats: OrchestrationEventStore["Service"]["getReplayStats"] = (input) =>
+  const getReplayStats: OrchestrationEventStore["Service"]["getReplayStats"] = (
+    input,
+  ) =>
     sql<{ readonly eventCount: number; readonly rawPayloadBytes: number }>`
       SELECT
         COUNT(*) AS "eventCount",
@@ -652,17 +741,18 @@ const makeEventStore = Effect.gen(function* () {
         )
     `.pipe(
       NodeSqliteClient.readOnly,
-      Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.getReplayStats:query")),
+      Effect.mapError(
+        toPersistenceSqlError("OrchestrationEventStore.getReplayStats:query"),
+      ),
       Effect.map((rows) => ({
         eventCount: rows[0]?.eventCount ?? 0,
         rawPayloadBytes: rows[0]?.rawPayloadBytes ?? 0,
       })),
     );
 
-  const latestAgentSequence: OrchestrationEventStore["Service"]["latestAgentSequence"] = (
-    threadId,
-  ) =>
-    sql<{ readonly sequence: number | null }>`
+  const latestAgentSequence: OrchestrationEventStore["Service"]["latestAgentSequence"] =
+    (threadId) =>
+      sql<{ readonly sequence: number | null }>`
       SELECT MAX(sequence) AS sequence
       FROM orchestration_events
       ${
@@ -675,10 +765,14 @@ const makeEventStore = Effect.gen(function* () {
         AND aggregate_kind = 'thread'
         ${threadId === undefined ? sql`` : sql`AND stream_id = ${threadId}`}
     `.pipe(
-      NodeSqliteClient.readOnly,
-      Effect.map((rows) => rows[0]?.sequence ?? 0),
-      Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.latestAgentSequence:query")),
-    );
+        NodeSqliteClient.readOnly,
+        Effect.map((rows) => rows[0]?.sequence ?? 0),
+        Effect.mapError(
+          toPersistenceSqlError(
+            "OrchestrationEventStore.latestAgentSequence:query",
+          ),
+        ),
+      );
 
   // The OR planner otherwise scans every V2 event instead of seeking the final sequence.
   const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
@@ -690,7 +784,9 @@ const makeEventStore = Effect.gen(function* () {
     NodeSqliteClient.readOnly,
     Effect.map((rows) => rows[0]?.sequence ?? 0),
     Effect.mapError(
-      toPersistenceSqlError("OrchestrationEventStore.latestApplicationSequence:query"),
+      toPersistenceSqlError(
+        "OrchestrationEventStore.latestApplicationSequence:query",
+      ),
     ),
   );
 
@@ -700,7 +796,11 @@ const makeEventStore = Effect.gen(function* () {
   `.pipe(
     NodeSqliteClient.readOnly,
     Effect.map((rows) => rows[0]?.last_sequence ?? 0),
-    Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.prunedThroughSequence:query")),
+    Effect.mapError(
+      toPersistenceSqlError(
+        "OrchestrationEventStore.prunedThroughSequence:query",
+      ),
+    ),
   );
 
   // Advance over raw rows so even a full page of unknown types cannot end replay early.
@@ -716,7 +816,9 @@ const makeEventStore = Effect.gen(function* () {
         limit: READ_PAGE_SIZE,
       }).pipe(
         Effect.mapError(
-          toPersistenceSqlError("OrchestrationEventStore.readApplicationEvents:query"),
+          toPersistenceSqlError(
+            "OrchestrationEventStore.readApplicationEvents:query",
+          ),
         ),
         Effect.map((rows) => {
           const last = rows.at(-1);
@@ -733,11 +835,15 @@ const makeEventStore = Effect.gen(function* () {
     ).pipe(
       // Query the next page on the reader while this one decodes.
       Stream.bufferArray({ capacity: 1 }),
-      input.skipUnknownEventTypes === true ? Stream.filterEffect(keepKnownEventTypeRow) : identity,
+      input.skipUnknownEventTypes === true
+        ? Stream.filterEffect(keepKnownEventTypeRow)
+        : identity,
       Stream.mapEffect((row) =>
         rowToApplicationStoredEvent(row).pipe(
           Effect.mapError(
-            toPersistenceDecodeError("OrchestrationEventStore.readApplicationEvents:decode"),
+            toPersistenceDecodeError(
+              "OrchestrationEventStore.readApplicationEvents:decode",
+            ),
           ),
         ),
       ),
@@ -765,14 +871,16 @@ const makeEventStore = Effect.gen(function* () {
       }).pipe(
         Stream.catchTag("LiveStreamBufferError", (cause) =>
           Stream.fail(
-            toPersistenceSqlError("OrchestrationEventStore.streamApplicationEvents:buffer")(cause),
+            toPersistenceSqlError(
+              "OrchestrationEventStore.streamApplicationEvents:buffer",
+            )(cause),
           ),
         ),
       );
 
-  const streamApplicationEvents: OrchestrationEventStore["Service"]["streamApplicationEvents"] = (
-    input,
-  ) => streamProjectedApplicationEvents({ ...input, project: (event) => event });
+  const streamApplicationEvents: OrchestrationEventStore["Service"]["streamApplicationEvents"] =
+    (input) =>
+      streamProjectedApplicationEvents({ ...input, project: (event) => event });
 
   return {
     appendProjectEvent,
@@ -784,7 +892,8 @@ const makeEventStore = Effect.gen(function* () {
     latestApplicationSequence,
     prunedThroughSequence,
     readApplicationEvents: catchUpApplicationEvents,
-    publishCommitted: (events) => PubSub.publishAll(committedEvents, events).pipe(Effect.asVoid),
+    publishCommitted: (events) =>
+      PubSub.publishAll(committedEvents, events).pipe(Effect.asVoid),
     streamApplicationEvents,
     streamProjectedApplicationEvents,
   } satisfies OrchestrationEventStore["Service"];

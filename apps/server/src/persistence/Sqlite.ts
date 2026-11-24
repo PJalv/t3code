@@ -32,7 +32,10 @@ const isDamagedDatabase = (error: SqlError.SqlError): boolean => {
   let cause: unknown = error.cause;
   while (Predicate.isObject(cause) && !seen.has(cause)) {
     seen.add(cause);
-    if (typeof cause.errcode === "number" && DAMAGED_SQLITE_CODES.has(cause.errcode & 0xff)) {
+    if (
+      typeof cause.errcode === "number" &&
+      DAMAGED_SQLITE_CODES.has(cause.errcode & 0xff)
+    ) {
       return true;
     }
     cause = cause.cause;
@@ -51,7 +54,9 @@ const damagedDatabaseError = (dbPath: string, cause: SqlError.SqlError) =>
   });
 
 // CLI commands open the server's database from another process; migrating behind its owner changes the schema it runs on.
-const runMigrationsAsOwner = Effect.fn("SqlitePersistence.runMigrationsAsOwner")(function* () {
+const runMigrationsAsOwner = Effect.fn(
+  "SqlitePersistence.runMigrationsAsOwner",
+)(function* () {
   // With nothing pending, runMigrations only validates the recorded history and writes nothing.
   if (!(yield* hasPendingMigrations())) return yield* runMigrations();
   const { serverRuntimeStatePath } = yield* ServerConfig.ServerConfig;
@@ -90,7 +95,8 @@ const makeLayerSetup = <E, R>(migrate: Effect.Effect<unknown, E, R>) =>
       yield* migrate;
       // Collecting stats scans every page, and stale small-table stats cause scans after growth; use indexes by default.
       // Connections cache stats; reload after deleting them.
-      const statTables = yield* sql`SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'`;
+      const statTables =
+        yield* sql`SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'`;
       if (statTables.length > 0) {
         yield* sql`DELETE FROM sqlite_stat1;`;
         yield* sql`ANALYZE sqlite_schema;`;
@@ -100,7 +106,9 @@ const makeLayerSetup = <E, R>(migrate: Effect.Effect<unknown, E, R>) =>
 
 const layerSetup = makeLayerSetup(runMigrations());
 
-const makeLayerFromPath = <E, R>(makeSetup: (dbPath: string) => Layer.Layer<never, E, R>) =>
+const makeLayerFromPath = <E, R>(
+  makeSetup: (dbPath: string) => Layer.Layer<never, E, R>,
+) =>
   Effect.fn("makeSqlitePersistenceLive")(function* (dbPath: string) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
