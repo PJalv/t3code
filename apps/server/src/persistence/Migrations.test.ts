@@ -76,7 +76,7 @@ const schema = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect.each([97, 103])(
+  it.effect.each([97, 102, 103, 106, 111])(
     "replays upstream migrations over legacy Gerrit id %s without losing pending clones",
     (legacyId) =>
       Effect.gen(function* () {
@@ -105,6 +105,41 @@ describe("runMigrations", () => {
         assert.deepStrictEqual(yield* runMigrations(), []);
         assert.deepStrictEqual(yield* gerritData, beforeData);
       }).pipe(Effect.provide(temporaryDatabase)),
+  );
+
+  it.effect("keeps the legacy ledger when an unrelated collision rejects the upgrade", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* legacyGerritDatabase(103);
+      yield* sql`UPDATE effect_sql_migrations SET name = 'Unrelated' WHERE migration_id = 102`;
+      const beforeHistory = yield* history;
+      const beforeSchema = yield* schema;
+      const beforeData = yield* gerritData;
+      const exit = yield* Effect.exit(runMigrations());
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(String(exit), "102_ThreadItemCounts (recorded: Unrelated)");
+      assert.deepStrictEqual(yield* history, beforeHistory);
+      assert.deepStrictEqual(yield* schema, beforeSchema);
+      assert.deepStrictEqual(yield* gerritData, beforeData);
+    }).pipe(Effect.provide(temporaryDatabase)),
+  );
+
+  it.effect("resumes an upgrade stopped before the current Gerrit migration", () =>
+    Effect.gen(function* () {
+      yield* legacyGerritDatabase(103);
+      const beforeData = yield* gerritData;
+      const beforeHistory = yield* history;
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 102 }), []);
+      assert.deepStrictEqual(yield* history, beforeHistory);
+      assert.deepStrictEqual(
+        yield* runMigrations({ toMigrationInclusive: 111 }),
+        migrationManifest.filter(([id]) => id >= 103 && id <= 111),
+      );
+      assert.deepStrictEqual(yield* gerritData, beforeData);
+      assert.deepStrictEqual(yield* runMigrations(), [[112, "GerritPendingClones"]]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* gerritData, beforeData);
+    }).pipe(Effect.provide(temporaryDatabase)),
   );
 
   it.effect("adds pending clone recovery tables", () =>

@@ -122,6 +122,8 @@ import Migration0110 from "./Migrations/110_Workflows.ts";
 import Migration0111 from "./Migrations/111_SupersededRunAttemptIndex.ts";
 import Migration0112 from "./Migrations/112_GerritPendingClones.ts";
 
+const GERRIT_MIGRATION_ID = 112;
+
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -235,7 +237,7 @@ const migrationEntries = [
   [109, "IssueTrackerAccounts", Migration0109],
   [110, "Workflows", Migration0110],
   [111, "SupersededRunAttemptIndex", Migration0111],
-  [112, "GerritPendingClones", Migration0112],
+  [GERRIT_MIGRATION_ID, "GerritPendingClones", Migration0112],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -294,8 +296,6 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
   });
 });
 
-const GERRIT_MIGRATION_ID = 112;
-
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
 // Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
@@ -329,7 +329,13 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
-  if (hasPending) yield* reconcileGerritMigration(GERRIT_MIGRATION_ID);
+  if (hasPending) {
+    yield* reconcileGerritMigration(
+      GERRIT_MIGRATION_ID,
+      includesV2 ? assertV2MigrationsCanRun(toMigrationInclusive) : Effect.void,
+      toMigrationInclusive,
+    );
+  }
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
   const previewMigrations = includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {

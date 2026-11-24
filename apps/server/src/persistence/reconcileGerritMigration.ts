@@ -1,19 +1,34 @@
 import * as Effect from "effect/Effect";
+import type * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
-// Earlier fork builds recorded GerritPendingClones at ids upstream later took (97, 103, ...).
-// Dropping that row lets the migrator run upstream's ids; the idempotent current migration
-// then adopts the existing tables and their rows.
+// Remove only the fork's obsolete ledger entry so upstream's ids run before the idempotent adopt.
 export const reconcileGerritMigration = Effect.fn("reconcileGerritMigration")(function* (
   currentId: number,
+  validate: Effect.Effect<void, Migrator.MigrationError | SqlError, SqlClient.SqlClient>,
+  throughId?: number,
 ) {
   const sql = yield* SqlClient.SqlClient;
   const tables = yield* sql`
     SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'effect_sql_migrations'
   `;
   if (tables.length === 0) return;
-  yield* sql`
-    DELETE FROM effect_sql_migrations
+  const legacy = yield* sql`
+    SELECT migration_id FROM effect_sql_migrations
     WHERE name = 'GerritPendingClones' AND migration_id < ${currentId}
+      AND migration_id <= ${throughId ?? currentId}
   `;
+  if (legacy.length === 0) return;
+  // A rejected history must leave the ledger intact for the previous build.
+  yield* sql.withTransaction(
+    Effect.gen(function* () {
+      yield* sql`
+        DELETE FROM effect_sql_migrations
+        WHERE name = 'GerritPendingClones' AND migration_id < ${currentId}
+          AND migration_id <= ${throughId ?? currentId}
+      `;
+      yield* validate;
+    }),
+  );
 });
