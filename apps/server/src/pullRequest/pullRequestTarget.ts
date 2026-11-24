@@ -119,13 +119,13 @@ export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(func
   // Azure DevOps tools name the project's repository by its bare name, which no URL can be built
   // from, so it is read as the project's full repository path.
   const own =
-    project?.repositoryIdentity == null || input.repository.includes("/")
+    project?.repositoryIdentity == null || inputRepository.includes("/")
       ? null
       : pullRequestSyncKey(
           {
             projectId: project.id,
             host: input.host,
-            repository: input.repository,
+            repository: inputRepository,
             number: input.number,
           },
           project.repositoryIdentity,
