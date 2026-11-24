@@ -319,10 +319,12 @@ it("closes the side chat's find for Escape in its find input and elsewhere in it
 
   expect(findCloses).toEqual(["side", "side"]);
   expect(sheetEscapes).toEqual([]);
+});
+
 function ChatWithDevice(props: { ran: string[] }) {
   useChatShortcuts({
     enabled: true,
-    keybindings: [ctrlShift("x", "thread.stop")],
+    keybindings: [ctrl("x", "thread.stop", true)],
     scriptKeybindings: [],
     getShortcutContext: () => shortcutContext,
     threadFindActive: false,
