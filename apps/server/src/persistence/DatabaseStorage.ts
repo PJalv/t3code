@@ -1,4 +1,7 @@
-import { DatabaseReclaimError, type DatabaseStorageStatus } from "@t3tools/contracts";
+import {
+  DatabaseReclaimError,
+  type DatabaseStorageStatus,
+} from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -49,7 +52,9 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const statusRef = yield* SubscriptionRef.make<DatabaseStorageStatus | null>(null);
+  const statusRef = yield* SubscriptionRef.make<DatabaseStorageStatus | null>(
+    null,
+  );
   const restart = yield* ServerRestart;
   const reclaimFiles = DatabaseMaintenance.reclaimFiles(path, config.dbPath);
   let reclaimFailure = Option.getOrUndefined(
@@ -77,8 +82,12 @@ const make = Effect.gen(function* () {
     layout !== undefined
       ? Effect.succeed(layout)
       : Effect.gen(function* () {
-          const size = yield* sql<{ readonly page_size: number }>`PRAGMA page_size`;
-          const mode = yield* sql<{ readonly auto_vacuum: number }>`PRAGMA auto_vacuum`;
+          const size = yield* sql<{
+            readonly page_size: number;
+          }>`PRAGMA page_size`;
+          const mode = yield* sql<{
+            readonly auto_vacuum: number;
+          }>`PRAGMA auto_vacuum`;
           const autoVacuum = mode[0]?.auto_vacuum ?? 0;
           layout = {
             pageSize: size[0]?.page_size ?? 0,
@@ -90,8 +99,12 @@ const make = Effect.gen(function* () {
   );
   const readPages = Effect.gen(function* () {
     const { pageSize, incrementalVacuum } = yield* readLayout;
-    const pages = yield* sql<{ readonly page_count: number }>`PRAGMA page_count`;
-    const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
+    const pages = yield* sql<{
+      readonly page_count: number;
+    }>`PRAGMA page_count`;
+    const free = yield* sql<{
+      readonly freelist_count: number;
+    }>`PRAGMA freelist_count`;
     return {
       databaseBytes: (pages[0]?.page_count ?? 0) * pageSize,
       reclaimableBytes: (free[0]?.freelist_count ?? 0) * pageSize,
@@ -100,7 +113,8 @@ const make = Effect.gen(function* () {
   });
   const publishStatus = Effect.gen(function* () {
     if (!doctorTargetsThisDatabase) return;
-    const { databaseBytes, reclaimableBytes, incrementalVacuum } = yield* readPages;
+    const { databaseBytes, reclaimableBytes, incrementalVacuum } =
+      yield* readPages;
     const next: DatabaseStorageStatus = {
       databaseBytes,
       reclaimableBytes,
@@ -114,7 +128,9 @@ const make = Effect.gen(function* () {
       yield* SubscriptionRef.set(statusRef, next);
     }
   }).pipe(
-    Effect.catch((cause) => Effect.logWarning("Database storage inspection failed", { cause })),
+    Effect.catch((cause) =>
+      Effect.logWarning("Database storage inspection failed", { cause }),
+    ),
   );
 
   const reclaim = Effect.suspend(() => {
@@ -123,14 +139,22 @@ const make = Effect.gen(function* () {
       if (!(yield* readLayout).incrementalVacuum) return;
       // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
       for (; page < RECLAIM_PAGES_PER_PASS; page++) {
-        const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
+        const free = yield* sql<{
+          readonly freelist_count: number;
+        }>`PRAGMA freelist_count`;
         if ((free[0]?.freelist_count ?? 0) === 0) break;
         yield* sql`PRAGMA incremental_vacuum(1)`;
         yield* Effect.yieldNow;
       }
     }).pipe(
-      Effect.ensuring(Effect.suspend(() => Effect.annotateCurrentSpan("db.reclaimed_pages", page))),
-      Effect.catch((cause) => Effect.logWarning("Database space reclamation failed", { cause })),
+      Effect.ensuring(
+        Effect.suspend(() =>
+          Effect.annotateCurrentSpan("db.reclaimed_pages", page),
+        ),
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Database space reclamation failed", { cause }),
+      ),
       // The pass owns the span; tracing each page's two PRAGMAs floods the server trace.
       Effect.withTracerEnabled(false),
       Effect.withSpan("DatabaseStorage.reclaim"),
@@ -152,7 +176,9 @@ const make = Effect.gen(function* () {
     });
     const result = yield* maintenance.pruneEventStore(betweenPages);
     const completedAt = yield* Clock.currentTimeMillis;
-    yield* fs.writeFileString(compactedAtPath, String(completedAt)).pipe(Effect.ignore);
+    yield* fs
+      .writeFileString(compactedAtPath, String(completedAt))
+      .pipe(Effect.ignore);
     if (
       result.deletedEventCount > 0 ||
       result.deletedReceiptCount > 0 ||
@@ -174,7 +200,10 @@ const make = Effect.gen(function* () {
     ? lastCompactedAt + intervalMs - (yield* Clock.currentTimeMillis)
     : 0;
   const firstCompactionDelay = Duration.millis(
-    Math.min(intervalMs, Math.max(Duration.toMillis(Duration.minutes(1)), untilDueMs)),
+    Math.min(
+      intervalMs,
+      Math.max(Duration.toMillis(Duration.minutes(1)), untilDueMs),
+    ),
   );
 
   yield* forkParked(
@@ -191,7 +220,10 @@ const make = Effect.gen(function* () {
     publishStatus.pipe(
       Effect.andThen(Effect.sleep("1 minute")),
       Effect.andThen(
-        reclaim.pipe(Effect.andThen(publishStatus), Effect.repeat(Schedule.spaced("1 minute"))),
+        reclaim.pipe(
+          Effect.andThen(publishStatus),
+          Effect.repeat(Schedule.spaced("1 minute")),
+        ),
       ),
     ),
   );
@@ -229,7 +261,9 @@ const make = Effect.gen(function* () {
     yield* Effect.uninterruptible(
       fs.writeFileString(reclaimFiles.request, String(requestedAt)).pipe(
         // Reply before stopping: the restart closes this connection.
-        Effect.andThen(restart.pipe(Effect.delay("500 millis"), Effect.forkDetach)),
+        Effect.andThen(
+          restart.pipe(Effect.delay("500 millis"), Effect.forkDetach),
+        ),
       ),
     );
     yield* Effect.logInfo("Restarting to reclaim database space");
@@ -237,7 +271,9 @@ const make = Effect.gen(function* () {
     Effect.mapError((cause) =>
       cause._tag === "DatabaseReclaimError"
         ? cause
-        : new DatabaseReclaimError({ reason: "Could not prepare the repair. Try again." }),
+        : new DatabaseReclaimError({
+            reason: "Could not prepare the repair. Try again.",
+          }),
     ),
     Effect.withSpan("DatabaseStorage.requestReclaim"),
   );

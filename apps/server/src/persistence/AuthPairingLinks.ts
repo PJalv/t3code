@@ -68,12 +68,14 @@ export const ConsumeAuthPairingLinkInput = Schema.Struct({
   consumedAt: Schema.DateTimeUtcFromString,
   now: Schema.DateTimeUtcFromString,
 });
-export type ConsumeAuthPairingLinkInput = typeof ConsumeAuthPairingLinkInput.Type;
+export type ConsumeAuthPairingLinkInput =
+  typeof ConsumeAuthPairingLinkInput.Type;
 
 export const ListActiveAuthPairingLinksInput = Schema.Struct({
   now: Schema.DateTimeUtcFromString,
 });
-export type ListActiveAuthPairingLinksInput = typeof ListActiveAuthPairingLinksInput.Type;
+export type ListActiveAuthPairingLinksInput =
+  typeof ListActiveAuthPairingLinksInput.Type;
 
 export const RevokeAuthPairingLinkInput = Schema.Struct({
   id: Schema.String,
@@ -84,19 +86,22 @@ export type RevokeAuthPairingLinkInput = typeof RevokeAuthPairingLinkInput.Type;
 export const GetAuthPairingLinkByCredentialInput = Schema.Struct({
   credential: Schema.String,
 });
-export type GetAuthPairingLinkByCredentialInput = typeof GetAuthPairingLinkByCredentialInput.Type;
+export type GetAuthPairingLinkByCredentialInput =
+  typeof GetAuthPairingLinkByCredentialInput.Type;
 
 export const GetActiveAuthPairingLinkByIdInput = Schema.Struct({
   id: Schema.String,
   now: Schema.DateTimeUtcFromString,
 });
-export type GetActiveAuthPairingLinkByIdInput = typeof GetActiveAuthPairingLinkByIdInput.Type;
+export type GetActiveAuthPairingLinkByIdInput =
+  typeof GetActiveAuthPairingLinkByIdInput.Type;
 
 export const FindPendingConnectPairingLinkInput = Schema.Struct({
   proofKeyThumbprint: Schema.String,
   now: Schema.DateTimeUtcFromString,
 });
-export type FindPendingConnectPairingLinkInput = typeof FindPendingConnectPairingLinkInput.Type;
+export type FindPendingConnectPairingLinkInput =
+  typeof FindPendingConnectPairingLinkInput.Type;
 
 /**
  * Unspent links bound to `proofKeyThumbprint`, or with `keepProofKeyThumbprint` every other bound
@@ -108,13 +113,15 @@ export const RevokeUnspentByProofKeyInput = Schema.Struct({
   includeUnbound: Schema.Boolean,
   revokedAt: Schema.DateTimeUtcFromString,
 });
-export type RevokeUnspentByProofKeyInput = typeof RevokeUnspentByProofKeyInput.Type;
+export type RevokeUnspentByProofKeyInput =
+  typeof RevokeUnspentByProofKeyInput.Type;
 
 export const RecordConnectRequestClientInput = Schema.Struct({
   id: Schema.String,
   client: Schema.fromJsonString(AuthClientMetadata),
 });
-export type RecordConnectRequestClientInput = typeof RecordConnectRequestClientInput.Type;
+export type RecordConnectRequestClientInput =
+  typeof RecordConnectRequestClientInput.Type;
 
 const AuthPairingLinkRawDbRow = Schema.Struct({
   id: Schema.String,
@@ -133,7 +140,9 @@ const AuthPairingLinkRawDbRow = Schema.Struct({
   requestedClient: Schema.Unknown,
 });
 
-const decodeAuthPairingLinkDbRow = Schema.decodeUnknownEffect(AuthPairingLinkRecord);
+const decodeAuthPairingLinkDbRow = Schema.decodeUnknownEffect(
+  AuthPairingLinkRecord,
+);
 
 export class AuthPairingLinkRepository extends Context.Service<
   AuthPairingLinkRepository,
@@ -143,23 +152,38 @@ export class AuthPairingLinkRepository extends Context.Service<
     ) => Effect.Effect<void, AuthPairingLinkRepositoryError>;
     readonly consumeAvailable: (
       input: ConsumeAuthPairingLinkInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<
+      Option.Option<AuthPairingLinkRecord>,
+      AuthPairingLinkRepositoryError
+    >;
     readonly listActive: (
       input: ListActiveAuthPairingLinksInput,
-    ) => Effect.Effect<ReadonlyArray<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<
+      ReadonlyArray<AuthPairingLinkRecord>,
+      AuthPairingLinkRepositoryError
+    >;
     readonly revoke: (
       input: RevokeAuthPairingLinkInput,
     ) => Effect.Effect<boolean, AuthPairingLinkRepositoryError>;
     readonly getByCredential: (
       input: GetAuthPairingLinkByCredentialInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<
+      Option.Option<AuthPairingLinkRecord>,
+      AuthPairingLinkRepositoryError
+    >;
     readonly getActiveById: (
       input: GetActiveAuthPairingLinkByIdInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<
+      Option.Option<AuthPairingLinkRecord>,
+      AuthPairingLinkRepositoryError
+    >;
     /** The device's open or denied request, so its retries do not stack up or re-prompt. */
     readonly findPendingConnect: (
       input: FindPendingConnectPairingLinkInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<
+      Option.Option<AuthPairingLinkRecord>,
+      AuthPairingLinkRepositoryError
+    >;
     /** Keeps the first description a device gave, so it cannot be swapped while someone decides. */
     readonly recordConnectRequestClient: (
       input: RecordConnectRequestClientInput,
@@ -177,7 +201,11 @@ function toPersistenceSqlOrDecodeError(
 ) {
   return (cause: unknown): AuthPairingLinkRepositoryError =>
     Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
+      ? PersistenceDecodeError.fromSchemaError(
+          decodeOperation,
+          cause,
+          correlation,
+        )
       : new PersistenceSqlError({
           operation: sqlOperation,
           ...(correlation === undefined ? {} : { correlation }),
@@ -438,19 +466,24 @@ export const make = Effect.gen(function* () {
   });
 
   const decodeOptionalRow =
-    (operation: string) => (rowOption: Option.Option<typeof AuthPairingLinkRawDbRow.Type>) =>
+    (operation: string) =>
+    (rowOption: Option.Option<typeof AuthPairingLinkRawDbRow.Type>) =>
       Option.match(rowOption, {
         onNone: () => Effect.succeedNone,
         onSome: (row) =>
           decodeAuthPairingLinkDbRow(row).pipe(
             Effect.mapError((cause) =>
-              PersistenceDecodeError.fromSchemaError(operation, cause, { pairingLinkId: row.id }),
+              PersistenceDecodeError.fromSchemaError(operation, cause, {
+                pairingLinkId: row.id,
+              }),
             ),
             Effect.asSome,
           ),
       });
 
-  const getActiveById: AuthPairingLinkRepository["Service"]["getActiveById"] = (input) =>
+  const getActiveById: AuthPairingLinkRepository["Service"]["getActiveById"] = (
+    input,
+  ) =>
     getActivePairingLinkRowById(input).pipe(
       NodeSqliteClient.readOnly,
       Effect.mapError(
@@ -460,20 +493,27 @@ export const make = Effect.gen(function* () {
           { pairingLinkId: input.id },
         ),
       ),
-      Effect.flatMap(decodeOptionalRow("AuthPairingLinkRepository.getActiveById:decodeRow")),
+      Effect.flatMap(
+        decodeOptionalRow("AuthPairingLinkRepository.getActiveById:decodeRow"),
+      ),
     );
 
-  const findPendingConnect: AuthPairingLinkRepository["Service"]["findPendingConnect"] = (input) =>
-    findPendingConnectPairingLinkRow(input).pipe(
-      NodeSqliteClient.readOnly,
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.findPendingConnect:query",
-          "AuthPairingLinkRepository.findPendingConnect:decodeRow",
+  const findPendingConnect: AuthPairingLinkRepository["Service"]["findPendingConnect"] =
+    (input) =>
+      findPendingConnectPairingLinkRow(input).pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthPairingLinkRepository.findPendingConnect:query",
+            "AuthPairingLinkRepository.findPendingConnect:decodeRow",
+          ),
         ),
-      ),
-      Effect.flatMap(decodeOptionalRow("AuthPairingLinkRepository.findPendingConnect:decodeRow")),
-    );
+        Effect.flatMap(
+          decodeOptionalRow(
+            "AuthPairingLinkRepository.findPendingConnect:decodeRow",
+          ),
+        ),
+      );
 
   const recordConnectRequestClient: AuthPairingLinkRepository["Service"]["recordConnectRequestClient"] =
     (input) =>
@@ -491,7 +531,12 @@ export const make = Effect.gen(function* () {
   const revokeUnspentByProofKeyRows = SqlSchema.findAll({
     Request: RevokeUnspentByProofKeyInput,
     Result: Schema.Struct({ id: Schema.String }),
-    execute: ({ proofKeyThumbprint, keepProofKeyThumbprint, includeUnbound, revokedAt }) =>
+    execute: ({
+      proofKeyThumbprint,
+      keepProofKeyThumbprint,
+      includeUnbound,
+      revokedAt,
+    }) =>
       sql`
         -- Only T3 Connect mints bind a proof key, so bound links are that key's connect credentials.
         UPDATE auth_pairing_links
@@ -510,18 +555,17 @@ export const make = Effect.gen(function* () {
       `,
   });
 
-  const revokeUnspentByProofKey: AuthPairingLinkRepository["Service"]["revokeUnspentByProofKey"] = (
-    input,
-  ) =>
-    revokeUnspentByProofKeyRows(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.revokeUnspentByProofKey:query",
-          "AuthPairingLinkRepository.revokeUnspentByProofKey:decodeRows",
+  const revokeUnspentByProofKey: AuthPairingLinkRepository["Service"]["revokeUnspentByProofKey"] =
+    (input) =>
+      revokeUnspentByProofKeyRows(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthPairingLinkRepository.revokeUnspentByProofKey:query",
+            "AuthPairingLinkRepository.revokeUnspentByProofKey:decodeRows",
+          ),
         ),
-      ),
-      Effect.map((rows) => rows.map((row) => row.id)),
-    );
+        Effect.map((rows) => rows.map((row) => row.id)),
+      );
 
   const create: AuthPairingLinkRepository["Service"]["create"] = (input) =>
     createPairingLinkRow(input).pipe(
@@ -534,33 +578,36 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const consumeAvailable: AuthPairingLinkRepository["Service"]["consumeAvailable"] = (input) =>
-    consumeAvailablePairingLinkRow(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.consumeAvailable:query",
-          "AuthPairingLinkRepository.consumeAvailable:decodeRow",
+  const consumeAvailable: AuthPairingLinkRepository["Service"]["consumeAvailable"] =
+    (input) =>
+      consumeAvailablePairingLinkRow(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthPairingLinkRepository.consumeAvailable:query",
+            "AuthPairingLinkRepository.consumeAvailable:decodeRow",
+          ),
         ),
-      ),
-      Effect.flatMap((rowOption) =>
-        Option.match(rowOption, {
-          onNone: () => Effect.succeedNone,
-          onSome: (row) =>
-            decodeAuthPairingLinkDbRow(row).pipe(
-              Effect.mapError((cause) =>
-                PersistenceDecodeError.fromSchemaError(
-                  "AuthPairingLinkRepository.consumeAvailable:decodeRow",
-                  cause,
-                  { pairingLinkId: row.id },
+        Effect.flatMap((rowOption) =>
+          Option.match(rowOption, {
+            onNone: () => Effect.succeedNone,
+            onSome: (row) =>
+              decodeAuthPairingLinkDbRow(row).pipe(
+                Effect.mapError((cause) =>
+                  PersistenceDecodeError.fromSchemaError(
+                    "AuthPairingLinkRepository.consumeAvailable:decodeRow",
+                    cause,
+                    { pairingLinkId: row.id },
+                  ),
                 ),
+                Effect.asSome,
               ),
-              Effect.asSome,
-            ),
-        }),
-      ),
-    );
+          }),
+        ),
+      );
 
-  const listActive: AuthPairingLinkRepository["Service"]["listActive"] = (input) =>
+  const listActive: AuthPairingLinkRepository["Service"]["listActive"] = (
+    input,
+  ) =>
     listActivePairingLinkRows(input).pipe(
       NodeSqliteClient.readOnly,
       Effect.mapError(
@@ -596,32 +643,33 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     );
 
-  const getByCredential: AuthPairingLinkRepository["Service"]["getByCredential"] = (input) =>
-    getPairingLinkRowByCredential(input).pipe(
-      NodeSqliteClient.readOnly,
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.getByCredential:query",
-          "AuthPairingLinkRepository.getByCredential:decodeRow",
+  const getByCredential: AuthPairingLinkRepository["Service"]["getByCredential"] =
+    (input) =>
+      getPairingLinkRowByCredential(input).pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthPairingLinkRepository.getByCredential:query",
+            "AuthPairingLinkRepository.getByCredential:decodeRow",
+          ),
         ),
-      ),
-      Effect.flatMap((rowOption) =>
-        Option.match(rowOption, {
-          onNone: () => Effect.succeedNone,
-          onSome: (row) =>
-            decodeAuthPairingLinkDbRow(row).pipe(
-              Effect.mapError((cause) =>
-                PersistenceDecodeError.fromSchemaError(
-                  "AuthPairingLinkRepository.getByCredential:decodeRow",
-                  cause,
-                  { pairingLinkId: row.id },
+        Effect.flatMap((rowOption) =>
+          Option.match(rowOption, {
+            onNone: () => Effect.succeedNone,
+            onSome: (row) =>
+              decodeAuthPairingLinkDbRow(row).pipe(
+                Effect.mapError((cause) =>
+                  PersistenceDecodeError.fromSchemaError(
+                    "AuthPairingLinkRepository.getByCredential:decodeRow",
+                    cause,
+                    { pairingLinkId: row.id },
+                  ),
                 ),
+                Effect.asSome,
               ),
-              Effect.asSome,
-            ),
-        }),
-      ),
-    );
+          }),
+        ),
+      );
 
   return {
     create,

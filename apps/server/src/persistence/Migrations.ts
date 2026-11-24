@@ -136,6 +136,8 @@ import Migration0118 from "./Migrations/118_GerritPendingClones.ts";
 
 const GERRIT_MIGRATION_ID = 120;
 
+const GERRIT_MIGRATION_ID = 112;
+
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],

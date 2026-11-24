@@ -22,7 +22,8 @@ export const PersistenceErrorCorrelation = Schema.Union([
   Schema.Struct({ pairingLinkId: Schema.String }),
   Schema.Struct({ threadId: Schema.String }),
 ]);
-export type PersistenceErrorCorrelation = typeof PersistenceErrorCorrelation.Type;
+export type PersistenceErrorCorrelation =
+  typeof PersistenceErrorCorrelation.Type;
 
 export class PersistenceSqlError extends Schema.TaggedError<PersistenceSqlError>()(
   "PersistenceSqlError",
@@ -105,17 +106,24 @@ export function toPersistenceDecodeError(operation: string) {
     PersistenceDecodeError.fromSchemaError(operation, cause);
 }
 
-export type OrchestrationEventStoreError = PersistenceSqlError | PersistenceDecodeError;
+export type OrchestrationEventStoreError =
+  PersistenceSqlError | PersistenceDecodeError;
 
 export type OrchestrationCommandReceiptRepositoryError =
-  | PersistenceSqlError
-  | PersistenceDecodeError;
+  PersistenceSqlError | PersistenceDecodeError;
 
-export type ProviderSessionRuntimeRepositoryError = PersistenceSqlError | PersistenceDecodeError;
-export type AuthPairingLinkRepositoryError = PersistenceSqlError | PersistenceDecodeError;
-export type AuthSessionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
-export type PullRequestFilesViewedRepositoryError = PersistenceSqlError | PersistenceDecodeError;
-export type IssueTrackerBindingsRepositoryError = PersistenceSqlError | PersistenceDecodeError;
-export type PullRequestReviewGuideRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type ProviderSessionRuntimeRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
+export type AuthPairingLinkRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
+export type AuthSessionRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
+export type PullRequestFilesViewedRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
+export type IssueTrackerBindingsRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
+export type PullRequestReviewGuideRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;
 
-export type ProjectionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type ProjectionRepositoryError =
+  PersistenceSqlError | PersistenceDecodeError;

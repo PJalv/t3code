@@ -29,7 +29,8 @@ export const AuthSessionClientMetadataRecord = Schema.Struct({
   os: Schema.NullOr(Schema.String),
   browser: Schema.NullOr(Schema.String),
 });
-export type AuthSessionClientMetadataRecord = typeof AuthSessionClientMetadataRecord.Type;
+export type AuthSessionClientMetadataRecord =
+  typeof AuthSessionClientMetadataRecord.Type;
 
 export const AuthSessionRecord = Schema.Struct({
   sessionId: AuthSessionId,
@@ -73,7 +74,8 @@ export const ListActiveAuthSessionsInput = Schema.Struct({
   now: Schema.DateTimeUtcFromString,
   connectedSessionIds: Schema.optionalKey(Schema.Array(AuthSessionId)),
 });
-export type ListActiveAuthSessionsInput = typeof ListActiveAuthSessionsInput.Type;
+export type ListActiveAuthSessionsInput =
+  typeof ListActiveAuthSessionsInput.Type;
 
 export const RevokeAuthSessionInput = Schema.Struct({
   sessionId: AuthSessionId,
@@ -94,19 +96,22 @@ export const RevokeOtherAuthSessionsInput = Schema.Struct({
   currentSessionId: AuthSessionId,
   revokedAt: Schema.DateTimeUtcFromString,
 });
-export type RevokeOtherAuthSessionsInput = typeof RevokeOtherAuthSessionsInput.Type;
+export type RevokeOtherAuthSessionsInput =
+  typeof RevokeOtherAuthSessionsInput.Type;
 
 export const RevokeAuthSessionsByProofKeyInput = Schema.Struct({
   proofKeyThumbprint: Schema.String,
   revokedAt: Schema.DateTimeUtcFromString,
 });
-export type RevokeAuthSessionsByProofKeyInput = typeof RevokeAuthSessionsByProofKeyInput.Type;
+export type RevokeAuthSessionsByProofKeyInput =
+  typeof RevokeAuthSessionsByProofKeyInput.Type;
 
 export const SetAuthSessionLastConnectedAtInput = Schema.Struct({
   sessionId: AuthSessionId,
   lastConnectedAt: Schema.DateTimeUtcFromString,
 });
-export type SetAuthSessionLastConnectedAtInput = typeof SetAuthSessionLastConnectedAtInput.Type;
+export type SetAuthSessionLastConnectedAtInput =
+  typeof SetAuthSessionLastConnectedAtInput.Type;
 
 export class AuthSessionRepository extends Context.Service<
   AuthSessionRepository,
@@ -116,16 +121,25 @@ export class AuthSessionRepository extends Context.Service<
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
     readonly createReplacingActive: (
       input: CreateReplacingActiveAuthSessionInput,
-    ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
+    ) => Effect.Effect<
+      ReadonlyArray<AuthSessionId>,
+      AuthSessionRepositoryError
+    >;
     readonly createIfAbsent: (
       input: CreateAuthSessionInput,
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
     readonly getById: (
       input: GetAuthSessionByIdInput,
-    ) => Effect.Effect<Option.Option<AuthSessionRecord>, AuthSessionRepositoryError>;
+    ) => Effect.Effect<
+      Option.Option<AuthSessionRecord>,
+      AuthSessionRepositoryError
+    >;
     readonly listActive: (
       input: ListActiveAuthSessionsInput,
-    ) => Effect.Effect<ReadonlyArray<AuthSessionRecord>, AuthSessionRepositoryError>;
+    ) => Effect.Effect<
+      ReadonlyArray<AuthSessionRecord>,
+      AuthSessionRepositoryError
+    >;
     readonly revoke: (
       input: RevokeAuthSessionInput,
     ) => Effect.Effect<boolean, AuthSessionRepositoryError>;
@@ -135,7 +149,10 @@ export class AuthSessionRepository extends Context.Service<
     ) => Effect.Effect<boolean, AuthSessionRepositoryError>;
     readonly revokeAllExcept: (
       input: RevokeOtherAuthSessionsInput,
-    ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
+    ) => Effect.Effect<
+      ReadonlyArray<AuthSessionId>,
+      AuthSessionRepositoryError
+    >;
     readonly setLastConnectedAt: (
       input: SetAuthSessionLastConnectedAtInput,
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
@@ -144,7 +161,10 @@ export class AuthSessionRepository extends Context.Service<
     ) => Effect.Effect<Option.Option<string>, AuthSessionRepositoryError>;
     readonly revokeByProofKey: (
       input: RevokeAuthSessionsByProofKeyInput,
-    ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
+    ) => Effect.Effect<
+      ReadonlyArray<AuthSessionId>,
+      AuthSessionRepositoryError
+    >;
   }
 >()("t3/persistence/AuthSessions/AuthSessionRepository") {}
 
@@ -156,7 +176,13 @@ const AuthSessionDbRow = Schema.Struct({
   clientLabel: Schema.NullOr(Schema.String),
   clientIpAddress: Schema.NullOr(Schema.String),
   clientUserAgent: Schema.NullOr(Schema.String),
-  clientDeviceType: Schema.Literals(["desktop", "mobile", "tablet", "bot", "unknown"]),
+  clientDeviceType: Schema.Literals([
+    "desktop",
+    "mobile",
+    "tablet",
+    "bot",
+    "unknown",
+  ]),
   clientOs: Schema.NullOr(Schema.String),
   clientBrowser: Schema.NullOr(Schema.String),
   issuedAt: Schema.DateTimeUtcFromString,
@@ -184,7 +210,9 @@ const AuthSessionRawDbRow = Schema.Struct({
 
 const decodeAuthSessionDbRow = Schema.decodeUnknownEffect(AuthSessionDbRow);
 
-function toAuthSessionRecord(row: typeof AuthSessionDbRow.Type): AuthSessionRecord {
+function toAuthSessionRecord(
+  row: typeof AuthSessionDbRow.Type,
+): AuthSessionRecord {
   return {
     sessionId: row.sessionId,
     subject: row.subject,
@@ -212,7 +240,11 @@ function toPersistenceSqlOrDecodeError(
 ) {
   return (cause: unknown): AuthSessionRepositoryError =>
     Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
+      ? PersistenceDecodeError.fromSchemaError(
+          decodeOperation,
+          cause,
+          correlation,
+        )
       : new PersistenceSqlError({
           operation: sqlOperation,
           ...(correlation === undefined ? {} : { correlation }),
@@ -426,30 +458,31 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const createReplacingActive: AuthSessionRepository["Service"]["createReplacingActive"] = (
-    input,
-  ) =>
-    sql
-      .withTransaction(
-        revokeActiveSessionsForReplacement(input).pipe(
-          Effect.flatMap((revokedRows) =>
-            createSessionRow(input.session).pipe(
-              Effect.as(revokedRows.map((row) => row.sessionId)),
+  const createReplacingActive: AuthSessionRepository["Service"]["createReplacingActive"] =
+    (input) =>
+      sql
+        .withTransaction(
+          revokeActiveSessionsForReplacement(input).pipe(
+            Effect.flatMap((revokedRows) =>
+              createSessionRow(input.session).pipe(
+                Effect.as(revokedRows.map((row) => row.sessionId)),
+              ),
             ),
           ),
-        ),
-      )
-      .pipe(
-        Effect.mapError(
-          toPersistenceSqlOrDecodeError(
-            "AuthSessionRepository.createReplacingActive:query",
-            "AuthSessionRepository.createReplacingActive:encodeRequest",
-            { sessionId: input.session.sessionId },
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "AuthSessionRepository.createReplacingActive:query",
+              "AuthSessionRepository.createReplacingActive:encodeRequest",
+              { sessionId: input.session.sessionId },
+            ),
           ),
-        ),
-      );
+        );
 
-  const createIfAbsent: AuthSessionRepository["Service"]["createIfAbsent"] = (input) =>
+  const createIfAbsent: AuthSessionRepository["Service"]["createIfAbsent"] = (
+    input,
+  ) =>
     createSessionRowIfAbsent(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
@@ -482,7 +515,9 @@ export const make = Effect.gen(function* () {
                   { sessionId: input.sessionId },
                 ),
               ),
-              Effect.map((decodedRow) => Option.some(toAuthSessionRecord(decodedRow))),
+              Effect.map((decodedRow) =>
+                Option.some(toAuthSessionRecord(decodedRow)),
+              ),
             ),
         }),
       ),
@@ -537,7 +572,9 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     );
 
-  const revokeAllExcept: AuthSessionRepository["Service"]["revokeAllExcept"] = (input) =>
+  const revokeAllExcept: AuthSessionRepository["Service"]["revokeAllExcept"] = (
+    input,
+  ) =>
     revokeOtherSessionRows(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
@@ -549,42 +586,43 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows.map((row) => row.sessionId)),
     );
 
-  const setLastConnectedAt: AuthSessionRepository["Service"]["setLastConnectedAt"] = (input) =>
-    setLastConnectedAtRow(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthSessionRepository.setLastConnectedAt:query",
-          "AuthSessionRepository.setLastConnectedAt:encodeRequest",
-          { sessionId: input.sessionId },
+  const setLastConnectedAt: AuthSessionRepository["Service"]["setLastConnectedAt"] =
+    (input) =>
+      setLastConnectedAtRow(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthSessionRepository.setLastConnectedAt:query",
+            "AuthSessionRepository.setLastConnectedAt:encodeRequest",
+            { sessionId: input.sessionId },
+          ),
         ),
-      ),
-    );
+      );
 
-  const getProofKeyThumbprint: AuthSessionRepository["Service"]["getProofKeyThumbprint"] = (
-    input,
-  ) =>
-    proofKeyThumbprintRows(input).pipe(
-      NodeSqliteClient.readOnly,
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthSessionRepository.getProofKeyThumbprint:query",
-          "AuthSessionRepository.getProofKeyThumbprint:decodeRows",
-          { sessionId: input.sessionId },
+  const getProofKeyThumbprint: AuthSessionRepository["Service"]["getProofKeyThumbprint"] =
+    (input) =>
+      proofKeyThumbprintRows(input).pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthSessionRepository.getProofKeyThumbprint:query",
+            "AuthSessionRepository.getProofKeyThumbprint:decodeRows",
+            { sessionId: input.sessionId },
+          ),
         ),
-      ),
-      Effect.map((rows) => Option.fromNullishOr(rows[0]?.proofKeyThumbprint)),
-    );
+        Effect.map((rows) => Option.fromNullishOr(rows[0]?.proofKeyThumbprint)),
+      );
 
-  const revokeByProofKey: AuthSessionRepository["Service"]["revokeByProofKey"] = (input) =>
-    revokeByProofKeyRows(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthSessionRepository.revokeByProofKey:query",
-          "AuthSessionRepository.revokeByProofKey:decodeRows",
+  const revokeByProofKey: AuthSessionRepository["Service"]["revokeByProofKey"] =
+    (input) =>
+      revokeByProofKeyRows(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthSessionRepository.revokeByProofKey:query",
+            "AuthSessionRepository.revokeByProofKey:decodeRows",
+          ),
         ),
-      ),
-      Effect.map((rows) => rows.map((row) => row.sessionId)),
-    );
+        Effect.map((rows) => rows.map((row) => row.sessionId)),
+      );
 
   return {
     create,

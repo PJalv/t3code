@@ -8,7 +8,9 @@ import AutoSettleDisabledAt from "./Migrations/054_ProjectionThreadsAutoSettleDi
 type MigrationRow = { readonly id: number; readonly name: string };
 
 // Previews used V2 ids 53/54; preserve their schema and import progress while reserving main's ids.
-function v2PreviewId(history: ReadonlyArray<MigrationRow>): number | "invalid" | undefined {
+function v2PreviewId(
+  history: ReadonlyArray<MigrationRow>,
+): number | "invalid" | undefined {
   const later = history.filter((row) => row.id >= 53);
   const legacy = later.find(
     (row) => row.name === "OrchestrationV2" && (row.id === 53 || row.id === 54),
@@ -42,7 +44,9 @@ export function reconciledV2PreviewHistory(
   ];
 }
 
-export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigration")(function* () {
+export const reconcileV2PreviewMigration = Effect.fn(
+  "reconcileV2PreviewMigration",
+)(function* () {
   const sql = yield* SqlClient.SqlClient;
   return yield* sql.withTransaction(
     Effect.gen(function* () {
@@ -50,7 +54,10 @@ export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigratio
         SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
       `;
       if (tables.length === 0) return [];
-      const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+      const history = yield* sql<{
+        readonly migration_id: number;
+        readonly name: string;
+      }>`
         SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53
       `;
       const previewId = v2PreviewId(
@@ -60,7 +67,8 @@ export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigratio
       if (previewId === "invalid") {
         return yield* new Migrator.MigrationError({
           kind: "BadState",
-          message: "Cannot upgrade V2 preview with unexpected later migrations.",
+          message:
+            "Cannot upgrade V2 preview with unexpected later migrations.",
         });
       }
       const executed: Array<readonly [number, string]> = [];
