@@ -2874,6 +2874,7 @@
   "dff9e061996e7b1d": "¿Activar la fusión automática?",
   "dafc4bac6e5e37b0": "¿Desactivar la fusión automática?",
   "88c7a80c40bbfe56": "Fusionar {layers} en {base} con {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}. Las capas por encima de #{number} siguen abiertas.",
+  "892f08d21b8e48a9": "Fusionar {layers} en {base} con {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} cuando se cumplan sus requisitos. Puede ocurrir de inmediato.",
   "700223fdcaa96bb7": "Fusionar #{number} con {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} cuando se cumplan sus requisitos. Puede ocurrir de inmediato.",
   "bc559c7cadcd9129": "Impide que el proveedor fusione automáticamente esta {term, select, mr {merge request} cr {solicitud de cambios} other {pull request}}.",
   "385ba70d2783260b": "Fusionar #{number} en {branch} con {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}.",
@@ -5426,6 +5427,7 @@
   "744127f8dfad7d22": "Conecta un entorno para ver sus ejecuciones de flujos de trabajo.",
   "b9aae2f7cdb1a379": "Aún no hay ejecuciones de flujos de trabajo",
   "ace8fc1c643cf9f6": "Un flujo de trabajo une agentes, código, programaciones y preguntas para ti en una sola ejecución que sobrevive a los reinicios. Escribe uno en tu ordenador, en Flujos de trabajo y luego Definiciones.",
+  "fceb81aa6685fb47": "Chats",
   "86798f07ba2d7f4d": "Buscar issues",
   "484cd83bb303bab8": "Buscar pull requests",
   "75ed31fcea4f741a": "Filtrar issues",
@@ -5459,7 +5461,6 @@
   "f03ba5bbef74ca6d": "Issues",
   "ee0df48be7144de4": "Flujos de trabajo",
   "724eacadecd3a4cf": "Uso",
-  "fceb81aa6685fb47": "Chats",
   "f1bb8f9323639c63": "PR",
   "a3bd0ffad2733714": "Guía de revisión",
   "399447461c149bb1": "Vuelve a conectarte o pide a alguien con acceso de escritura que lo reintente.",
@@ -5756,8 +5757,5 @@
   "ad208e3e32c85029": "Ocultar todo",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Llamadas a herramientas en el chat",
-  "8d545d54c0a9e950": "Oculta los comandos, ediciones y búsquedas que ejecutan los agentes. Ocultar las correctas mantiene los fallos. Zen solo muestra las respuestas finales. Las aprobaciones, preguntas y errores siempre se muestran.",
-  "99d51127f573296b": "Otra cuenta",
-  "8ec2c57414669b79": "Conecta un segundo espacio de trabajo o usuario de {tracker}.",
-  "892f08d21b8e48a9": "Fusionar {layers} en {base} con {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} cuando se cumplan sus requisitos. Puede ocurrir de inmediato."
+  "8d545d54c0a9e950": "Oculta los comandos, ediciones y búsquedas que ejecutan los agentes. Ocultar las correctas mantiene los fallos. Zen solo muestra las respuestas finales. Las aprobaciones, preguntas y errores siempre se muestran."
 }
