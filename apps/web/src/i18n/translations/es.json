@@ -25,6 +25,7 @@
   "986b0873f913a840": "La política de {organization} no permite tareas de webhook.",
   "eebc538e25b09fe2": "La política de {organization} no permite importar cookies del navegador.",
   "7642a133db05f164": "La política de {organization} no permite abrir los servidores locales de esta máquina en otros dispositivos.",
+  "e0856d6a402ad821": "{organization}'s policy does not allow project worktree layout commands.",
   "39f6771b49f9b3b6": "Usar valor predeterminado",
   "45bb0e90e1c42046": "Cuando vuelvas",
   "d8fa0a55446bbb0d": "Antes de que caduque la caché (beta)",
@@ -498,7 +499,7 @@
   "bc24c300d53d61c5": "{host} no respondió en ninguna de las rutas guardadas.",
   "b0dd3cd876937ca8": "El perfil de conexión {connectionId} no está disponible.",
   "5ce46783e79ca9d1": "La credencial de conexión {connectionId} no está disponible.",
-  "0bda0cac7f5acc20": "El entorno conectado {actual} no coincide con {expected}.",
+  "b39d1428ec8b23f5": "This address now runs a different T3 Code install ({actual}, not {expected}). Remove this connection and add it again.",
   "ea0d3e4e51d5706f": "La credencial del entorno no es válida.",
   "7283ebfd16d09677": "La credencial del entorno no concede el acceso necesario.",
   "d3e9a9cb543b4b7b": "El entorno rechazó la solicitud de autenticación.",
@@ -1526,6 +1527,8 @@
   "4eb599c7f36c99ba": "Ese archivo de tema no es un JSON válido.",
   "29a5ff50ce55c4f9": "Tema de VS Code",
   "10348092dfed8b11": "Ese tema de VS Code no tiene el color \"editor.background\", así que no hay nada a partir de lo que crear una paleta.",
+  "206811f6f441bfc7": "This project sets up worktrees with its own command, which nobody has approved as it is written now. This connection cannot approve it: approve it from a client that can use the terminal.",
+  "b8087c9a70c26da9": "Could not approve the worktree layout command.",
   "6dff8d487001c6cf": "Adaptable",
   "f5f61c338cc5aeb5": "Barra de dispositivos del navegador",
   "3b4eb5b5ec5e60cb": "Dispositivo predefinido del navegador",
@@ -1554,6 +1557,7 @@
   "6848f5bbb2bd9eec": "Documento PDF",
   "7873a79df0cf6d0e": "Página del navegador",
   "0b55696e27387e4e": "Pulsa Shift+Escape para salir de la página del navegador.",
+  "90dfebe26eb86b2d": "Page select options",
   "737d3c6bec93f9e6": "Elige archivos para la página",
   "e6a3fa7cfc14f86a": "Cuadro de diálogo del navegador",
   "61a552a67e9e3eac": "Respuesta al cuadro de diálogo",
@@ -1987,13 +1991,16 @@
   "7af7f00b85cc2930": "Confirmar acción",
   "8b418a02b73f49b8": "Esta acción requiere tu confirmación.",
   "e74139c17fab1fa1": "Confirmar",
+  "4a18481bea4b4ad5": "New device signed in to {environmentLabel}",
+  "4144ab6aa487528a": "{device} connected through {product}. Not you? Review it.",
+  "a10cfdb27152c757": "{count, plural, one {{count} device} other {{count} devices}} connected through {product}. Not you? Review them.",
+  "4672f332c89dbcd9": "Revisar",
   "775a3e99e2638341": "Un dispositivo quiere conectarse a {environmentLabel}",
   "a8befcb9f1c61f60": "{device}. Apruébalo solo si muestra el código {code}.",
   "ac48cc297029db41": "Aprobar",
   "c12ca3fea745def0": "No se pudo aprobar el dispositivo",
   "af63f05ed2f5eeb3": "Denegar",
   "b735bab216b27041": "No se pudo denegar el dispositivo",
-  "4672f332c89dbcd9": "Revisar",
   "913fc23f62321556": "Elige una fecha y hora válidas en el futuro.",
   "9485a52216cfc0d5": "Introduce una duración positiva.",
   "9bc551235d78e133": "Tipo de programación",
@@ -2643,6 +2650,8 @@
   "89b5e8f3887812da": "Solicitud de invitado",
   "62e626804919b294": "Se necesita una respuesta",
   "c6196d99000642b4": "Abrir hilo",
+  "70bdebaa3d291d3b": "Thread unavailable",
+  "a351ebbdcf1a3f7a": "This thread is on an environment this app is not connected to.",
   "826cb862b4a11fb3": "{label}:",
   "3e597ec938e7551b": "Tú:",
   "a1fbf2422c588292": "Agente:",
@@ -2709,6 +2718,24 @@
   "a707abf0a4a73ffa": "Cerrar terminal ({shortcut})",
   "9206ecf328948f90": "Cerrar terminal",
   "9b1326a11cfe3308": "Aún no hay sesiones de terminal en este hilo.",
+  "49eda70cfd56e621": "Runs when a worktree thread starts, and when its folder is restored",
+  "188ccaa1199f5611": "Runs when a thread's worktree is removed",
+  "7e8476e7306acabe": "Let this project run its worktree commands?",
+  "8e11914556fd8b13": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " sets up worktree threads with its own commands from ",
+    {
+      "t": "code",
+      "i": 2,
+      "c": "t3.json"
+    },
+    ". They run on this environment's machine with your permissions, outside any agent sandbox. You are asked again whenever their text changes."
+  ],
+  "46807acd02a4ff72": "Approve and continue",
   "2ac142f34e5dabc2": "Repositorios en el nuevo worktree: {selection}",
   "c514773a8031f00b": "Filtrar repositorios",
   "e32b730f6d27753f": "Elige los repositorios en los que trabaja este hilo",
@@ -3638,8 +3665,8 @@
   "478e3b4551be4db3": "Mostrar texto extraído",
   "e7205ebfead1aafc": "Vista previa ampliada del vídeo",
   "1bda77e861bb472f": "Vista previa ampliada de la imagen",
-  "eebe5b17e3c19a1c": "Atrás, cerrar la vista previa del vídeo",
-  "58fd0009a6eb7258": "Atrás, cerrar la vista previa de la imagen",
+  "fb633d54edaeb4b1": "Close video preview",
+  "62d0c453f5803180": "Close image preview",
   "47bae54b5f532ff3": "Elemento anterior",
   "fb9434aad2b5c0bb": "No se pudo cargar esta imagen.",
   "26aee5d4e97bfb28": "Imagen no disponible. Puede que el archivo se haya movido o eliminado.",
@@ -3653,6 +3680,7 @@
   "ddb7e6f8ce99e657": "Solo quien pueda ejecutar agentes en esta máquina puede enviarlo o rechazarlo.",
   "03c1eb603c112f47": "No enviar",
   "653405e4ed498d9f": "Enviar",
+  "76cf478e5674fd12": "{count, plural, one {{count} match} other {{count} matches}}",
   "262955d6eb632f9b": "La API del portapapeles no está disponible al copiar el enlace de invitado.",
   "f1a4f2b04cdbb4ef": "No se pudo copiar el enlace de invitado al portapapeles.",
   "cf3490a604e44d31": "No se pudo crear un enlace de invitado.",
@@ -3800,6 +3828,21 @@
     }
   ],
   "dff97202cbdaec5b": "Mostrar app",
+  "796b81c4875c4feb": [
+    "The ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " app needs a newer ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " server on this environment. Update the server to use it."
+  ],
   "705cf2b2ee4e0e42": [
     "La app ",
     {
@@ -4556,6 +4599,7 @@
       "c": "”"
     }
   ],
+  "91aadfc843c600de": "Verify Google account",
   "a2aaca7ff8310186": "Abrir chat",
   "a3048aaa541b7744": "Actividad",
   "4a3cbccb2beedeb0": "imagen",
@@ -6700,8 +6744,8 @@
   "e545fcdb83e2c36a": "Añadir a la revisión",
   "2250f241daadd71b": "Añadir al agente",
   "be9b06fae29cc07a": "Todos los commits",
-  "5ef391d5403d7bdd": "{count, plural, one {Mostrar más (queda {count})} other {Mostrar más (quedan {count})}}",
   "ccd5fc4db08374d7": "{count, plural, one {{count} archivo de prueba oculto} other {{count} archivos de prueba ocultos}}",
+  "5ef391d5403d7bdd": "{count, plural, one {Mostrar más (queda {count})} other {Mostrar más (quedan {count})}}",
   "c12871955b159db4": "visto en {app}",
   "98b353c208fd7977": "vistos",
   "d65b870952bbe4f0": "Estas marcas se guardan aquí, no en el host",
@@ -6896,6 +6940,7 @@
   "79772510c52e42f7": "Más antiguas primero",
   "06139a8d4fc794e8": "No se encontró la {term, select, mr {merge request} cr {solicitud de cambios} other {pull request}} #{number}",
   "0001ae1f2d78613e": "Puede que sea una issue y no una {term, select, mr {merge request} cr {solicitud de cambios} other {pull request}}, o que esta cuenta no pueda verla.",
+  "c9bec97f6fa218c1": "Loading {term, select, mr {merge request} cr {change} other {pull request}} diff...",
   "6d2ebc126fb570a9": "Reintentar la búsqueda de la pila",
   "5b068246238194d3": [
     "actualizado",
@@ -7648,9 +7693,20 @@
   "dc87902396b8ade4": "Letras, dígitos, '-' o '_'.",
   "251dfec07b7c3612": "Este driver no tiene configuración obligatoria. Puedes añadir la instancia ahora.",
   "08fe32f007e788f1": "Configurar manualmente",
+  "65300794c1edb929": "Bearer token (optional)",
   "84eb2878dc17d3eb": "Clave de gestión",
   "7ac196c1e8175928": "Por defecto, el nombre de host del hub",
+  "0c026221dcd2820b": "Add an HTTP quota source",
   "e3548407052e9e12": "Añadir un hub de CLIProxyAPI",
+  "d185c750156b2121": [
+    "Read quotas from an endpoint on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "432e85a50e2e7964": [
     "Muestra la cuota de cada cuenta que agrupa el hub, junto a los proveedores en",
     " ",
@@ -7661,9 +7717,12 @@
     },
     ". La clave se queda en ese servidor."
   ],
+  "2324770ba91371ac": "Endpoint URL",
   "556a695b117565ac": "URL del hub",
+  "e4e5b75bba51396c": "Bearer token (optional)",
   "e62cedcbcdbafc75": "Clave de gestión",
   "f1b3d0634ec035cb": "Etiqueta (opcional)",
+  "b35256ca61016104": "Añadir origen",
   "52814dd6f7d0a15c": "Añadir hub",
   "27b770d3402abfa2": "Avanzado",
   "584595dfcadab699": "Ilustración",
@@ -8506,7 +8565,6 @@
   "0c99fa183ed512e8": "{platform} disponible en algunos",
   "e6886a7f77b73a8e": "{platform} no disponible",
   "b0b7610d9860d18d": "No configurado en esta máquina.",
-  "b35256ca61016104": "Añadir origen",
   "3b20ef0670ae4b0b": "Máquina por SSH",
   "121ccffacb6b8c6d": "Simuladores de Expo",
   "130b55a1410a8030": "Pool de Simlock (alfa)",
@@ -8987,7 +9045,7 @@
   "a9cdd8c7073be920": "Paleta de comandos: alternar",
   "4e0943e8c7a465d1": "Selector de archivos: alternar",
   "df5fdcdf26a6b52a": "Búsqueda en el proyecto: alternar",
-  "a8ff6d33b060736f": "Uso: abrir",
+  "0ca6fd2b8fcab2c3": "Usage: Toggle",
   "a513d51b71b95674": "Tema: seleccionar",
   "1ffd8427452372e1": "Apariencia: alternar",
   "3a3bb4a7551a87cc": "Editor de temas: alternar",
@@ -9095,6 +9153,10 @@
   "f0e853acd2006d53": "Entornos vinculados",
   "ef10c2dff987f3ea": "Ejecuta flujos de trabajo de varios pasos a partir de archivos en la carpeta workflows del directorio T3 de este servidor. Ábrelos desde la paleta de comandos. Mientras está desactivado, no se ejecuta nada de esa carpeta; las ejecuciones esperan hasta que se vuelva a activar.",
   "2dadb2359422121c": "Flujos de trabajo",
+  "933dabf0700708af": "How many skipped runs each workflow keeps in its history. Older skipped runs are deleted; runs that did something are always kept.",
+  "f172d7e5deb24f75": "Reset skipped runs kept to default",
+  "ba94015389f327bc": "Skipped runs kept",
+  "d52b3d6bf9f2a013": "Mixto",
   "13e86eb5d8287a71": "Muestra un mensaje siguiente previsto en el cuadro de mensaje vacío tras un turno de Claude o Codex. Tab lo usa. Cada uno es una solicitud extra en caché de tu plan. Requiere Codex 0.165+. Los hilos de Claude se actualizan al reiniciar.",
   "d4b2a2ec812aafb0": "Sugerir el siguiente prompt",
   "298c7150a7621c80": "Hosts de dispositivos Simlock",
@@ -9102,7 +9164,6 @@
   "f9904f78d3003f58": "Checkout rápido de worktrees",
   "9c2f647882522302": "Las máquinas seleccionadas usan distintos modos de comentarios de agentes.",
   "31bbf7bf8c0a5279": "Comentarios de agentes",
-  "d52b3d6bf9f2a013": "Mixto",
   "fdd433881febcefa": [
     "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
     " "
@@ -9453,6 +9514,28 @@
   "d2ad2df4c015f417": "La regla de agrupación decide cómo se une cada checkout a los grupos de proyectos de la barra lateral. Cambiarla puede mover un checkout a otro proyecto.",
   "0bdf6ae2117b6c23": "¿No encuentras un ajuste? Mantén este proyecto seleccionado arriba y ve a cualquier otra página de ajustes.",
   "3310e10f1efdc9bd": "Elegir icono",
+  "a9cb97fca6a6576b": "Create command",
+  "90f45a354884ccdd": "Remove command",
+  "0cdc8cdbed3e5eae": "Worktree layout",
+  "c17b25519e2b194e": "Could not load the worktree layout commands",
+  "78e308ada516928b": "Could not approve the command",
+  "a0c772d32a233da6": "Could not revoke the approval",
+  "5ccd5614c65f8d1f": "Revoke approval of the {kind} command",
+  "80c3794a5fa12f3a": "Approve the {kind} command",
+  "f206891e124c77b0": [
+    "This project's ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": "t3.json"
+    },
+    " sets up worktree threads with its own commands. They run on this environment's machine with your permissions, and only as approved here: a command whose text changes needs approval again."
+  ],
+  "8e73b883d41d4102": "Desactivado",
+  "f6a91589456cca50": "Approved",
+  "c92657bb7f2293ff": "Needs approval",
+  "f1e5c1be1ac92361": "Approve",
+  "fcb5f3c4d4753326": "This connection cannot approve commands. Use a client that can use the terminal.",
   "65ccf4f8e049003e": "Elige un proyecto para gestionar su nombre, icono, checkouts y acciones.",
   "067beea7d8f6e2c9": "Mostrar todos los entornos",
   "1bf6da50131340d4": "Tono del color de acento",
@@ -11323,7 +11406,6 @@
   "b0d0aebadc521ed1": "Elimina las capturas del navegador guardadas tras este número de días. Los enlaces a capturas antiguas dejarán de abrirse.",
   "fe4208562792c313": "Eliminar registros rotados antiguos",
   "8debac9c8e9cff47": "Elimina los archivos de registro rotados inactivos tras este número de días. Se conservan los registros actuales.",
-  "8e73b883d41d4102": "Desactivado",
   "80d58a3fd4e4212a": "Proyecto",
   "de770505be25f1ff": "Carpeta",
   "ada7b9a4d96959d2": "Hilo",
@@ -11720,10 +11802,11 @@
       "v": "v"
     }
   ],
-  "f54364b854a07918": "No hay hubs configurados.",
+  "39f64d971ba424b5": "No usage sources configured.",
+  "dbd877abdc2c7c81": "HTTP quota source",
   "4cf6a373a7535324": "{name} · Deshabilitado",
-  "1d1e9cda847bd398": "La clave de gestión del hub se elimina de este servidor. Sus cuentas salen de la vista Límites; el hub en sí no se toca. Vuelve a añadirlo con la URL y la clave para recuperarlas.",
-  "c9bee4f93481b77a": "Quitar hub",
+  "c792e744936dbe1b": "Add HTTP source",
+  "4032a03ee5301037": "The saved connection and its credentials are removed from this environment.",
   "0424112d5a0ecd71": "Automático",
   "3f0e1b77e45d53a9": "Toca para alternar, mantén para hablar",
   "45928549c050a1b4": "Mantener",
@@ -12053,6 +12136,7 @@
   "6826fa9579c22035": "beta compartir invitado invitar enlace compañero ver t3 connect túnel",
   "f10c06cba0cdf7fe": "beta vincular otra máquina vps agentes pares trabajar allí delegar",
   "bc0b409d89ce086e": "beta flujo de trabajo workflow ejecuciones duraderas automatización pasos programación webhook carpeta",
+  "4b2669dcdb7d3776": "workflow history retention delete old skipped runs webhook",
   "4a21cf825a2045b0": "beta tab autocompletar predecir siguiente mensaje claude codex texto fantasma",
   "fea2dc36585c4a20": "Hosts de dispositivos Simlock (alfa)",
   "9d834d178130180e": "beta alfa simlock callstack simulador emulador ios android grupo préstamo gateway",
@@ -12269,11 +12353,14 @@
   "37ffec8201f153c1": "Falló",
   "984b361806ce8d25": "Reactivado",
   "c6e8abc00ae470d2": "Hecho",
+  "353b08f4363dbb2c": "Pending",
   "f31a95961de19433": "Incidencia {key}: {title}, {state}",
   "2dd9d295c882ef65": "{count, plural, one {{count} incidencia vinculada} other {{count} incidencias vinculadas}}",
   "8cf699ae75fd8067": "Fijados",
   "be451f475c514b37": "Descartar notificación de reactivación",
   "e9ced65134f2f36c": "Reactivar hilo ahora",
+  "374dac09151d4578": "Pending",
+  "a8f30f631e2b010e": "Waiting to sync with its environment",
   "aca5896600bf173e": "Ahora mismo tienes otra rama en el checkout.",
   "f665b5be60d8c144": [
     "Traspasado desde ",
@@ -12347,6 +12434,8 @@
   "9bca02be2b4d612a": "sin conexión",
   "2dcc418b6a13b83c": "requiere una actualización manual",
   "fa8faa732a2688ef": "en el canal {channel}",
+  "e65649675cb4cbaa": "turned off",
+  "a1e7c08d9ef315c7": "still loading",
   "9b961309baafa09d": "sin permiso",
   "9bafb2622c22d145": "ya se está actualizando",
   "61aa0109862ff7ca": "Nightly",
@@ -12403,6 +12492,7 @@
   "9c015d3d034316cb": "Usa las flechas para ajustar el valor enfocado. Mantén Shift para pasos más grandes. Usa Inicio y Fin para el mínimo y el máximo. Pulsa Tab para pasar entre saturación y brillo.",
   "8639d5532561f87f": "Cerrar",
   "e1186ad82ee08b33": "Cerrar",
+  "a4579e548b768663": "Show sidebar",
   "a1b11a1cf39c9dc9": "Cambiar el tamaño de la barra lateral",
   "c557090df5722838": "Alternar barra lateral",
   "bbde430e56272901": "Arrastra para cambiar el tamaño de la barra lateral",
@@ -12452,6 +12542,28 @@
   "8bcab2ef61de6518": "Límite de 0 $",
   "a16b48709357a5a7": "Gestionar uso",
   "a00e74aaa421c524": "restante",
+  "0e34c3076c08feb2": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": [
+        "↻ +",
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        "%"
+      ]
+    },
+    " ",
+    "in ",
+    {
+      "i": 3,
+      "k": "_gt_value_3",
+      "v": "v"
+    }
+  ],
   "8bd6f07136317c8f": "Ningún proveedor de los entornos seleccionados informa de límites de suscripción.",
   "87f5d0c61b335f38": "Consulta el uso en ChatGPT con tu cuenta conectada.",
   "5b4c71b36b979e80": "Coste",
@@ -12694,9 +12806,14 @@
   "dd7a1e58c2553933": "despierta en {duration}",
   "95cc952724dd7310": "a punto de despertar",
   "3cc34921c0128593": "en curso",
-  "e777db2880f53a46": "nadie respondió",
   "dc90739d391a5e67": "Dijiste {choice}",
+  "4e96712d839ccbff": "{who} said {choice}",
+  "e777db2880f53a46": "nadie respondió",
+  "201490988858b511": "withdrawn by {by}",
   "389f2563b5b763fd": "Pasos rápidos",
+  "99451a5d2d40440f": "Withdrawn by {by}.",
+  "3ee30a50b70fffab": "Withdrawn by {by}: {reason}",
+  "92e129bf413a1220": "withdrawn",
   "a41c8d758121ad81": "en espera",
   "9db248b770096984": "esperó",
   "c76124517af28686": "en ejecución desde hace {duration}",
@@ -12732,6 +12849,49 @@
   "8bffb377e2a6a7de": "su versión ya no está registrada",
   "f92d9132f7b85d1a": "Cargando pasos…",
   "6ebc59f64c761a49": "Nada todavía.",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
   "a759dccd157d7dae": [
     "Dijiste",
     " ",
@@ -12765,6 +12925,15 @@
       "v": "v"
     }
   ],
+  "3759768c5d342c22": [
+    "answered",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
   "c98009be9a273b31": "Abrir ejecución",
   "c8eb9be36d4d51ad": [
     "Hilo en ",
@@ -12790,6 +12959,14 @@
   ],
   "02dfe6c63fd0b8a1": "Añadir un motivo",
   "19abd94828a3bdbc": "Preguntar antes al agente",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " needs a reason."
+  ],
   "a18721fa8f328361": "Te necesitan",
   "bbf24e7920c1e86b": "En ejecución",
   "8d6e18d2ad832db6": "Todas",
@@ -12799,11 +12976,15 @@
   "5459bf696a187c26": "No se pudieron cargar las ejecuciones de flujos de trabajo",
   "d57c35d43b0f163a": "Esta ejecución no está aquí",
   "b9aae2f7cdb1a379": "Aún no hay ejecuciones de flujos de trabajo",
+  "45a94c724845ec1d": "Other",
   "8f15f66e545af7c0": "Qué ejecuciones",
   "b6409289e0c9a4dd": "Flujo de trabajo",
   "035cb02ca1ae4952": "Los {count} flujos de trabajo",
+  "8eeb9cb07d7c59e1": "Kind of question",
+  "e2131cbec8accfe3": "All kinds",
   "46d614fa7b4bf1e5": "Ejecuciones de flujos de trabajo",
   "1c635faa2fb45b8b": "Aún no se ha ejecutado.",
+  "e4d1316c85ed7066": "No questions of this kind wait on you.",
   "156ff7b625287a1e": "Ocultar omitidos",
   "69b985b97ab45e6b": "Mostrar {count} omitidos",
   "2400254d362de84d": "Cargando ejecuciones de flujos de trabajo…",
@@ -12843,6 +13024,7 @@
     }
   ],
   "5d8d278ff828102d": "Todos los flujos de trabajo",
+  "3b0f1659172107e4": "All kinds",
   "39459da07479f482": "Agente",
   "7741243632056b81": "{step} · transcripción",
   "c512071143a5ba32": "Este hilo ya no existe.",

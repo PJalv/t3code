@@ -25,6 +25,7 @@
   "986b0873f913a840": "{organization} のポリシーでは、Webhook タスクは許可されていません。",
   "eebc538e25b09fe2": "{organization} のポリシーでは、ブラウザーの Cookie のインポートは許可されていません。",
   "7642a133db05f164": "{organization} のポリシーでは、このマシンのローカルサーバーを他のデバイスで開くことは許可されていません。",
+  "e0856d6a402ad821": "{organization}'s policy does not allow project worktree layout commands.",
   "39f6771b49f9b3b6": "デフォルトを使用",
   "45bb0e90e1c42046": "戻ってきたとき",
   "d8fa0a55446bbb0d": "キャッシュの期限切れ前 (ベータ)",
@@ -498,7 +499,7 @@
   "bc24c300d53d61c5": "{host} は保存されたどのルートでも応答しませんでした。",
   "b0dd3cd876937ca8": "接続プロファイル {connectionId} は利用できません。",
   "5ce46783e79ca9d1": "接続の資格情報 {connectionId} は利用できません。",
-  "0bda0cac7f5acc20": "接続した環境 {actual} が {expected} と一致しません。",
+  "b39d1428ec8b23f5": "This address now runs a different T3 Code install ({actual}, not {expected}). Remove this connection and add it again.",
   "ea0d3e4e51d5706f": "環境の資格情報が無効です。",
   "7283ebfd16d09677": "環境の資格情報に必要なアクセス権がありません。",
   "d3e9a9cb543b4b7b": "環境が認証リクエストを拒否しました。",
@@ -1526,6 +1527,8 @@
   "4eb599c7f36c99ba": "そのテーマファイルは有効な JSON ではありません。",
   "29a5ff50ce55c4f9": "VS Code テーマ",
   "10348092dfed8b11": "その VS Code テーマには \"editor.background\" の色がないため、パレットを作成できません。",
+  "206811f6f441bfc7": "This project sets up worktrees with its own command, which nobody has approved as it is written now. This connection cannot approve it: approve it from a client that can use the terminal.",
+  "b8087c9a70c26da9": "Could not approve the worktree layout command.",
   "6dff8d487001c6cf": "レスポンシブ",
   "f5f61c338cc5aeb5": "ブラウザーのデバイスツールバー",
   "3b4eb5b5ec5e60cb": "ブラウザーのデバイスプリセット",
@@ -1554,6 +1557,7 @@
   "6848f5bbb2bd9eec": "PDF ドキュメント",
   "7873a79df0cf6d0e": "ブラウザーのページ",
   "0b55696e27387e4e": "ブラウザーのページから離れるには Shift+Escape を押します。",
+  "90dfebe26eb86b2d": "Page select options",
   "737d3c6bec93f9e6": "ページに渡すファイルを選択",
   "e6a3fa7cfc14f86a": "ブラウザーのダイアログ",
   "61a552a67e9e3eac": "ダイアログへの応答",
@@ -1985,13 +1989,16 @@
   "7af7f00b85cc2930": "操作の確認",
   "8b418a02b73f49b8": "この操作には確認が必要です。",
   "e74139c17fab1fa1": "確認",
+  "4a18481bea4b4ad5": "New device signed in to {environmentLabel}",
+  "4144ab6aa487528a": "{device} connected through {product}. Not you? Review it.",
+  "a10cfdb27152c757": "{count, plural, one {{count} device} other {{count} devices}} connected through {product}. Not you? Review them.",
+  "4672f332c89dbcd9": "確認",
   "775a3e99e2638341": "デバイスが {environmentLabel} への接続を求めています",
   "a8befcb9f1c61f60": "{device}。コード {code} が表示されている場合のみ承認してください。",
   "ac48cc297029db41": "承認",
   "c12ca3fea745def0": "デバイスを承認できませんでした",
   "af63f05ed2f5eeb3": "拒否",
   "b735bab216b27041": "デバイスを拒否できませんでした",
-  "4672f332c89dbcd9": "確認",
   "913fc23f62321556": "未来の有効な日時を選択してください。",
   "9485a52216cfc0d5": "正の期間を入力してください。",
   "9bc551235d78e133": "スケジュールの種類",
@@ -2641,6 +2648,8 @@
   "89b5e8f3887812da": "ゲストのリクエスト",
   "62e626804919b294": "入力が必要です",
   "c6196d99000642b4": "スレッドを開く",
+  "70bdebaa3d291d3b": "Thread unavailable",
+  "a351ebbdcf1a3f7a": "This thread is on an environment this app is not connected to.",
   "826cb862b4a11fb3": "{label}:",
   "3e597ec938e7551b": "あなた:",
   "a1fbf2422c588292": "エージェント:",
@@ -2707,6 +2716,24 @@
   "a707abf0a4a73ffa": "ターミナルを閉じる ({shortcut})",
   "9206ecf328948f90": "ターミナルを閉じる",
   "9b1326a11cfe3308": "このスレッドにはまだターミナルセッションがありません。",
+  "49eda70cfd56e621": "Runs when a worktree thread starts, and when its folder is restored",
+  "188ccaa1199f5611": "Runs when a thread's worktree is removed",
+  "7e8476e7306acabe": "Let this project run its worktree commands?",
+  "8e11914556fd8b13": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " sets up worktree threads with its own commands from ",
+    {
+      "t": "code",
+      "i": 2,
+      "c": "t3.json"
+    },
+    ". They run on this environment's machine with your permissions, outside any agent sandbox. You are asked again whenever their text changes."
+  ],
+  "46807acd02a4ff72": "Approve and continue",
   "2ac142f34e5dabc2": "新しいワークツリーのリポジトリ: {selection}",
   "c514773a8031f00b": "リポジトリを絞り込む",
   "e32b730f6d27753f": "このスレッドが作業するリポジトリを選択してください",
@@ -3634,8 +3661,8 @@
   "478e3b4551be4db3": "抽出したテキストを表示",
   "e7205ebfead1aafc": "拡大した動画のプレビュー",
   "1bda77e861bb472f": "拡大した画像のプレビュー",
-  "eebe5b17e3c19a1c": "戻る、動画のプレビューを閉じる",
-  "58fd0009a6eb7258": "戻る、画像のプレビューを閉じる",
+  "fb633d54edaeb4b1": "Close video preview",
+  "62d0c453f5803180": "Close image preview",
   "47bae54b5f532ff3": "前のメディア",
   "fb9434aad2b5c0bb": "この画像を読み込めませんでした。",
   "26aee5d4e97bfb28": "画像を利用できません。ファイルが移動または削除された可能性があります。",
@@ -3649,6 +3676,7 @@
   "ddb7e6f8ce99e657": "このマシンでエージェントを実行できる人だけが、送信または拒否できます。",
   "03c1eb603c112f47": "送信しない",
   "653405e4ed498d9f": "送信",
+  "76cf478e5674fd12": "{count, plural, one {{count} match} other {{count} matches}}",
   "262955d6eb632f9b": "ゲストリンクをコピーする際にクリップボード API を利用できませんでした。",
   "f1a4f2b04cdbb4ef": "ゲストリンクをクリップボードにコピーできませんでした。",
   "cf3490a604e44d31": "ゲストリンクを作成できませんでした。",
@@ -3795,6 +3823,21 @@
     " アプリが閉じられました"
   ],
   "dff97202cbdaec5b": "アプリを表示",
+  "796b81c4875c4feb": [
+    "The ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " app needs a newer ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " server on this environment. Update the server to use it."
+  ],
   "705cf2b2ee4e0e42": [
     {
       "i": 1,
@@ -4547,6 +4590,7 @@
       "c": "」を読み取っています"
     }
   ],
+  "91aadfc843c600de": "Verify Google account",
   "a2aaca7ff8310186": "チャットを開く",
   "a3048aaa541b7744": "アクティビティ",
   "4a3cbccb2beedeb0": "画像",
@@ -6670,8 +6714,8 @@
   "e545fcdb83e2c36a": "レビューに追加",
   "2250f241daadd71b": "エージェントに追加",
   "be9b06fae29cc07a": "すべてのコミット",
-  "5ef391d5403d7bdd": "{count, plural, other {さらに表示 (残り {count} 件)}}",
   "ccd5fc4db08374d7": "{count, plural, other {{count} 個のテストファイルを非表示}}",
+  "5ef391d5403d7bdd": "{count, plural, other {さらに表示 (残り {count} 件)}}",
   "c12871955b159db4": "{app} で確認済み",
   "98b353c208fd7977": "確認済み",
   "d65b870952bbe4f0": "これらの確認済みマークはホストではなく、ここに保存されます",
@@ -6866,6 +6910,7 @@
   "79772510c52e42f7": "古い順",
   "06139a8d4fc794e8": "{term, select, mr {マージリクエスト #{number} が見つかりません} cr {変更リクエスト #{number} が見つかりません} other {プルリクエスト #{number} が見つかりません}}",
   "0001ae1f2d78613e": "{term, select, mr {マージリクエストではなく Issue であるか、このアカウントでは表示できない可能性があります。} cr {変更リクエストではなく Issue であるか、このアカウントでは表示できない可能性があります。} other {プルリクエストではなく Issue であるか、このアカウントでは表示できない可能性があります。}}",
+  "c9bec97f6fa218c1": "Loading {term, select, mr {merge request} cr {change} other {pull request}} diff...",
   "6d2ebc126fb570a9": "スタックの検索を再試行",
   "5b068246238194d3": [
     "更新:",
@@ -7614,9 +7659,20 @@
   "dc87902396b8ade4": "英字、数字、'-'、'_'。",
   "251dfec07b7c3612": "このドライバーに必須の構成はありません。今すぐインスタンスを追加できます。",
   "08fe32f007e788f1": "手動で構成",
+  "65300794c1edb929": "Bearer token (optional)",
   "84eb2878dc17d3eb": "管理キー",
   "7ac196c1e8175928": "デフォルトはハブのホスト名です",
+  "0c026221dcd2820b": "Add an HTTP quota source",
   "e3548407052e9e12": "CLIProxyAPI ハブを追加",
+  "d185c750156b2121": [
+    "Read quotas from an endpoint on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "432e85a50e2e7964": [
     "ハブがまとめているすべてのアカウントのクォータを、",
     " ",
@@ -7627,9 +7683,12 @@
     },
     " のプロバイダーの横に表示します。キーはそのサーバーに保存されます。"
   ],
+  "2324770ba91371ac": "Endpoint URL",
   "556a695b117565ac": "ハブの URL",
+  "e4e5b75bba51396c": "Bearer token (optional)",
   "e62cedcbcdbafc75": "管理キー",
   "f1b3d0634ec035cb": "ラベル (省略可)",
+  "b35256ca61016104": "ソースを追加",
   "52814dd6f7d0a15c": "ハブを追加",
   "27b770d3402abfa2": "詳細設定",
   "584595dfcadab699": "アートワーク",
@@ -8465,7 +8524,6 @@
   "0c99fa183ed512e8": "{platform} は一部で利用可能",
   "e6886a7f77b73a8e": "{platform} は利用不可",
   "b0b7610d9860d18d": "このマシンでは未設定です。",
-  "b35256ca61016104": "ソースを追加",
   "3b20ef0670ae4b0b": "SSH 経由のマシン",
   "121ccffacb6b8c6d": "Expo Simulators",
   "130b55a1410a8030": "Simlock プール (アルファ版)",
@@ -8945,7 +9003,7 @@
   "a9cdd8c7073be920": "コマンドパレット: 切り替え",
   "4e0943e8c7a465d1": "ファイル選択: 切り替え",
   "df5fdcdf26a6b52a": "プロジェクト検索: 切り替え",
-  "a8ff6d33b060736f": "使用量: 開く",
+  "0ca6fd2b8fcab2c3": "Usage: Toggle",
   "a513d51b71b95674": "テーマ: 選択",
   "1ffd8427452372e1": "外観: 順に切り替え",
   "3a3bb4a7551a87cc": "テーマエディター: 切り替え",
@@ -9053,6 +9111,10 @@
   "f0e853acd2006d53": "リンクされた環境",
   "ef10c2dff987f3ea": "このサーバーの T3 ホームにある workflows フォルダーのファイルから、複数ステップのワークフローを実行します。コマンドパレットから開けます。オフの間はそのフォルダーの内容は実行されず、実行はオンに戻るまで待機します。",
   "2dadb2359422121c": "ワークフロー",
+  "933dabf0700708af": "How many skipped runs each workflow keeps in its history. Older skipped runs are deleted; runs that did something are always kept.",
+  "f172d7e5deb24f75": "Reset skipped runs kept to default",
+  "ba94015389f327bc": "Skipped runs kept",
+  "d52b3d6bf9f2a013": "混在",
   "13e86eb5d8287a71": "Claude または Codex のターンの後、空の入力欄に次のメッセージの予測を表示します。Tab で使用します。毎回、プランでキャッシュされたリクエストが 1 つ追加されます。Codex 0.165 以降が必要です。Claude のスレッドは再起動時に更新されます。",
   "d4b2a2ec812aafb0": "次のプロンプトを提案",
   "298c7150a7621c80": "Simlock デバイスホスト",
@@ -9060,7 +9122,6 @@
   "f9904f78d3003f58": "高速ワークツリーチェックアウト",
   "9c2f647882522302": "選択したマシンでは、エージェントのフィードバックモードが異なります。",
   "31bbf7bf8c0a5279": "エージェントのフィードバック",
-  "d52b3d6bf9f2a013": "混在",
   "fdd433881febcefa": [
     "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
     " "
@@ -9412,6 +9473,28 @@
   "d2ad2df4c015f417": "グループ化ルールは、各チェックアウトがサイドバーのどのプロジェクトグループに入るかを決めます。変更すると、チェックアウトが別のプロジェクトに移動することがあります。",
   "0bdf6ae2117b6c23": "設定が見つかりませんか？上でこのプロジェクトを選択したまま、他の設定ページに移動できます。",
   "3310e10f1efdc9bd": "アイコンを選択",
+  "a9cb97fca6a6576b": "Create command",
+  "90f45a354884ccdd": "Remove command",
+  "0cdc8cdbed3e5eae": "Worktree layout",
+  "c17b25519e2b194e": "Could not load the worktree layout commands",
+  "78e308ada516928b": "Could not approve the command",
+  "a0c772d32a233da6": "Could not revoke the approval",
+  "5ccd5614c65f8d1f": "Revoke approval of the {kind} command",
+  "80c3794a5fa12f3a": "Approve the {kind} command",
+  "f206891e124c77b0": [
+    "This project's ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": "t3.json"
+    },
+    " sets up worktree threads with its own commands. They run on this environment's machine with your permissions, and only as approved here: a command whose text changes needs approval again."
+  ],
+  "8e73b883d41d4102": "オフ",
+  "f6a91589456cca50": "Approved",
+  "c92657bb7f2293ff": "Needs approval",
+  "f1e5c1be1ac92361": "Approve",
+  "fcb5f3c4d4753326": "This connection cannot approve commands. Use a client that can use the terminal.",
   "65ccf4f8e049003e": "名前、アイコン、チェックアウト、アクションを管理するプロジェクトを選択してください。",
   "067beea7d8f6e2c9": "すべての環境を表示",
   "1bf6da50131340d4": "アクセントカラーの色相",
@@ -11279,7 +11362,6 @@
   "b0d0aebadc521ed1": "保存されたブラウザーのキャプチャを、この日数が経過したら削除します。古いキャプチャのリンクは開けなくなります。",
   "fe4208562792c313": "古いローテーション済みログを削除",
   "8debac9c8e9cff47": "使われていないローテーション済みのログファイルを、この日数が経過したら削除します。現在のログは保持されます。",
-  "8e73b883d41d4102": "オフ",
   "80d58a3fd4e4212a": "プロジェクト",
   "de770505be25f1ff": "フォルダー",
   "ada7b9a4d96959d2": "スレッド",
@@ -11676,10 +11758,11 @@
     },
     " に切り替え"
   ],
-  "f54364b854a07918": "ハブが設定されていません。",
+  "39f64d971ba424b5": "No usage sources configured.",
+  "dbd877abdc2c7c81": "HTTP quota source",
   "4cf6a373a7535324": "{name} · 無効",
-  "1d1e9cda847bd398": "ハブの管理キーはこのサーバーから削除されます。そのアカウントは「上限」ビューから消えますが、ハブ自体には影響しません。元に戻すには、URL とキーで再度追加してください。",
-  "c9bee4f93481b77a": "ハブを削除",
+  "c792e744936dbe1b": "Add HTTP source",
+  "4032a03ee5301037": "The saved connection and its credentials are removed from this environment.",
   "0424112d5a0ecd71": "自動",
   "3f0e1b77e45d53a9": "タップで切り替え、長押しで話す",
   "45928549c050a1b4": "長押し",
@@ -12009,6 +12092,7 @@
   "6826fa9579c22035": "ベータ 共有 ゲスト 招待 リンク チームメイト 閲覧 T3 Connect トンネル beta share guest",
   "f10c06cba0cdf7fe": "ベータ リンク 別のマシン VPS ピア エージェント そこで作業 委任 beta link machine",
   "bc0b409d89ce086e": "ベータ ワークフロー 永続 実行 自動化 ステップ スケジュール webhook フォルダー beta workflow",
+  "4b2669dcdb7d3776": "workflow history retention delete old skipped runs webhook",
   "4a21cf825a2045b0": "ベータ Tab 補完 次のメッセージを予測 Claude Codex ゴーストテキスト autocomplete",
   "fea2dc36585c4a20": "Simlock デバイスホスト (アルファ版)",
   "9d834d178130180e": "ベータ アルファ simlock callstack シミュレーター エミュレーター iOS Android プール リース ゲートウェイ simulator",
@@ -12225,11 +12309,14 @@
   "37ffec8201f153c1": "失敗",
   "984b361806ce8d25": "再開",
   "c6e8abc00ae470d2": "完了",
+  "353b08f4363dbb2c": "Pending",
   "f31a95961de19433": "課題 {key}: {title}、{state}",
   "2dd9d295c882ef65": "{count, plural, other {{count} 件のリンクされた課題}}",
   "8cf699ae75fd8067": "ピン留め済み",
   "be451f475c514b37": "再開の通知を閉じる",
   "e9ced65134f2f36c": "スレッドを今すぐ再開",
+  "374dac09151d4578": "Pending",
+  "a8f30f631e2b010e": "Waiting to sync with its environment",
   "aca5896600bf173e": "現在、別のブランチをチェックアウトしています。",
   "f665b5be60d8c144": [
     {
@@ -12303,6 +12390,8 @@
   "9bca02be2b4d612a": "未接続",
   "2dcc418b6a13b83c": "手動での更新が必要",
   "fa8faa732a2688ef": "{channel} チャネル",
+  "e65649675cb4cbaa": "turned off",
+  "a1e7c08d9ef315c7": "still loading",
   "9b961309baafa09d": "権限なし",
   "9bafb2622c22d145": "すでに更新中",
   "61aa0109862ff7ca": "Nightly",
@@ -12359,6 +12448,7 @@
   "9c015d3d034316cb": "矢印キーでフォーカス中の値を調整します。Shift を押しながらだと大きく変わります。Home と End で最小値と最大値にします。Tab で彩度と明度を切り替えます。",
   "8639d5532561f87f": "閉じる",
   "e1186ad82ee08b33": "閉じる",
+  "a4579e548b768663": "Show sidebar",
   "a1b11a1cf39c9dc9": "サイドバーのサイズを変更",
   "c557090df5722838": "サイドバーの表示を切り替え",
   "bbde430e56272901": "ドラッグしてサイドバーのサイズを変更",
@@ -12408,6 +12498,28 @@
   "8bcab2ef61de6518": "上限 $0",
   "a16b48709357a5a7": "使用量を管理",
   "a00e74aaa421c524": "残り",
+  "0e34c3076c08feb2": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": [
+        "↻ +",
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        "%"
+      ]
+    },
+    " ",
+    "in ",
+    {
+      "i": 3,
+      "k": "_gt_value_3",
+      "v": "v"
+    }
+  ],
   "8bd6f07136317c8f": "選択した環境には、サブスクリプションの上限を報告するプロバイダーがありません。",
   "87f5d0c61b335f38": "接続したアカウントで ChatGPT の使用量を表示します。",
   "5b4c71b36b979e80": "コスト",
@@ -12647,9 +12759,14 @@
   "dd7a1e58c2553933": "{duration} 後にスリープ解除",
   "95cc952724dd7310": "まもなくスリープ解除",
   "3cc34921c0128593": "実行中",
-  "e777db2880f53a46": "回答なし",
   "dc90739d391a5e67": "あなたの回答: {choice}",
+  "4e96712d839ccbff": "{who} said {choice}",
+  "e777db2880f53a46": "回答なし",
+  "201490988858b511": "withdrawn by {by}",
   "389f2563b5b763fd": "短いステップ",
+  "99451a5d2d40440f": "Withdrawn by {by}.",
+  "3ee30a50b70fffab": "Withdrawn by {by}: {reason}",
+  "92e129bf413a1220": "withdrawn",
   "a41c8d758121ad81": "スリープ",
   "9db248b770096984": "待機",
   "c76124517af28686": "{duration} 実行中",
@@ -12684,6 +12801,49 @@
   "8bffb377e2a6a7de": "そのバージョンはもう登録されていません",
   "f92d9132f7b85d1a": "ステップを読み込んでいます…",
   "6ebc59f64c761a49": "まだ何もありません。",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
   "a759dccd157d7dae": [
     "あなたの回答: ",
     {
@@ -12714,6 +12874,15 @@
       "v": "v"
     }
   ],
+  "3759768c5d342c22": [
+    "answered",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
   "c98009be9a273b31": "実行を開く",
   "c8eb9be36d4d51ad": [
     {
@@ -12738,6 +12907,14 @@
   ],
   "02dfe6c63fd0b8a1": "理由を追加",
   "19abd94828a3bdbc": "先にエージェントに質問",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " needs a reason."
+  ],
   "a18721fa8f328361": "要対応",
   "bbf24e7920c1e86b": "実行中",
   "8d6e18d2ad832db6": "すべて",
@@ -12747,11 +12924,15 @@
   "5459bf696a187c26": "ワークフローの実行を読み込めませんでした",
   "d57c35d43b0f163a": "この実行はここにありません",
   "b9aae2f7cdb1a379": "ワークフローの実行はまだありません",
+  "45a94c724845ec1d": "Other",
   "8f15f66e545af7c0": "表示する実行",
   "b6409289e0c9a4dd": "ワークフロー",
   "035cb02ca1ae4952": "すべてのワークフロー ({count} 件)",
+  "8eeb9cb07d7c59e1": "Kind of question",
+  "e2131cbec8accfe3": "All kinds",
   "46d614fa7b4bf1e5": "ワークフローの実行",
   "1c635faa2fb45b8b": "まだ実行されていません。",
+  "e4d1316c85ed7066": "No questions of this kind wait on you.",
   "156ff7b625287a1e": "スキップ済みを非表示",
   "69b985b97ab45e6b": "スキップ済み {count} 件を表示",
   "2400254d362de84d": "ワークフローの実行を読み込んでいます…",
@@ -12791,6 +12972,7 @@
     }
   ],
   "5d8d278ff828102d": "すべてのワークフロー",
+  "3b0f1659172107e4": "All kinds",
   "39459da07479f482": "エージェント",
   "7741243632056b81": "{step} · トランスクリプト",
   "c512071143a5ba32": "このスレッドはもう存在しません。",

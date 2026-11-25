@@ -25,6 +25,7 @@
   "986b0873f913a840": "Die Richtlinie von {organization} erlaubt keine Webhook-Aufgaben.",
   "eebc538e25b09fe2": "Die Richtlinie von {organization} erlaubt keinen Import von Browser-Cookies.",
   "7642a133db05f164": "Die Richtlinie von {organization} erlaubt nicht, die lokalen Server dieses Rechners auf anderen Geräten zu öffnen.",
+  "e0856d6a402ad821": "{organization}'s policy does not allow project worktree layout commands.",
   "39f6771b49f9b3b6": "Standard verwenden",
   "45bb0e90e1c42046": "Wenn du zurückkommst",
   "d8fa0a55446bbb0d": "Bevor der Cache abläuft (Beta)",
@@ -498,7 +499,7 @@
   "bc24c300d53d61c5": "{host} hat auf keiner gespeicherten Route geantwortet.",
   "b0dd3cd876937ca8": "Verbindungsprofil {connectionId} ist nicht verfügbar.",
   "5ce46783e79ca9d1": "Zugangsdaten der Verbindung {connectionId} sind nicht verfügbar.",
-  "0bda0cac7f5acc20": "Die verbundene Umgebung {actual} stimmt nicht mit {expected} überein.",
+  "b39d1428ec8b23f5": "This address now runs a different T3 Code install ({actual}, not {expected}). Remove this connection and add it again.",
   "ea0d3e4e51d5706f": "Die Zugangsdaten der Umgebung sind ungültig.",
   "7283ebfd16d09677": "Die Zugangsdaten der Umgebung gewähren nicht den erforderlichen Zugriff.",
   "d3e9a9cb543b4b7b": "Die Umgebung hat die Authentifizierungsanfrage abgelehnt.",
@@ -1526,6 +1527,8 @@
   "4eb599c7f36c99ba": "Diese Design-Datei ist kein gültiges JSON.",
   "29a5ff50ce55c4f9": "VS-Code-Design",
   "10348092dfed8b11": "Dieses VS-Code-Design hat keine Farbe „editor.background“, daher lässt sich keine Palette daraus erstellen.",
+  "206811f6f441bfc7": "This project sets up worktrees with its own command, which nobody has approved as it is written now. This connection cannot approve it: approve it from a client that can use the terminal.",
+  "b8087c9a70c26da9": "Could not approve the worktree layout command.",
   "6dff8d487001c6cf": "Responsiv",
   "f5f61c338cc5aeb5": "Browser-Gerätesymbolleiste",
   "3b4eb5b5ec5e60cb": "Browser-Gerätevorlage",
@@ -1554,6 +1557,7 @@
   "6848f5bbb2bd9eec": "PDF-Dokument",
   "7873a79df0cf6d0e": "Browserseite",
   "0b55696e27387e4e": "Drücke Shift+Escape, um die Browserseite zu verlassen.",
+  "90dfebe26eb86b2d": "Page select options",
   "737d3c6bec93f9e6": "Dateien für die Seite auswählen",
   "e6a3fa7cfc14f86a": "Browserdialog",
   "61a552a67e9e3eac": "Antwort auf Dialog",
@@ -1986,13 +1990,16 @@
   "7af7f00b85cc2930": "Aktion bestätigen",
   "8b418a02b73f49b8": "Diese Aktion erfordert deine Bestätigung.",
   "e74139c17fab1fa1": "Bestätigen",
+  "4a18481bea4b4ad5": "New device signed in to {environmentLabel}",
+  "4144ab6aa487528a": "{device} connected through {product}. Not you? Review it.",
+  "a10cfdb27152c757": "{count, plural, one {{count} device} other {{count} devices}} connected through {product}. Not you? Review them.",
+  "4672f332c89dbcd9": "Prüfen",
   "775a3e99e2638341": "Ein Gerät möchte sich mit {environmentLabel} verbinden",
   "a8befcb9f1c61f60": "{device}. Genehmige nur, wenn der Code {code} angezeigt wird.",
   "ac48cc297029db41": "Genehmigen",
   "c12ca3fea745def0": "Das Gerät konnte nicht genehmigt werden",
   "af63f05ed2f5eeb3": "Ablehnen",
   "b735bab216b27041": "Das Gerät konnte nicht abgelehnt werden",
-  "4672f332c89dbcd9": "Prüfen",
   "913fc23f62321556": "Wähle ein gültiges Datum und eine Uhrzeit in der Zukunft.",
   "9485a52216cfc0d5": "Gib eine positive Dauer ein.",
   "9bc551235d78e133": "Zeitplantyp",
@@ -2644,6 +2651,8 @@
   "89b5e8f3887812da": "Gastanfrage",
   "62e626804919b294": "Eingabe nötig",
   "c6196d99000642b4": "Thread öffnen",
+  "70bdebaa3d291d3b": "Thread unavailable",
+  "a351ebbdcf1a3f7a": "This thread is on an environment this app is not connected to.",
   "826cb862b4a11fb3": "{label}:",
   "3e597ec938e7551b": "Du:",
   "a1fbf2422c588292": "Agent:",
@@ -2710,6 +2719,24 @@
   "a707abf0a4a73ffa": "Terminal schließen ({shortcut})",
   "9206ecf328948f90": "Terminal schließen",
   "9b1326a11cfe3308": "Noch keine Terminal-Sitzungen für diesen Thread.",
+  "49eda70cfd56e621": "Runs when a worktree thread starts, and when its folder is restored",
+  "188ccaa1199f5611": "Runs when a thread's worktree is removed",
+  "7e8476e7306acabe": "Let this project run its worktree commands?",
+  "8e11914556fd8b13": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " sets up worktree threads with its own commands from ",
+    {
+      "t": "code",
+      "i": 2,
+      "c": "t3.json"
+    },
+    ". They run on this environment's machine with your permissions, outside any agent sandbox. You are asked again whenever their text changes."
+  ],
+  "46807acd02a4ff72": "Approve and continue",
   "2ac142f34e5dabc2": "Repositorys im neuen Worktree: {selection}",
   "c514773a8031f00b": "Repositorys filtern",
   "e32b730f6d27753f": "Wähle die Repositorys, an denen dieser Thread arbeitet",
@@ -3639,8 +3666,8 @@
   "478e3b4551be4db3": "Extrahierten Text anzeigen",
   "e7205ebfead1aafc": "Vergrößerte Videovorschau",
   "1bda77e861bb472f": "Vergrößerte Bildvorschau",
-  "eebe5b17e3c19a1c": "Zurück, Videovorschau schließen",
-  "58fd0009a6eb7258": "Zurück, Bildvorschau schließen",
+  "fb633d54edaeb4b1": "Close video preview",
+  "62d0c453f5803180": "Close image preview",
   "47bae54b5f532ff3": "Vorheriges Medium",
   "fb9434aad2b5c0bb": "Dieses Bild konnte nicht geladen werden.",
   "26aee5d4e97bfb28": "Bild nicht verfügbar. Die Datei wurde möglicherweise verschoben oder gelöscht.",
@@ -3654,6 +3681,7 @@
   "ddb7e6f8ce99e657": "Nur wer auf diesem Rechner Agenten ausführen kann, kann den Bericht senden oder ablehnen.",
   "03c1eb603c112f47": "Nicht senden",
   "653405e4ed498d9f": "Senden",
+  "76cf478e5674fd12": "{count, plural, one {{count} match} other {{count} matches}}",
   "262955d6eb632f9b": "Die Zwischenablage-API ist beim Kopieren des Gast-Links nicht verfügbar.",
   "f1a4f2b04cdbb4ef": "Der Gast-Link konnte nicht in die Zwischenablage kopiert werden.",
   "cf3490a604e44d31": "Gastlink konnte nicht erstellt werden.",
@@ -3802,6 +3830,21 @@
     " wurde geschlossen"
   ],
   "dff97202cbdaec5b": "App anzeigen",
+  "796b81c4875c4feb": [
+    "The ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " app needs a newer ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " server on this environment. Update the server to use it."
+  ],
   "705cf2b2ee4e0e42": [
     "Die App ",
     {
@@ -4559,6 +4602,7 @@
       "c": "“ wird gelesen"
     }
   ],
+  "91aadfc843c600de": "Verify Google account",
   "a2aaca7ff8310186": "Chat öffnen",
   "a3048aaa541b7744": "Aktivität",
   "4a3cbccb2beedeb0": "Bild",
@@ -6700,8 +6744,8 @@
   "e545fcdb83e2c36a": "Zum Review hinzufügen",
   "2250f241daadd71b": "Zum Agenten hinzufügen",
   "be9b06fae29cc07a": "Alle Commits",
-  "5ef391d5403d7bdd": "{count, plural, one {Mehr anzeigen (noch {count})} other {Mehr anzeigen (noch {count})}}",
   "ccd5fc4db08374d7": "{count, plural, one {{count} Testdatei ausgeblendet} other {{count} Testdateien ausgeblendet}}",
+  "5ef391d5403d7bdd": "{count, plural, one {Mehr anzeigen (noch {count})} other {Mehr anzeigen (noch {count})}}",
   "c12871955b159db4": "in {app} angesehen",
   "98b353c208fd7977": "angesehen",
   "d65b870952bbe4f0": "Diese Häkchen werden hier gespeichert, nicht auf dem Host",
@@ -6896,6 +6940,7 @@
   "79772510c52e42f7": "Älteste zuerst",
   "06139a8d4fc794e8": "{term, select, mr {Merge Request #{number} nicht gefunden} cr {Änderungsanfrage #{number} nicht gefunden} other {Pull Request #{number} nicht gefunden}}",
   "0001ae1f2d78613e": "{term, select, mr {Es ist möglicherweise ein Issue statt eines Merge Requests, oder dieses Konto kann es nicht sehen.} cr {Es ist möglicherweise ein Issue statt einer Änderungsanfrage, oder dieses Konto kann es nicht sehen.} other {Es ist möglicherweise ein Issue statt eines Pull Requests, oder dieses Konto kann es nicht sehen.}}",
+  "c9bec97f6fa218c1": "Loading {term, select, mr {merge request} cr {change} other {pull request}} diff...",
   "6d2ebc126fb570a9": "Stack-Abfrage wiederholen",
   "5b068246238194d3": [
     "aktualisiert",
@@ -7647,9 +7692,20 @@
   "dc87902396b8ade4": "Buchstaben, Ziffern, '-' oder '_'.",
   "251dfec07b7c3612": "Dieser Treiber erfordert keine Konfiguration. Du kannst die Instanz jetzt hinzufügen.",
   "08fe32f007e788f1": "Manuell konfigurieren",
+  "65300794c1edb929": "Bearer token (optional)",
   "84eb2878dc17d3eb": "Verwaltungsschlüssel",
   "7ac196c1e8175928": "Standardmäßig der Hostname des Hubs",
+  "0c026221dcd2820b": "Add an HTTP quota source",
   "e3548407052e9e12": "CLIProxyAPI-Hub hinzufügen",
+  "d185c750156b2121": [
+    "Read quotas from an endpoint on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "432e85a50e2e7964": [
     "Zeige das Kontingent jedes Kontos, das der Hub bündelt, neben den Anbietern auf",
     " ",
@@ -7660,9 +7716,12 @@
     },
     ". Der Schlüssel bleibt auf diesem Server."
   ],
+  "2324770ba91371ac": "Endpoint URL",
   "556a695b117565ac": "Hub-URL",
+  "e4e5b75bba51396c": "Bearer token (optional)",
   "e62cedcbcdbafc75": "Verwaltungsschlüssel",
   "f1b3d0634ec035cb": "Bezeichnung (optional)",
+  "b35256ca61016104": "Quelle hinzufügen",
   "52814dd6f7d0a15c": "Hub hinzufügen",
   "27b770d3402abfa2": "Erweitert",
   "584595dfcadab699": "Artwork",
@@ -8506,7 +8565,6 @@
   "0c99fa183ed512e8": "{platform} teilweise verfügbar",
   "e6886a7f77b73a8e": "{platform} nicht verfügbar",
   "b0b7610d9860d18d": "Auf diesem Rechner nicht eingerichtet.",
-  "b35256ca61016104": "Quelle hinzufügen",
   "3b20ef0670ae4b0b": "Rechner über SSH",
   "121ccffacb6b8c6d": "Expo-Simulatoren",
   "130b55a1410a8030": "Simlock-Pool (Alpha)",
@@ -8989,7 +9047,7 @@
   "a9cdd8c7073be920": "Befehlspalette: Umschalten",
   "4e0943e8c7a465d1": "Dateiauswahl: Umschalten",
   "df5fdcdf26a6b52a": "Projektsuche: Umschalten",
-  "a8ff6d33b060736f": "Nutzung: Öffnen",
+  "0ca6fd2b8fcab2c3": "Usage: Toggle",
   "a513d51b71b95674": "Design: Auswählen",
   "1ffd8427452372e1": "Darstellung: Wechseln",
   "3a3bb4a7551a87cc": "Design-Editor: Umschalten",
@@ -9097,6 +9155,10 @@
   "f0e853acd2006d53": "Verknüpfte Umgebungen",
   "ef10c2dff987f3ea": "Führe mehrstufige Workflows aus Dateien im Ordner workflows des T3-Home dieses Servers aus. Öffne sie über die Befehlspalette. Solange es aus ist, läuft nichts aus diesem Ordner; Läufe warten, bis es wieder an ist.",
   "2dadb2359422121c": "Workflows",
+  "933dabf0700708af": "How many skipped runs each workflow keeps in its history. Older skipped runs are deleted; runs that did something are always kept.",
+  "f172d7e5deb24f75": "Reset skipped runs kept to default",
+  "ba94015389f327bc": "Skipped runs kept",
+  "d52b3d6bf9f2a013": "Gemischt",
   "13e86eb5d8287a71": "Nach einer Claude- oder Codex-Runde eine vorhergesagte nächste Nachricht im leeren Eingabefeld anzeigen. Tab übernimmt sie. Jede ist eine zusätzliche gecachte Anfrage in deinem Tarif. Erfordert Codex 0.165+. Claude-Threads werden nach einem Neustart aktualisiert.",
   "d4b2a2ec812aafb0": "Nächsten Prompt vorschlagen",
   "298c7150a7621c80": "Simlock-Geräte-Hosts",
@@ -9104,7 +9166,6 @@
   "f9904f78d3003f58": "Schneller Worktree-Checkout",
   "9c2f647882522302": "Die ausgewählten Rechner verwenden unterschiedliche Modi für Agenten-Feedback.",
   "31bbf7bf8c0a5279": "Agenten-Feedback",
-  "d52b3d6bf9f2a013": "Gemischt",
   "fdd433881febcefa": [
     "Share a thread with a guest who watches it live in a browser and sends messages you approve.",
     " "
@@ -9455,6 +9516,28 @@
   "d2ad2df4c015f417": "Die Gruppierungsregel bestimmt, wie jeder Checkout Projektgruppen in der Seitenleiste beitritt. Eine Änderung kann einen Checkout in ein anderes Projekt verschieben.",
   "0bdf6ae2117b6c23": "Einstellung nicht gefunden? Lass dieses Projekt oben ausgewählt und wechsle zu einer anderen Einstellungsseite.",
   "3310e10f1efdc9bd": "Symbol auswählen",
+  "a9cb97fca6a6576b": "Create command",
+  "90f45a354884ccdd": "Remove command",
+  "0cdc8cdbed3e5eae": "Worktree layout",
+  "c17b25519e2b194e": "Could not load the worktree layout commands",
+  "78e308ada516928b": "Could not approve the command",
+  "a0c772d32a233da6": "Could not revoke the approval",
+  "5ccd5614c65f8d1f": "Revoke approval of the {kind} command",
+  "80c3794a5fa12f3a": "Approve the {kind} command",
+  "f206891e124c77b0": [
+    "This project's ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": "t3.json"
+    },
+    " sets up worktree threads with its own commands. They run on this environment's machine with your permissions, and only as approved here: a command whose text changes needs approval again."
+  ],
+  "8e73b883d41d4102": "Aus",
+  "f6a91589456cca50": "Approved",
+  "c92657bb7f2293ff": "Needs approval",
+  "f1e5c1be1ac92361": "Approve",
+  "fcb5f3c4d4753326": "This connection cannot approve commands. Use a client that can use the terminal.",
   "65ccf4f8e049003e": "Wähle ein Projekt, um Name, Symbol, Checkouts und Aktionen zu verwalten.",
   "067beea7d8f6e2c9": "Alle Umgebungen anzeigen",
   "1bf6da50131340d4": "Farbton der Akzentfarbe",
@@ -11329,7 +11412,6 @@
   "b0d0aebadc521ed1": "Gespeicherte Browser-Aufnahmen nach so vielen Tagen löschen. Ältere Aufnahme-Links öffnen sich dann nicht mehr.",
   "fe4208562792c313": "Alte rotierte Logs löschen",
   "8debac9c8e9cff47": "Inaktive rotierte Log-Dateien nach so vielen Tagen löschen. Aktuelle Logs bleiben erhalten.",
-  "8e73b883d41d4102": "Aus",
   "80d58a3fd4e4212a": "Projekt",
   "de770505be25f1ff": "Ordner",
   "ada7b9a4d96959d2": "Thread",
@@ -11726,10 +11808,11 @@
     },
     " wechseln"
   ],
-  "f54364b854a07918": "Keine Hubs konfiguriert.",
+  "39f64d971ba424b5": "No usage sources configured.",
+  "dbd877abdc2c7c81": "HTTP quota source",
   "4cf6a373a7535324": "{name} · Deaktiviert",
-  "1d1e9cda847bd398": "Der Verwaltungsschlüssel des Hubs wird von diesem Server gelöscht. Seine Konten verschwinden aus der Limits-Ansicht; der Hub selbst bleibt unberührt. Füge ihn mit URL und Schlüssel erneut hinzu, um sie zurückzuholen.",
-  "c9bee4f93481b77a": "Hub entfernen",
+  "c792e744936dbe1b": "Add HTTP source",
+  "4032a03ee5301037": "The saved connection and its credentials are removed from this environment.",
   "0424112d5a0ecd71": "Automatisch",
   "3f0e1b77e45d53a9": "Tippen zum Umschalten, halten zum Sprechen",
   "45928549c050a1b4": "Halten",
@@ -12060,6 +12143,7 @@
   "6826fa9579c22035": "beta teilen gast einladen link teammitglied zuschauen t3 connect tunnel",
   "f10c06cba0cdf7fe": "beta anderen rechner verknüpfen vps peer agenten dort arbeiten delegieren",
   "bc0b409d89ce086e": "beta workflow dauerhafte läufe automatisierung schritte zeitplan webhook ordner",
+  "4b2669dcdb7d3776": "workflow history retention delete old skipped runs webhook",
   "4a21cf825a2045b0": "beta tab autovervollständigung nächste nachricht vorhersagen claude codex ghost text",
   "fea2dc36585c4a20": "Simlock-Geräte-Hosts (Alpha)",
   "9d834d178130180e": "beta alpha simlock callstack simulator emulator ios android pool lease gateway",
@@ -12276,11 +12360,14 @@
   "37ffec8201f153c1": "Fehlgeschlagen",
   "984b361806ce8d25": "Aufgeweckt",
   "c6e8abc00ae470d2": "Fertig",
+  "353b08f4363dbb2c": "Pending",
   "f31a95961de19433": "Issue {key}: {title}, {state}",
   "2dd9d295c882ef65": "{count, plural, one {{count} verknüpftes Issue} other {{count} verknüpfte Issues}}",
   "8cf699ae75fd8067": "Angeheftet",
   "be451f475c514b37": "Aufgeweckt-Hinweis schließen",
   "e9ced65134f2f36c": "Thread jetzt aufwecken",
+  "374dac09151d4578": "Pending",
+  "a8f30f631e2b010e": "Waiting to sync with its environment",
   "aca5896600bf173e": "Du hast gerade einen anderen Branch ausgecheckt.",
   "f665b5be60d8c144": [
     "Übergeben von ",
@@ -12354,6 +12441,8 @@
   "9bca02be2b4d612a": "nicht verbunden",
   "2dcc418b6a13b83c": "erfordert manuelles Update",
   "fa8faa732a2688ef": "im Kanal {channel}",
+  "e65649675cb4cbaa": "turned off",
+  "a1e7c08d9ef315c7": "still loading",
   "9b961309baafa09d": "keine Berechtigung",
   "9bafb2622c22d145": "wird bereits aktualisiert",
   "61aa0109862ff7ca": "Nightly",
@@ -12410,6 +12499,7 @@
   "9c015d3d034316cb": "Verwende die Pfeiltasten, um den fokussierten Wert anzupassen. Halte Shift für größere Schritte. Pos1 und Ende setzen Minimum und Maximum. Mit Tab wechselst du zwischen Sättigung und Helligkeit.",
   "8639d5532561f87f": "Schließen",
   "e1186ad82ee08b33": "Schließen",
+  "a4579e548b768663": "Show sidebar",
   "a1b11a1cf39c9dc9": "Seitenleiste skalieren",
   "c557090df5722838": "Seitenleiste umschalten",
   "bbde430e56272901": "Ziehen, um die Seitenleiste zu skalieren",
@@ -12459,6 +12549,28 @@
   "8bcab2ef61de6518": "0-$-Limit",
   "a16b48709357a5a7": "Nutzung verwalten",
   "a00e74aaa421c524": "übrig",
+  "0e34c3076c08feb2": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": [
+        "↻ +",
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        "%"
+      ]
+    },
+    " ",
+    "in ",
+    {
+      "i": 3,
+      "k": "_gt_value_3",
+      "v": "v"
+    }
+  ],
   "8bd6f07136317c8f": "Kein Anbieter in den ausgewählten Umgebungen meldet Abo-Limits.",
   "87f5d0c61b335f38": "Nutzung in ChatGPT mit deinem verbundenen Konto ansehen.",
   "5b4c71b36b979e80": "Kosten",
@@ -12701,9 +12813,14 @@
   "dd7a1e58c2553933": "wacht in {duration} auf",
   "95cc952724dd7310": "wacht gleich auf",
   "3cc34921c0128593": "läuft",
-  "e777db2880f53a46": "niemand hat geantwortet",
   "dc90739d391a5e67": "Du hast {choice} gesagt",
+  "4e96712d839ccbff": "{who} said {choice}",
+  "e777db2880f53a46": "niemand hat geantwortet",
+  "201490988858b511": "withdrawn by {by}",
   "389f2563b5b763fd": "Kurze Schritte",
+  "99451a5d2d40440f": "Withdrawn by {by}.",
+  "3ee30a50b70fffab": "Withdrawn by {by}: {reason}",
+  "92e129bf413a1220": "withdrawn",
   "a41c8d758121ad81": "hat geschlafen",
   "9db248b770096984": "hat gewartet",
   "c76124517af28686": "läuft seit {duration}",
@@ -12739,6 +12856,49 @@
   "8bffb377e2a6a7de": "ihre Version ist nicht mehr registriert",
   "f92d9132f7b85d1a": "Schritte werden geladen…",
   "6ebc59f64c761a49": "Noch nichts.",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " said",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
   "a759dccd157d7dae": [
     "Du hast",
     " ",
@@ -12772,6 +12932,15 @@
       "v": "v"
     }
   ],
+  "3759768c5d342c22": [
+    "answered",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
   "c98009be9a273b31": "Ausführung öffnen",
   "c8eb9be36d4d51ad": [
     "Thread auf ",
@@ -12797,6 +12966,14 @@
   ],
   "02dfe6c63fd0b8a1": "Begründung hinzufügen",
   "19abd94828a3bdbc": "Erst den Agenten fragen",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " needs a reason."
+  ],
   "a18721fa8f328361": "Braucht dich",
   "bbf24e7920c1e86b": "Läuft",
   "8d6e18d2ad832db6": "Alle",
@@ -12806,11 +12983,15 @@
   "5459bf696a187c26": "Workflow-Ausführungen konnten nicht geladen werden",
   "d57c35d43b0f163a": "Diesen Lauf gibt es hier nicht",
   "b9aae2f7cdb1a379": "Noch keine Workflow-Ausführungen",
+  "45a94c724845ec1d": "Other",
   "8f15f66e545af7c0": "Welche Ausführungen",
   "b6409289e0c9a4dd": "Workflow",
   "035cb02ca1ae4952": "Alle {count} Workflows",
+  "8eeb9cb07d7c59e1": "Kind of question",
+  "e2131cbec8accfe3": "All kinds",
   "46d614fa7b4bf1e5": "Workflow-Ausführungen",
   "1c635faa2fb45b8b": "Noch nie gelaufen.",
+  "e4d1316c85ed7066": "No questions of this kind wait on you.",
   "156ff7b625287a1e": "Übersprungene ausblenden",
   "69b985b97ab45e6b": "{count} übersprungene anzeigen",
   "2400254d362de84d": "Workflow-Ausführungen werden geladen…",
@@ -12850,6 +13031,7 @@
     }
   ],
   "5d8d278ff828102d": "Alle Workflows",
+  "3b0f1659172107e4": "All kinds",
   "39459da07479f482": "Agent",
   "7741243632056b81": "{step} · Transkript",
   "c512071143a5ba32": "Diesen Thread gibt es nicht mehr.",

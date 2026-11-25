@@ -1733,15 +1733,6 @@ describe("source control tools", () => {
         })
         .pipe(Effect.flip);
       expect(backwards.message).toContain("startLine must not be after line");
-      rangeComment = false;
-      const unsupported = yield* harness
-        .call("pull_request_review", {
-          verdict: "comment",
-          comments: [{ path: "b.ts", line: 10, startLine: 9, body: "Range" }],
-        })
-        .pipe(Effect.flip);
-      expect(unsupported.message).toContain("does not support multiline");
-      expect(reviews).toHaveLength(1);
 
       // A range whose start the diff shows names its end, the line that is missing.
       const rangeError = yield* harness
@@ -1760,6 +1751,15 @@ describe("source control tools", () => {
         })
         .pipe(Effect.flip);
       expect(startError.message).toContain("b.ts line 2 (new side) is not in this PR's diff");
+      expect(reviews).toHaveLength(1);
+      rangeComment = false;
+      const unsupported = yield* harness
+        .call("pull_request_review", {
+          verdict: "comment",
+          comments: [{ path: "b.ts", line: 10, startLine: 9, body: "Range" }],
+        })
+        .pipe(Effect.flip);
+      expect(unsupported.message).toContain("does not support multiline");
       expect(reviews).toHaveLength(1);
     }),
   );
