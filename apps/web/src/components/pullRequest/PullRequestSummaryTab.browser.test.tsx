@@ -310,6 +310,7 @@ it.each(["src/file.ts", "/PATCHSET_LEVEL"])(
         threadRef={null}
         reference={value}
         detail={value}
+        observedAt={value.observedAt}
         activityPending={false}
         activityError={null}
         onRefresh={refresh}
@@ -376,6 +377,7 @@ it.each([false, true])(
           reference={value}
           detail={value}
           threadRef={null}
+          observedAt={value.observedAt}
           activityPending={false}
           activityError={null}
           onRefresh={() => {}}

@@ -53,20 +53,14 @@ const dependencies = [
   ProjectService.ProjectService,
 ];
 
-const forgeDependencies = [
-  ...dependencies,
-  PullRequestService.PullRequestService,
-];
+const forgeDependencies = [...dependencies, PullRequestService.PullRequestService];
 
 const guideDependencies = [
   ...dependencies,
   PullRequestReviewGuideService.PullRequestReviewGuideService,
 ];
 
-const watchDependencies = [
-  ...dependencies,
-  PullRequestWatchService.PullRequestWatchService,
-];
+const watchDependencies = [...dependencies, PullRequestWatchService.PullRequestWatchService];
 
 export const PullRequestTargetInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,
@@ -321,8 +315,7 @@ export const ListThreadPullRequestsResult = Schema.Struct({
   /** Pass as `cursor` for the next page; null on the last page. */
   nextCursor: Schema.NullOr(Schema.String),
 });
-export type ListThreadPullRequestsResult =
-  typeof ListThreadPullRequestsResult.Type;
+export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
@@ -343,9 +336,7 @@ const LinkPullRequestsTool = Tool.make("link_pull_requests", {
     "Link several PRs to a thread. Use it instead of one `link_pull_request` per PR. URLs that are not PRs come back in `invalidUrls`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
-    threadId: Schema.optional(
-      ThreadId.annotate({ description: "Thread. Default: this thread." }),
-    ),
+    threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
     urls: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
   }),
   success: LinkPullRequestsResult,
@@ -377,9 +368,7 @@ const UnlinkPullRequestsTool = Tool.make("unlink_pull_requests", {
     "Unlink a thread's PRs whose last known state is in `states`. Use it instead of one `unlink_pull_request` per PR. PRs with no known state stay linked.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
-    threadId: Schema.optional(
-      ThreadId.annotate({ description: "Thread. Default: this thread." }),
-    ),
+    threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
     states: Schema.Array(PullRequestState).check(Schema.isMinLength(1)),
   }),
   success: UnlinkPullRequestsResult,
@@ -397,9 +386,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
     "List a thread's PRs, with last known state and stack order (bottom to top). Not an end-of-work check.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
-    threadId: Schema.optional(
-      ThreadId.annotate({ description: "Thread. Default: this thread." }),
-    ),
+    threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
     states: Schema.optional(Schema.Array(PullRequestState)),
     cursor: Schema.optional(Schema.String),
   }),
@@ -462,8 +449,7 @@ const GuideTarget = Schema.Struct({
 const GuideOutcome = Schema.Struct({
   ...PullRequestIdentity,
   outcome: Schema.Literals(["started", "running", "failed"]).annotate({
-    description:
-      "started: a run began. running: joined a run for this head. failed: see detail.",
+    description: "started: a run began. running: joined a run for this head. failed: see detail.",
   }),
   detail: Schema.NullOr(Schema.String),
 });
@@ -471,8 +457,7 @@ const GuideOutcome = Schema.Struct({
 export const WritePullRequestGuidesResult = Schema.Struct({
   guides: Schema.Array(GuideOutcome),
 });
-export type WritePullRequestGuidesResult =
-  typeof WritePullRequestGuidesResult.Type;
+export type WritePullRequestGuidesResult = typeof WritePullRequestGuidesResult.Type;
 
 export const ReadPullRequestGuideResult = Schema.Struct({
   ...PullRequestIdentity,
@@ -490,10 +475,7 @@ const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
     "Write review guides for up to 20 PRs (the tour in the PR Guide tab). Returns once runs start. Each run takes minutes in a temporary checkout. A run for the same head is joined. Read with `read_pull_request_guide`. Fails while guides are off.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
-    pullRequests: Schema.Array(GuideTarget).check(
-      Schema.isMinLength(1),
-      Schema.isMaxLength(20),
-    ),
+    pullRequests: Schema.Array(GuideTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   }),
   success: WritePullRequestGuidesResult,
   failure: PullRequestToolError,
@@ -524,9 +506,7 @@ const ReadPullRequestGuideTool = Tool.make("read_pull_request_guide", {
 
 export const ThreadPullRequestInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,
-  number: Schema.optional(
-    PositiveInt.annotate({ description: "Default: the branch's PR." }),
-  ),
+  number: Schema.optional(PositiveInt.annotate({ description: "Default: the branch's PR." })),
   repository: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadPullRequestInput = typeof ThreadPullRequestInput.Type;
@@ -706,16 +686,10 @@ const ListPullRequestsTool = Tool.make("pull_request_list", {
   description: "List PRs in this thread's repository, recently updated first.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
-    state: Schema.optional(
-      PullRequestListState.annotate({ description: "Default: open." }),
-    ),
+    state: Schema.optional(PullRequestListState.annotate({ description: "Default: open." })),
     involvement: Schema.optional(PullRequestInvolvement),
-    query: Schema.optional(
-      TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
-    ),
-    limit: Schema.optional(
-      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
-    ),
+    query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+    limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
     cursor: Schema.optional(TrimmedNonEmptyString),
   }),
   success: ListPullRequestsResult,
@@ -811,8 +785,7 @@ export const ReviewLineComment = Schema.Struct({
   startLine: Schema.optional(PositiveInt),
   side: Schema.optional(
     Schema.Literals(["new", "old"]).annotate({
-      description:
-        "Default new. old: line numbers in the base, for removed lines.",
+      description: "Default new. old: line numbers in the base, for removed lines.",
     }),
   ),
   body: TrimmedNonEmptyString,
@@ -827,9 +800,7 @@ const ReviewPullRequestTool = Tool.make("pull_request_review", {
     verdict: PullRequestReviewVerdict,
     expectedHeadSha: Schema.optional(TrimmedNonEmptyString),
     body: Schema.optional(Schema.String),
-    comments: Schema.optional(
-      Schema.Array(ReviewLineComment).check(Schema.isMaxLength(50)),
-    ),
+    comments: Schema.optional(Schema.Array(ReviewLineComment).check(Schema.isMaxLength(50))),
   }),
   success: Schema.Struct(PullRequestIdentity),
   failure: PullRequestToolError,
@@ -856,8 +827,7 @@ const MergePullRequestTool = Tool.make("pull_request_merge", {
     ),
     stack: Schema.optional(
       Schema.Boolean.annotate({
-        description:
-          "Merge this PR and every open stack layer below it at once.",
+        description: "Merge this PR and every open stack layer below it at once.",
       }),
     ),
   }),
@@ -905,9 +875,7 @@ const CheckLogsTool = Tool.make("ci_logs", {
     ...ThreadPullRequestInput.fields,
     check: Schema.optional(TrimmedNonEmptyString),
     tailLines: Schema.optional(
-      Schema.Int.check(
-        Schema.isBetween({ minimum: 1, maximum: 2000 }),
-      ).annotate({
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2000 })).annotate({
         description: "Default: 200.",
       }),
     ),

@@ -20,12 +20,10 @@ it.effect("names a real SQLite condition without copying query data", () =>
     const payload = "sql-private-sentinel";
     yield* sql`CREATE TABLE error_test (private_column TEXT PRIMARY KEY)`;
     yield* sql`INSERT INTO error_test VALUES (${payload})`;
-    const cause = yield* Effect.flip(
-      sql`INSERT INTO error_test VALUES (${payload})`,
+    const cause = yield* Effect.flip(sql`INSERT INTO error_test VALUES (${payload})`);
+    const error = toPersistenceSqlError("OrchestrationCommandReceiptRepository.upsert:query")(
+      cause,
     );
-    const error = toPersistenceSqlError(
-      "OrchestrationCommandReceiptRepository.upsert:query",
-    )(cause);
 
     assert.equal(error.detail, "SQLITE(1555) constraint failed");
     assert.equal(error.cause, cause);
@@ -46,30 +44,25 @@ it("reads the condition through a wrapping driver error", () => {
   assert.equal(error.detail, "SQLITE(5) database is locked");
 });
 
-it.effect(
-  "maps schema errors without copying rejected payloads into diagnostics",
-  () =>
-    Effect.gen(function* () {
-      const rejectedPayload = "runtime-payload-secret-sentinel";
-      const cause = yield* Effect.flip(
-        decodeRuntimePayload({
-          runtimePayload: {
-            attempt: rejectedPayload,
-          },
-        }),
-      );
-      const error = PersistenceDecodeError.fromSchemaError(
-        "ProviderSessionRuntimeRepository.list:decodeRows",
-        cause,
-      );
+it.effect("maps schema errors without copying rejected payloads into diagnostics", () =>
+  Effect.gen(function* () {
+    const rejectedPayload = "runtime-payload-secret-sentinel";
+    const cause = yield* Effect.flip(
+      decodeRuntimePayload({
+        runtimePayload: {
+          attempt: rejectedPayload,
+        },
+      }),
+    );
+    const error = PersistenceDecodeError.fromSchemaError(
+      "ProviderSessionRuntimeRepository.list:decodeRows",
+      cause,
+    );
 
-      assert.equal(
-        error.operation,
-        "ProviderSessionRuntimeRepository.list:decodeRows",
-      );
-      assert.equal(error.cause, cause);
-      assert.notInclude(error.issue, rejectedPayload);
-      assert.notInclude(error.message, rejectedPayload);
-      assert.include(error.issue, "InvalidType");
-    }),
+    assert.equal(error.operation, "ProviderSessionRuntimeRepository.list:decodeRows");
+    assert.equal(error.cause, cause);
+    assert.notInclude(error.issue, rejectedPayload);
+    assert.notInclude(error.message, rejectedPayload);
+    assert.include(error.issue, "InvalidType");
+  }),
 );

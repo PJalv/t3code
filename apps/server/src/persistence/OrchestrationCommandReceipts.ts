@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  IsoDateTime,
-  NonNegativeInt,
-  ProjectId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { CommandId, IsoDateTime, NonNegativeInt, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
@@ -29,8 +23,7 @@ export const OrchestrationCommandReceipt = Schema.Struct({
   status: Schema.Literals(["accepted", "rejected"]),
   error: Schema.NullOr(Schema.String),
 });
-export type OrchestrationCommandReceipt =
-  typeof OrchestrationCommandReceipt.Type;
+export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type;
 
 export const GetByCommandIdInput = Schema.Struct({
   commandId: CommandId,
@@ -55,9 +48,7 @@ export class OrchestrationCommandReceiptRepository extends Context.Service<
       OrchestrationCommandReceiptRepositoryError
     >;
   }
->()(
-  "t3/persistence/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository",
-) {}
+>()("t3/persistence/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository") {}
 
 const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -117,20 +108,15 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       `,
   });
 
-  const upsert: OrchestrationCommandReceiptRepository["Service"]["upsert"] = (
-    receipt,
-  ) =>
+  const upsert: OrchestrationCommandReceiptRepository["Service"]["upsert"] = (receipt) =>
     upsertReceiptRow(receipt).pipe(
-      Effect.mapError(
-        toPersistenceSqlError(
-          "OrchestrationCommandReceiptRepository.upsert:query",
-        ),
-      ),
+      Effect.mapError(toPersistenceSqlError("OrchestrationCommandReceiptRepository.upsert:query")),
     );
 
-  const insertIfAbsent: OrchestrationCommandReceiptRepository["Service"]["insertIfAbsent"] =
-    (receipt) =>
-      sql<{ readonly command_id: string }>`
+  const insertIfAbsent: OrchestrationCommandReceiptRepository["Service"]["insertIfAbsent"] = (
+    receipt,
+  ) =>
+    sql<{ readonly command_id: string }>`
       INSERT INTO orchestration_command_receipts (
         command_id,
         aggregate_kind,
@@ -154,24 +140,21 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       ON CONFLICT(command_id) DO NOTHING
       RETURNING command_id
     `.pipe(
-        Effect.map((rows) => rows.length === 1),
-        Effect.mapError(
-          toPersistenceSqlError(
-            "OrchestrationCommandReceiptRepository.insertIfAbsent:query",
-          ),
-        ),
-      );
+      Effect.map((rows) => rows.length === 1),
+      Effect.mapError(
+        toPersistenceSqlError("OrchestrationCommandReceiptRepository.insertIfAbsent:query"),
+      ),
+    );
 
-  const getByCommandId: OrchestrationCommandReceiptRepository["Service"]["getByCommandId"] =
-    (input) =>
-      findReceiptByCommandId(input).pipe(
-        NodeSqliteClient.readOnly,
-        Effect.mapError(
-          toPersistenceSqlError(
-            "OrchestrationCommandReceiptRepository.getByCommandId:query",
-          ),
-        ),
-      );
+  const getByCommandId: OrchestrationCommandReceiptRepository["Service"]["getByCommandId"] = (
+    input,
+  ) =>
+    findReceiptByCommandId(input).pipe(
+      NodeSqliteClient.readOnly,
+      Effect.mapError(
+        toPersistenceSqlError("OrchestrationCommandReceiptRepository.getByCommandId:query"),
+      ),
+    );
 
   return {
     insertIfAbsent,

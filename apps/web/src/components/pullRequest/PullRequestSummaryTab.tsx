@@ -50,15 +50,8 @@ import { formatFullTimestamp } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import { PullRequestEditButton } from "./PullRequestEditButton";
 import { PullRequestDiscussionStatus } from "./PullRequestDiscussionStatus";
-import {
-  gerritCommitMessageParts,
-  PullRequestGerritSummary,
-} from "./PullRequestGerritSummary";
-import {
-  Collapsible,
-  CollapsiblePanel,
-  CollapsibleTrigger,
-} from "../ui/collapsible";
+import { gerritCommitMessageParts, PullRequestGerritSummary } from "./PullRequestGerritSummary";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Menu,
   MenuCheckboxItem,
@@ -144,9 +137,7 @@ function CommentIdentity({
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const actor = comment.author;
   const profileUrl = actor
-    ? sourceControlClients
-        .get(detail.provider)
-        .authorProfileUrl(actor.login, detail.url)
+    ? sourceControlClients.get(detail.provider).authorProfileUrl(actor.login, detail.url)
     : null;
   return (
     <h2 className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
@@ -203,10 +194,7 @@ function CommentLocation({
       : `${path}${thread?.line ? `:${thread.line}` : ""}`;
   return (
     <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-      <SharedTooltipTrigger
-        render={<span className="truncate font-mono" />}
-        label={label}
-      >
+      <SharedTooltipTrigger render={<span className="truncate font-mono" />} label={label}>
         {label}
       </SharedTooltipTrigger>
       {thread?.isOutdated ? (
@@ -302,9 +290,7 @@ function chatSubject(
       ? { kind: "thread", thread }
       : null;
   }
-  return visibleBody(comment.body) === null
-    ? null
-    : { kind: "comment", comment };
+  return visibleBody(comment.body) === null ? null : { kind: "comment", comment };
 }
 
 function AddToChatButton({ onClick }: { onClick: () => void }) {
@@ -361,12 +347,9 @@ function CollapsedComment({
             <CommentIdentity comment={comment} detail={detail} threadRef={editing.threadRef} />
             {replyCount > 0 ? (
               <span className="shrink-0 py-1 text-xs text-muted-foreground">
-                {gt(
-                  "{count, plural, one {{count} reply} other {{count} replies}}",
-                  {
-                    count: replyCount,
-                  },
-                )}
+                {gt("{count, plural, one {{count} reply} other {{count} replies}}", {
+                  count: replyCount,
+                })}
               </span>
             ) : null}
             {/* Collapsed, the status label already says "Resolved". It goes before the
@@ -376,17 +359,10 @@ function CollapsedComment({
               ref={statusTriggerRef}
               className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
             >
-              {thread?.isResolved ? (
-                <PullRequestDiscussionStatus resolved />
-              ) : (
-                label
-              )}
+              {thread?.isResolved ? <PullRequestDiscussionStatus resolved /> : label}
               <ChevronDownIcon
                 aria-hidden
-                className={cn(
-                  "size-3.5 transition-transform",
-                  open && "rotate-180",
-                )}
+                className={cn("size-3.5 transition-transform", open && "rotate-180")}
               />
             </CollapsibleTrigger>
             {onAddToChat ? <AddToChatButton onClick={onAddToChat} /> : null}
@@ -396,9 +372,7 @@ function CollapsedComment({
           {!open && body ? (
             <CollapsibleTrigger
               className="mt-2 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
-              onClick={() =>
-                statusTriggerRef.current?.focus({ preventScroll: true })
-              }
+              onClick={() => statusTriggerRef.current?.focus({ preventScroll: true })}
             >
               {pullRequestCommentPreview(body, detail.provider)}
             </CollapsibleTrigger>
@@ -408,11 +382,7 @@ function CollapsedComment({
           {open ? (
             <div className="px-3 pb-3">
               {body === null && !editing.canEdit(comment) ? null : (
-                <CommentBody
-                  className="mt-2"
-                  comment={comment}
-                  editing={editing}
-                />
+                <CommentBody className="mt-2" comment={comment} editing={editing} />
               )}
               {replies ? <div className="mt-3">{replies}</div> : null}
               {replyComposer}
@@ -477,12 +447,8 @@ export function PullRequestSection({
   const setOpenWithScrollAnchor = (nextOpen: boolean) => {
     if (!nextOpen) {
       const heading = headingRef.current;
-      const section = heading?.closest<HTMLElement>(
-        "[data-pull-request-summary-section]",
-      );
-      const scroller = heading?.closest<HTMLElement>(
-        "[data-pull-request-summary-scroll]",
-      );
+      const section = heading?.closest<HTMLElement>("[data-pull-request-summary-section]");
+      const scroller = heading?.closest<HTMLElement>("[data-pull-request-summary-scroll]");
       if (heading && section && scroller) {
         const target = sectionCollapseAnchorScrollTop({
           scrollTop: scroller.scrollTop,
@@ -593,8 +559,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
   const resolve = useMessages();
   const fixFindingLabel = requestedFixFindingLabel ?? gt("Fix in a thread");
   const fixCheckLabel =
-    requestedFixCheckLabel ??
-    gt("Fix", { $context: "verb, fix a review finding" });
+    requestedFixCheckLabel ?? gt("Fix", { $context: "verb, fix a review finding" });
   const terminology = sourceControlClients.get(detail.provider).changeRequest;
   const viewKey = `${environmentId}:${detail.url}`;
   const rememberView = (patch: Partial<SummaryView>) => {
@@ -613,8 +578,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     setShownState(next);
     rememberView({ shown: next.count });
   };
-  const shownConversations =
-    shown.url === detail.url ? shown.count : COMMENT_PAGE;
+  const shownConversations = shown.url === detail.url ? shown.count : COMMENT_PAGE;
   const [commentFilter, setCommentFilter] = useLocalStorage(
     COMMENT_FILTER_STORAGE_KEY,
     DEFAULT_COMMENT_FILTER,
@@ -624,10 +588,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     detail.comments,
     pullRequestConversationThreads(detail),
   );
-  const filteredItems = filterPullRequestConversationItems(
-    items,
-    commentFilter,
-  );
+  const filteredItems = filterPullRequestConversationItems(items, commentFilter);
   const commentCount = items.reduce(
     (count, item) => count + pullRequestConversationItemComments(item).length,
     0,
@@ -638,8 +599,10 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
       (count, item) => count + pullRequestConversationItemComments(item).length,
       0,
     );
-  const { shown: recentItems, hidden: hiddenConversationCount } =
-    pagePullRequestConversationItems(filteredItems, shownConversations);
+  const { shown: recentItems, hidden: hiddenConversationCount } = pagePullRequestConversationItems(
+    filteredItems,
+    shownConversations,
+  );
   const [commentOrder, setCommentOrder] = useState(
     () => summaryViewByScopeKey.get(viewKey)?.order ?? "newest",
   );
@@ -667,10 +630,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
       </Button>
     ) : null;
   // Verdicts outside the visible comment window still count.
-  const reviewOutcomes = latestPullRequestReviewOutcomes(
-    detail.comments,
-    detail.commits,
-  );
+  const reviewOutcomes = latestPullRequestReviewOutcomes(detail.comments, detail.commits);
   // Host login casing varies; normalize to preserve verdicts and deduplicate reviewers.
   const outcomeByLogin = new Map(
     reviewOutcomes.flatMap((entry) =>
@@ -690,8 +650,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
         (entry) =>
           !detail.reviewers.some(
             (actor) =>
-              entry.actor !== null &&
-              reviewerKey(actor.login) === reviewerKey(entry.actor.login),
+              entry.actor !== null && reviewerKey(actor.login) === reviewerKey(entry.actor.login),
           ),
       )
       .map((entry) => ({
@@ -719,29 +678,18 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
   const updateComment = useAtomCommand(pullRequestEnvironment.updateComment, {
     reportFailure: false,
   });
-  const canUpdate = useAtomValue(
-    pullRequestEnvironment.update.permissionAtom(environmentId),
-  );
-  const canEditDescription =
-    canUpdate && canEditPullRequestChangeRequest(detail);
+  const canUpdate = useAtomValue(pullRequestEnvironment.update.permissionAtom(environmentId));
+  const canEditDescription = canUpdate && canEditPullRequestChangeRequest(detail);
   // The editor keeps the body it opened from, so a failed save cannot reset what was typed.
   const [bodyScope, setBodyScope] = useState<{
     readonly url: string;
     readonly body: string;
   } | null>(null);
-  const [descriptionDraft, setDescriptionDraft] =
-    useState<DescriptionDraft | null>(null);
-  const descriptionDraftKept = descriptionDraftInForce(
-    descriptionDraft,
-    detail.url,
-    observedAt,
-  );
-  if (descriptionDraftKept !== descriptionDraft)
-    setDescriptionDraft(descriptionDraftKept);
+  const [descriptionDraft, setDescriptionDraft] = useState<DescriptionDraft | null>(null);
+  const descriptionDraftKept = descriptionDraftInForce(descriptionDraft, detail.url, observedAt);
+  if (descriptionDraftKept !== descriptionDraft) setDescriptionDraft(descriptionDraftKept);
   const description = descriptionDraftKept?.body ?? detail.body;
-  const gerritMessage = detail.gerrit
-    ? gerritCommitMessageParts(description)
-    : null;
+  const gerritMessage = detail.gerrit ? gerritCommitMessageParts(description) : null;
   const descriptionText = gerritMessage?.body ?? description;
   const descriptionSaving = (descriptionDraftKept?.saves ?? 0) > 0;
   const descriptionSavesRunning = useRef(0);
@@ -751,16 +699,13 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     readonly commentId: string;
   } | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
-  const editingCommentId =
-    commentScope?.pullRequest === detail.url ? commentScope.commentId : null;
+  const editingCommentId = commentScope?.pullRequest === detail.url ? commentScope.commentId : null;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const location = parsePullRequestAnchor(revealUrl);
   const [checksReveals, setChecksReveals] = useState(0);
   const [descriptionReveals, setDescriptionReveals] = useState(0);
-  const [seenRevealUrl, setSeenRevealUrl] = useState<string | undefined>(
-    undefined,
-  );
+  const [seenRevealUrl, setSeenRevealUrl] = useState<string | undefined>(undefined);
   if (revealUrl !== seenRevealUrl) {
     setSeenRevealUrl(revealUrl);
     if (location?.kind === "checks") setChecksReveals((count) => count + 1);
@@ -776,9 +721,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     if (revealUrl === undefined || !root) return;
     let target: HTMLElement | null | undefined;
     if (location?.kind === "checks") {
-      target = root.querySelector<HTMLElement>(
-        '[data-pull-request-summary-section="checks"]',
-      );
+      target = root.querySelector<HTMLElement>('[data-pull-request-summary-section="checks"]');
     } else if (location?.kind === "summary") {
       if (location.anchor === "top") {
         stopHolding.current?.();
@@ -788,9 +731,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
       target = /^issue-\d+$/.test(location.anchor)
         ? root.querySelector<HTMLElement>("[data-pr-description]")
         : [...root.querySelectorAll<HTMLElement>("[id]")].find(
-            (node) =>
-              node.id === location.anchor ||
-              node.id === `user-content-${location.anchor}`,
+            (node) => node.id === location.anchor || node.id === `user-content-${location.anchor}`,
           );
     }
     // A heading may still be rendering; the link stays pending until it appears.
@@ -798,8 +739,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     stopHolding.current?.();
     const heading = target.hasAttribute("data-pull-request-summary-section")
       ? null
-      : target.closest("[data-pull-request-summary-section]")
-          ?.firstElementChild;
+      : target.closest("[data-pull-request-summary-section]")?.firstElementChild;
     stopHolding.current = holdLinkedNodeInView(
       target,
       root,
@@ -812,13 +752,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
   useEffect(() => {
     revealSummary();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- retries once the description markdown renders, including after its editor closes
-  }, [
-    revealUrl,
-    description,
-    checksReveals,
-    descriptionReveals,
-    editingDescription,
-  ]);
+  }, [revealUrl, description, checksReveals, descriptionReveals, editingDescription]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- puts a remounted Summary back at the scroll position it left, before paint
   useLayoutEffect(() => {
     const scrollTop = summaryViewByScopeKey.get(viewKey)?.scrollTop ?? 0;
@@ -859,22 +793,12 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     if (descriptionSaving) return;
     if (await saveDescription(body)) setBodyScope(null);
   };
-  const toggleTask = ({
-    markerOffset,
-    checked,
-  }: {
-    markerOffset: number;
-    checked: boolean;
-  }) => {
+  const toggleTask = ({ markerOffset, checked }: { markerOffset: number; checked: boolean }) => {
     const body = setMarkdownTaskChecked(description, markerOffset, checked);
     if (body !== description) void saveDescription(body);
   };
 
-  const completionScope = pullRequestCompletionScope(
-    detail,
-    environmentId,
-    reference,
-  );
+  const completionScope = pullRequestCompletionScope(detail, environmentId, reference);
   const commentEditing: CommentEditing = {
     cwd: detail.workspaceRoot,
     environmentId,
@@ -884,11 +808,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     editingId: editingCommentId,
     saving: commentSaving,
     onEdit: (comment) =>
-      setCommentScope(
-        comment === null
-          ? null
-          : { pullRequest: detail.url, commentId: comment.id },
-      ),
+      setCommentScope(comment === null ? null : { pullRequest: detail.url, commentId: comment.id }),
     onSave: async (comment, body) => {
       if (commentSaving || comment.kind === "review") return;
       setCommentSaving(true);
@@ -926,9 +846,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     />
   );
 
-  const resolveButtonFor = (
-    thread: PullRequestConversationThread | undefined,
-  ) =>
+  const resolveButtonFor = (thread: PullRequestConversationThread | undefined) =>
     thread === undefined ? null : (
       <PullRequestResolveThreadButton
         environmentId={environmentId}
@@ -1003,11 +921,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
           </div>
         )}
         {body === null && !canEditPullRequestComment(detail, comment) ? null : (
-          <CommentBody
-            className="px-3 py-3"
-            comment={comment}
-            editing={commentEditing}
-          />
+          <CommentBody className="px-3 py-3" comment={comment} editing={commentEditing} />
         )}
       </article>
     );
@@ -1019,15 +933,11 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
     const replies =
       item.kind === "thread" && item.replies.length > 0 ? (
         <div className="ml-4 space-y-2 border-l-2 border-border/60 pl-3">
-          {item.replies.map((reply) =>
-            renderCommentCard(reply, undefined, { reply: true }),
-          )}
+          {item.replies.map((reply) => renderCommentCard(reply, undefined, { reply: true }))}
         </div>
       ) : null;
     const moreReplies =
-      item.kind === "thread" && item.hasMoreReplies ? (
-        <PullRequestMoreReplies {...item} />
-      ) : null;
+      item.kind === "thread" && item.hasMoreReplies ? <PullRequestMoreReplies {...item} /> : null;
     const replyComposer = thread ? (
       <PullRequestThreadReply
         environmentId={environmentId}
@@ -1052,15 +962,11 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
               : gt("Review dismissed")
           }
           body={visibleBody(comment.body)}
-          replyCount={
-            item.kind === "thread" ? item.replies.length + item.moreReplies : 0
-          }
+          replyCount={item.kind === "thread" ? item.replies.length + item.moreReplies : 0}
           replies={replies}
           moreReplies={moreReplies}
           replyComposer={replyComposer}
-          onAddToChat={
-            onAddToChat && chat !== null ? () => onAddToChat(chat) : undefined
-          }
+          onAddToChat={onAddToChat && chat !== null ? () => onAddToChat(chat) : undefined}
           reactionBar={reactionBarFor(comment)}
           resolveButton={resolveButtonFor(thread)}
         />
@@ -1090,8 +996,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
         scrollerRef(node);
       }}
       onScroll={(event) => {
-        if (!restoringScroll.current)
-          rememberView({ scrollTop: event.currentTarget.scrollTop });
+        if (!restoringScroll.current) rememberView({ scrollTop: event.currentTarget.scrollTop });
       }}
       tabIndex={-1}
       data-workspace-focus-default
@@ -1101,10 +1006,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
       <section className="px-4 pt-2.5 pb-1">
         <div className="space-y-2">
           {detail.gerrit?.isWip === true && detail.state === "open" ? null : (
-            <PullRequestMetaRow
-              icon={<UsersIcon className="size-3.5" />}
-              label={gt("Reviewers")}
-            >
+            <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label={gt("Reviewers")}>
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {reviewerEntries.length === 0 ? (
                   <span className="text-muted-foreground">
@@ -1138,14 +1040,8 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                             entry.outcome
                               ? `${named}: ${
                                   entry.stale
-                                    ? pullRequestReviewOutcomeStaleLabel(
-                                        entry.outcome,
-                                        resolve,
-                                      )
-                                    : pullRequestReviewOutcomeLabel(
-                                        entry.outcome,
-                                        resolve,
-                                      )
+                                    ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
+                                    : pullRequestReviewOutcomeLabel(entry.outcome, resolve)
                                 }`
                               : named
                           }
@@ -1165,14 +1061,8 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                               />
                               <span className="sr-only">
                                 {entry.stale
-                                  ? pullRequestReviewOutcomeStaleLabel(
-                                      entry.outcome,
-                                      resolve,
-                                    )
-                                  : pullRequestReviewOutcomeLabel(
-                                      entry.outcome,
-                                      resolve,
-                                    )}
+                                  ? pullRequestReviewOutcomeStaleLabel(entry.outcome, resolve)
+                                  : pullRequestReviewOutcomeLabel(entry.outcome, resolve)}
                               </span>
                             </>
                           ) : null}
@@ -1186,9 +1076,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                 detail.capabilities.reviewers.listCandidates ? (
                   <PullRequestReviewerPicker
                     provider={detail.provider}
-                    searchable={
-                      detail.capabilities.reviewers.searchCandidates === true
-                    }
+                    searchable={detail.capabilities.reviewers.searchCandidates === true}
                     environmentId={environmentId}
                     reference={reference}
                     allowed={detail.viewerPermissions.requestReviewers}
@@ -1198,10 +1086,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
             </PullRequestMetaRow>
           )}
           {detail.labels.length > 0 || detail.capabilities.labels === true ? (
-            <PullRequestMetaRow
-              icon={<TagIcon className="size-3.5" />}
-              label={gt("Labels")}
-            >
+            <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label={gt("Labels")}>
               <span className="flex min-w-0 flex-wrap items-center gap-1">
                 {detail.labels.length === 0 ? (
                   <span className="text-muted-foreground">
@@ -1293,23 +1178,17 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                 environmentId={environmentId}
                 threadRef={threadRef}
                 // The shown Gerrit body omits the subject and trailers, so task indexes would not match.
-                onTaskListChange={
-                  canEditDescription && !gerritMessage ? toggleTask : undefined
-                }
+                onTaskListChange={canEditDescription && !gerritMessage ? toggleTask : undefined}
               />
               {canEditDescription ? (
                 <PullRequestEditButton
                   aria-label={gt("Edit description")}
-                  onClick={() =>
-                    setBodyScope({ url: detail.url, body: description })
-                  }
+                  onClick={() => setBodyScope({ url: detail.url, body: description })}
                 />
               ) : null}
             </div>
           )}
-          {!editingDescription &&
-          gerritMessage &&
-          gerritMessage.footers.length > 0 ? (
+          {!editingDescription && gerritMessage && gerritMessage.footers.length > 0 ? (
             <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-xs">
               {gerritMessage.footers.map((footer) => (
                 <Fragment key={`${footer.key}:${footer.value}`}>
@@ -1348,50 +1227,45 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
               check,
               index,
             ) => /* oxlint-disable react/no-array-index-key -- Check names and URLs can repeat; these status rows have no local state. */ {
-              const finding = { kind: "check", check } as const;
-              const failing =
-                check.status === "failure" || check.status === "cancelled";
-              return (
-                <div
-                  key={`${index}:${check.name}:${check.url ?? ""}`}
-                  className="group flex items-center gap-2 rounded-md pr-1 hover:bg-accent/60"
-                >
-                  <button
-                    type="button"
-                    disabled={!check.url}
-                    onClick={() => check.url && openCheck(check.url)}
-                    className={cn(
-                      "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-xs leading-5 [&>svg]:mt-0.5",
-                      check.url ? "cursor-pointer" : "cursor-default",
-                    )}
+                const finding = { kind: "check", check } as const;
+                const failing = check.status === "failure" || check.status === "cancelled";
+                return (
+                  <div
+                    key={`${index}:${check.name}:${check.url ?? ""}`}
+                    className="group flex items-center gap-2 rounded-md pr-1 hover:bg-accent/60"
                   >
-                    <PullRequestCheckStatusIcon status={check.status} />
-                    <span className="min-w-0 flex-1 wrap-anywhere">
-                      {check.name}
-                    </span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {pullRequestCheckStatusLabel(check, resolve)}
-                    </span>
-                  </button>
-                  {onFixFinding && failing ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="shrink-0"
-                      disabled={
-                        pendingFinding !== null && pendingFinding !== undefined
-                      }
-                      onClick={() => onFixFinding(finding)}
+                    <button
+                      type="button"
+                      disabled={!check.url}
+                      onClick={() => check.url && openCheck(check.url)}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-xs leading-5 [&>svg]:mt-0.5",
+                        check.url ? "cursor-pointer" : "cursor-default",
+                      )}
                     >
-                      <HammerIcon className="size-3" />
-                      {pendingFinding === pullRequestFindingKey(finding)
-                        ? gt("Preparing...")
-                        : fixCheckLabel}
-                    </Button>
-                  ) : null}
-                </div>
-              );
-            } /* oxlint-enable react/no-array-index-key */,
+                      <PullRequestCheckStatusIcon status={check.status} />
+                      <span className="min-w-0 flex-1 wrap-anywhere">{check.name}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {pullRequestCheckStatusLabel(check, resolve)}
+                      </span>
+                    </button>
+                    {onFixFinding && failing ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="shrink-0"
+                        disabled={pendingFinding !== null && pendingFinding !== undefined}
+                        onClick={() => onFixFinding(finding)}
+                      >
+                        <HammerIcon className="size-3" />
+                        {pendingFinding === pullRequestFindingKey(finding)
+                          ? gt("Preparing...")
+                          : fixCheckLabel}
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              } /* oxlint-enable react/no-array-index-key */,
           )
         )}
       </PullRequestSection>
@@ -1407,12 +1281,9 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
               >
                 <ListFilterIcon aria-hidden className="size-3" />
                 {filteredOutCount > 0
-                  ? gt(
-                      "{count, plural, one {{count} hidden} other {{count} hidden}}",
-                      {
-                        count: filteredOutCount,
-                      },
-                    )
+                  ? gt("{count, plural, one {{count} hidden} other {{count} hidden}}", {
+                      count: filteredOutCount,
+                    })
                   : gt("Filter", { $context: "noun, filter menu" })}
               </MenuTrigger>
               <MenuPopup align="end">
@@ -1423,9 +1294,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                   <MenuCheckboxItem
                     checked={commentFilter.bots}
                     closeOnClick={false}
-                    onCheckedChange={(bots) =>
-                      setCommentFilter((value) => ({ ...value, bots }))
-                    }
+                    onCheckedChange={(bots) => setCommentFilter((value) => ({ ...value, bots }))}
                   >
                     <T>Bot comments</T>
                   </MenuCheckboxItem>
@@ -1456,9 +1325,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
               }}
             >
               <ArrowDownUpIcon aria-hidden className="size-3" />
-              {commentOrder === "newest"
-                ? gt("Newest first")
-                : gt("Oldest first")}
+              {commentOrder === "newest" ? gt("Newest first") : gt("Oldest first")}
             </Button>
           </div>
         }
@@ -1507,9 +1374,7 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
                     size="sm"
                     variant="ghost"
                     className="w-full"
-                    onClick={() =>
-                      setShown({ url: detail.url, count: COMMENT_PAGE })
-                    }
+                    onClick={() => setShown({ url: detail.url, count: COMMENT_PAGE })}
                   >
                     <T>
                       Show only <Var>{COMMENT_PAGE}</Var> recent conversations

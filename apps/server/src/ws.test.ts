@@ -226,123 +226,104 @@ const settingsUpdated = (settings: object): ServerConfigStreamEvent => ({
   payload: { settings: settings as ServerConfig["settings"] },
 });
 
-it.effect(
-  "resends late editors without rolling back updates already sent",
-  () =>
-    Effect.gen(function* () {
-      const settingsSent = yield* Deferred.make<void>();
-      const events = yield* withLateConfigDiscovery(
-        snapshotConfig({
-          settings: { enableProviderUpdateChecks: true } as never,
-        }),
-        Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
-        {
-          resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
-          resolveFileManagerRevealKind: () =>
-            Deferred.await(settingsSent).pipe(
-              Effect.as("file-explorer" as const),
-            ),
-        },
-        { resolveTargets: () => Effect.succeed([]) },
-        { resolve: () => Effect.succeed([]) },
-      ).pipe(
-        Stream.tap((event) =>
-          event.type === "settingsUpdated"
-            ? Deferred.succeed(settingsSent, undefined)
-            : Effect.void,
+it.effect("resends late editors without rolling back updates already sent", () =>
+  Effect.gen(function* () {
+    const settingsSent = yield* Deferred.make<void>();
+    const events = yield* withLateConfigDiscovery(
+      snapshotConfig({
+        settings: { enableProviderUpdateChecks: true } as never,
+      }),
+      Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
+      {
+        resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
+        resolveFileManagerRevealKind: () =>
+          Deferred.await(settingsSent).pipe(Effect.as("file-explorer" as const)),
+      },
+      { resolveTargets: () => Effect.succeed([]) },
+      { resolve: () => Effect.succeed([]) },
+    ).pipe(
+      Stream.tap((event) =>
+        event.type === "settingsUpdated" ? Deferred.succeed(settingsSent, undefined) : Effect.void,
+      ),
+      Stream.runCollect,
+    );
+
+    const [first, second] = Array.from(events);
+    assert.equal(events.length, 2);
+    assert.equal(first?.type, "settingsUpdated");
+    assert.equal(second?.type, "snapshot");
+    if (second?.type === "snapshot") {
+      assert.deepEqual(second.config.availableEditors, ["file-manager"]);
+      assert.equal(second.config.shellRevealInFileManagerKind, "file-explorer");
+      assert.deepEqual(second.config.settings, {
+        enableProviderUpdateChecks: false,
+      } as never);
+    }
+  }),
+);
+
+it.effect("resends a reveal kind and remote targets that outlast the snapshot timeout", () =>
+  Effect.gen(function* () {
+    const targets = [{ kind: "mdns" as const, host: "test.local" }];
+    const finishDiscovery = yield* Deferred.make<typeof targets>();
+    const collecting = yield* withLateConfigDiscovery(
+      snapshotConfig({ availableEditors: ["file-manager"] }),
+      Stream.empty,
+      {
+        resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
+        resolveFileManagerRevealKind: () => Effect.succeed("file-explorer"),
+      },
+      { resolveTargets: () => Deferred.await(finishDiscovery) },
+      { resolve: () => Effect.succeed([]) },
+    ).pipe(Stream.runCollect, Effect.forkScoped({ startImmediately: true }));
+    yield* TestClock.adjust("6 seconds");
+    yield* Deferred.succeed(finishDiscovery, targets);
+    const events = yield* Fiber.join(collecting);
+
+    const [late, remote] = Array.from(events);
+    assert.equal(events.length, 2);
+    assert.equal(late?.type, "snapshot");
+    if (late?.type === "snapshot") {
+      assert.equal(late.config.shellRevealInFileManagerKind, "file-explorer");
+    }
+    assert.equal(remote?.type, "snapshot");
+    if (remote?.type === "snapshot") {
+      assert.deepEqual(remote.config.remoteOpenTargets, targets);
+      assert.equal(remote.config.shellRevealInFileManagerKind, "file-explorer");
+    }
+  }),
+);
+
+it.effect("runs editor, remote open target and direct endpoint discovery side by side", () =>
+  Effect.gen(function* () {
+    // Each discovery finishes only once the other two have started, so a
+    // config that ran them one after another would never resolve.
+    const editorsStarted = yield* Deferred.make<void>();
+    const targetsStarted = yield* Deferred.make<void>();
+    const endpointsStarted = yield* Deferred.make<void>();
+    const startThenAwait = <A>(started: Deferred.Deferred<void>, value: A) =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(
+          Effect.forEach([editorsStarted, targetsStarted, endpointsStarted], Deferred.await),
         ),
-        Stream.runCollect,
+        Effect.as(value),
       );
 
-      const [first, second] = Array.from(events);
-      assert.equal(events.length, 2);
-      assert.equal(first?.type, "settingsUpdated");
-      assert.equal(second?.type, "snapshot");
-      if (second?.type === "snapshot") {
-        assert.deepEqual(second.config.availableEditors, ["file-manager"]);
-        assert.equal(
-          second.config.shellRevealInFileManagerKind,
-          "file-explorer",
-        );
-        assert.deepEqual(second.config.settings, {
-          enableProviderUpdateChecks: false,
-        } as never);
-      }
-    }),
-);
+    const discovery = yield* resolveOpenDiscoveryForConfig({
+      editors: startThenAwait(editorsStarted, ["file-manager" as const]),
+      fileManagerRevealKind: Effect.succeed("finder" as const),
+      remoteOpenTargets: startThenAwait(targetsStarted, []),
+      directEndpoints: startThenAwait(endpointsStarted, []),
+    });
 
-it.effect(
-  "resends a reveal kind and remote targets that outlast the snapshot timeout",
-  () =>
-    Effect.gen(function* () {
-      const targets = [{ kind: "mdns" as const, host: "test.local" }];
-      const finishDiscovery = yield* Deferred.make<typeof targets>();
-      const collecting = yield* withLateConfigDiscovery(
-        snapshotConfig({ availableEditors: ["file-manager"] }),
-        Stream.empty,
-        {
-          resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
-          resolveFileManagerRevealKind: () => Effect.succeed("file-explorer"),
-        },
-        { resolveTargets: () => Deferred.await(finishDiscovery) },
-        { resolve: () => Effect.succeed([]) },
-      ).pipe(Stream.runCollect, Effect.forkScoped({ startImmediately: true }));
-      yield* TestClock.adjust("6 seconds");
-      yield* Deferred.succeed(finishDiscovery, targets);
-      const events = yield* Fiber.join(collecting);
-
-      const [late, remote] = Array.from(events);
-      assert.equal(events.length, 2);
-      assert.equal(late?.type, "snapshot");
-      if (late?.type === "snapshot") {
-        assert.equal(late.config.shellRevealInFileManagerKind, "file-explorer");
-      }
-      assert.equal(remote?.type, "snapshot");
-      if (remote?.type === "snapshot") {
-        assert.deepEqual(remote.config.remoteOpenTargets, targets);
-        assert.equal(
-          remote.config.shellRevealInFileManagerKind,
-          "file-explorer",
-        );
-      }
-    }),
-);
-
-it.effect(
-  "runs editor, remote open target and direct endpoint discovery side by side",
-  () =>
-    Effect.gen(function* () {
-      // Each discovery finishes only once the other two have started, so a
-      // config that ran them one after another would never resolve.
-      const editorsStarted = yield* Deferred.make<void>();
-      const targetsStarted = yield* Deferred.make<void>();
-      const endpointsStarted = yield* Deferred.make<void>();
-      const startThenAwait = <A>(started: Deferred.Deferred<void>, value: A) =>
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(
-            Effect.forEach(
-              [editorsStarted, targetsStarted, endpointsStarted],
-              Deferred.await,
-            ),
-          ),
-          Effect.as(value),
-        );
-
-      const discovery = yield* resolveOpenDiscoveryForConfig({
-        editors: startThenAwait(editorsStarted, ["file-manager" as const]),
-        fileManagerRevealKind: Effect.succeed("finder" as const),
-        remoteOpenTargets: startThenAwait(targetsStarted, []),
-        directEndpoints: startThenAwait(endpointsStarted, []),
-      });
-
-      assert.deepEqual(discovery, {
-        availableEditors: ["file-manager"],
-        shellRevealInFileManager: true,
-        shellRevealInFileManagerKind: "finder",
-        remoteOpenTargets: [],
-        directEndpoints: [],
-      });
-    }),
+    assert.deepEqual(discovery, {
+      availableEditors: ["file-manager"],
+      shellRevealInFileManager: true,
+      shellRevealInFileManagerKind: "finder",
+      remoteOpenTargets: [],
+      directEndpoints: [],
+    });
+  }),
 );
 
 const ReplayTestLayer = OrchestrationEventStore.layer.pipe(
@@ -388,11 +369,7 @@ const resumeSkipsUnknownTypes = (scope: "thread" | "shell") =>
     const [highWater] = yield* insert(3, true);
     const updates = yield* PubSub.unbounded();
     let liveSequence = 0;
-    const consume = <
-      A extends { readonly kind: string; readonly sequence?: number },
-      E,
-      R,
-    >(
+    const consume = <A extends { readonly kind: string; readonly sequence?: number }, E, R>(
       stream: Stream.Stream<A, E, R>,
     ) =>
       stream.pipe(
@@ -432,8 +409,7 @@ const resumeSkipsUnknownTypes = (scope: "thread" | "shell") =>
     const items = yield* subscription.pipe(
       Effect.provideService(ThreadManagement.ThreadManagementService, {
         ensureLegacyTranscript: () => Effect.void,
-        getShellSnapshot: () =>
-          Effect.die("shell resume must not load a full snapshot"),
+        getShellSnapshot: () => Effect.die("shell resume must not load a full snapshot"),
         listActiveSubagentThreadIds: () => Effect.succeed([]),
         streamStoredEventsFrom: (
           input: Parameters<
@@ -445,12 +421,7 @@ const resumeSkipsUnknownTypes = (scope: "thread" | "shell") =>
             .streamApplicationEvents({
               afterSequence: input?.afterSequence ?? 0,
             })
-            .pipe(
-              Stream.filter(
-                (event): event is OrchestrationV2StoredEvent =>
-                  "event" in event,
-              ),
-            );
+            .pipe(Stream.filter((event): event is OrchestrationV2StoredEvent => "event" in event));
         },
       } as unknown as ThreadManagement.ThreadManagementService["Service"]),
       Effect.provideService(ProjectStore.ProjectStoreV2, {
@@ -470,39 +441,29 @@ const resumeSkipsUnknownTypes = (scope: "thread" | "shell") =>
         : ["project.updated", "synchronized", "project.updated"],
     );
     assert.deepEqual(
-      items.flatMap((item) =>
-        item.sequence === undefined ? [] : [item.sequence],
-      ),
+      items.flatMap((item) => (item.sequence === undefined ? [] : [item.sequence])),
       [after!.sequence, liveSequence],
     );
   }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer));
 
-it.effect(
-  "thread resume skips unknown types, synchronizes, and receives the live tail",
-  () => resumeSkipsUnknownTypes("thread"),
+it.effect("thread resume skips unknown types, synchronizes, and receives the live tail", () =>
+  resumeSkipsUnknownTypes("thread"),
 );
 
 // Shell updates batch through `Stream.groupedWithin`, whose window needs real time to close.
-it.live(
-  "shell resume skips unknown types, synchronizes, and receives the live tail",
-  () => resumeSkipsUnknownTypes("shell"),
+it.live("shell resume skips unknown types, synchronizes, and receives the live tail", () =>
+  resumeSkipsUnknownTypes("shell"),
 );
 
-it.effect(
-  "coalesces streaming replay before synchronization and the live tail",
-  () =>
-    Effect.gen(function* () {
-      const store = yield* OrchestrationEventStore.OrchestrationEventStore;
-      const sql = yield* SqlClient.SqlClient;
-      const threadId = ThreadId.make("thread:streaming-replay");
-      const now = "2026-10-27T00:00:00.000Z";
-      const insert = (
-        version: number,
-        text: string,
-        streaming: boolean,
-      ) => sql<{
-        sequence: number;
-      }>`
+it.effect("coalesces streaming replay before synchronization and the live tail", () =>
+  Effect.gen(function* () {
+    const store = yield* OrchestrationEventStore.OrchestrationEventStore;
+    const sql = yield* SqlClient.SqlClient;
+    const threadId = ThreadId.make("thread:streaming-replay");
+    const now = "2026-10-27T00:00:00.000Z";
+    const insert = (version: number, text: string, streaming: boolean) => sql<{
+      sequence: number;
+    }>`
       INSERT INTO orchestration_events (
         event_id, aggregate_kind, stream_id, stream_version, event_type,
         occurred_at, actor_kind, payload_json, metadata_json, application_event_version
@@ -524,64 +485,53 @@ it.effect(
         })}, '{}', 2
       ) RETURNING sequence
     `;
-      yield* insert(0, "H", true);
-      yield* insert(1, "He", true);
-      const [latest] = yield* insert(2, "Hello", true);
-      const [completed] = yield* insert(3, "Hello!", false);
-      const items = yield* subscribeOrchestrationV2Thread({
-        threadId,
-        afterSequence: 0,
-        requestCompletionMarker: true,
-      }).pipe(
-        Effect.flatMap(Stream.runCollect),
-        Effect.provideService(ThreadManagement.ThreadManagementService, {
-          ensureLegacyTranscript: () => Effect.void,
-          streamStoredEventsFrom: () =>
-            Stream.unwrap(
-              insert(4, "Next", false).pipe(
-                Effect.map(() =>
-                  store.readAgentEvents({
-                    threadId,
-                    afterSequence: completed!.sequence,
-                  }),
-                ),
+    yield* insert(0, "H", true);
+    yield* insert(1, "He", true);
+    const [latest] = yield* insert(2, "Hello", true);
+    const [completed] = yield* insert(3, "Hello!", false);
+    const items = yield* subscribeOrchestrationV2Thread({
+      threadId,
+      afterSequence: 0,
+      requestCompletionMarker: true,
+    }).pipe(
+      Effect.flatMap(Stream.runCollect),
+      Effect.provideService(ThreadManagement.ThreadManagementService, {
+        ensureLegacyTranscript: () => Effect.void,
+        streamStoredEventsFrom: () =>
+          Stream.unwrap(
+            insert(4, "Next", false).pipe(
+              Effect.map(() =>
+                store.readAgentEvents({
+                  threadId,
+                  afterSequence: completed!.sequence,
+                }),
               ),
             ),
-        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
-      );
-      assert.deepEqual(
-        items.map((item) =>
-          item.kind === "event"
-            ? [
-                item.sequence,
-                item.event.type === "message.updated"
-                  ? item.event.payload.text
-                  : null,
-              ]
-            : [item.kind],
-        ),
-        [
-          [latest!.sequence, "Hello"],
-          [completed!.sequence, "Hello!"],
-          ["synchronized"],
-          [completed!.sequence + 1, "Next"],
-        ],
-      );
-    }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+          ),
+      } as unknown as ThreadManagement.ThreadManagementService["Service"]),
+    );
+    assert.deepEqual(
+      items.map((item) =>
+        item.kind === "event"
+          ? [item.sequence, item.event.type === "message.updated" ? item.event.payload.text : null]
+          : [item.kind],
+      ),
+      [
+        [latest!.sequence, "Hello"],
+        [completed!.sequence, "Hello!"],
+        ["synchronized"],
+        [completed!.sequence + 1, "Next"],
+      ],
+    );
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
 
-it.effect(
-  "shell groups read distinct threads once and keep each event's own sequence",
-  () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const now = "2026-10-27T00:00:00.000Z";
-      const insert = (
-        aggregateKind: "thread" | "project",
-        streamId: string,
-        version: number,
-      ) =>
-        sql<{ sequence: number }>`
+it.effect("shell groups read distinct threads once and keep each event's own sequence", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-10-27T00:00:00.000Z";
+    const insert = (aggregateKind: "thread" | "project", streamId: string, version: number) =>
+      sql<{ sequence: number }>`
       INSERT INTO orchestration_events (
         event_id, aggregate_kind, stream_id, stream_version, event_type,
         occurred_at, actor_kind, payload_json, metadata_json, application_event_version
@@ -595,377 +545,335 @@ it.effect(
         )}, '{}', 2
       ) RETURNING sequence
     `.pipe(Effect.map(([row]) => row!.sequence));
-      const shell = (id: string, archivedAt: string | null = null) =>
-        ({
-          id: ThreadId.make(id),
-          archivedAt,
-        }) as unknown as OrchestrationV2ThreadShell;
-      const project = {
-        id: ProjectId.make("project:group"),
-      } as unknown as OrchestrationProjectShell;
+    const shell = (id: string, archivedAt: string | null = null) =>
+      ({
+        id: ThreadId.make(id),
+        archivedAt,
+      }) as unknown as OrchestrationV2ThreadShell;
+    const project = {
+      id: ProjectId.make("project:group"),
+    } as unknown as OrchestrationProjectShell;
 
-      const after = yield* insert("project", "project:before", 0);
-      yield* insert("thread", "thread:active", 0);
-      const archived = yield* insert("thread", "thread:archived", 0);
-      const projectUpdated = yield* insert("project", project.id, 0);
-      const active = yield* insert("thread", "thread:active", 1);
-      const missing = yield* insert("thread", "thread:missing", 0);
+    const after = yield* insert("project", "project:before", 0);
+    yield* insert("thread", "thread:active", 0);
+    const archived = yield* insert("thread", "thread:archived", 0);
+    const projectUpdated = yield* insert("project", project.id, 0);
+    const active = yield* insert("thread", "thread:active", 1);
+    const missing = yield* insert("thread", "thread:missing", 0);
 
-      const shellReads: Array<ReadonlyArray<string> | undefined> = [];
-      let batchFails = false;
-      const collect = (afterSequence: number) =>
-        subscribeOrchestrationV2Shell({
-          afterSequence,
-          requestCompletionMarker: true,
-        }).pipe(
-          Effect.flatMap((stream) =>
-            stream.pipe(
-              Stream.takeUntil((item) => item.kind === "synchronized"),
-              Stream.runCollect,
-            ),
+    const shellReads: Array<ReadonlyArray<string> | undefined> = [];
+    let batchFails = false;
+    const collect = (afterSequence: number) =>
+      subscribeOrchestrationV2Shell({
+        afterSequence,
+        requestCompletionMarker: true,
+      }).pipe(
+        Effect.flatMap((stream) =>
+          stream.pipe(
+            Stream.takeUntil((item) => item.kind === "synchronized"),
+            Stream.runCollect,
           ),
-          Effect.provideService(ThreadManagement.ThreadManagementService, {
-            listActiveSubagentThreadIds: () => Effect.succeed([]),
-            getShellSnapshot: (options?: {
-              readonly threadIds?: ReadonlyArray<string>;
-            }) =>
-              Effect.suspend(() => {
-                shellReads.push(options?.threadIds);
-                return batchFails
-                  ? Effect.fail("batch failed")
-                  : Effect.succeed({
-                      schemaVersion: 1,
-                      snapshotSequence: Number.MAX_SAFE_INTEGER,
-                      threads: [shell("thread:active")],
-                      archivedThreads: [shell("thread:archived", now)],
-                    });
-              }),
-            getThreadShell: (threadId: string) =>
-              Effect.sync(() => {
-                shellReads.push([`scalar:${threadId}`]);
-                return threadId === "thread:missing"
-                  ? null
-                  : shell(
-                      threadId,
-                      threadId === "thread:archived" ? now : null,
-                    );
-              }),
-          } as unknown as ThreadManagement.ThreadManagementService["Service"]),
-          Effect.provideService(ProjectStore.ProjectStoreV2, {
-            listShells: () => Effect.succeed([]),
-          } as unknown as ProjectStore.ProjectStoreV2["Service"]),
-          Effect.provideService(ProjectService.ProjectService, {
-            getShell: () => Effect.succeedSome(project),
-          } as unknown as ProjectService.ProjectService["Service"]),
-          Effect.provideServiceEffect(
-            ProjectEnrichment.ProjectEnrichmentService,
-            PubSub.unbounded().pipe(
-              Effect.map(
-                (changes) =>
-                  ({
-                    subscribeChanges: PubSub.subscribe(changes),
-                  }) as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"],
-              ),
-            ),
-          ),
-        );
-
-      const collectSummary = (afterSequence: number) =>
-        collect(afterSequence).pipe(
-          Effect.map((items) =>
-            items.flatMap(
-              (item): ReadonlyArray<ReadonlyArray<string | number>> =>
-                item.kind === "thread.updated"
-                  ? [[item.kind, item.sequence, item.thread.id]]
-                  : item.kind === "thread.removed"
-                    ? [[item.kind, item.sequence, item.threadId]]
-                    : item.kind === "project.updated"
-                      ? [[item.kind, item.sequence, item.project.id]]
-                      : [],
-            ),
-          ),
-        );
-      const expectedGroup = [
-        ["thread.removed", archived, "thread:archived"],
-        ["project.updated", projectUpdated, project.id],
-        ["thread.updated", active, "thread:active"],
-        ["thread.removed", missing, "thread:missing"],
-      ];
-
-      assert.deepEqual(yield* collectSummary(after), expectedGroup);
-      assert.deepEqual(shellReads, [
-        ["thread:archived", "thread:active", "thread:missing"],
-      ]);
-
-      shellReads.length = 0;
-      assert.deepEqual(yield* collectSummary(active), [
-        ["thread.removed", missing, "thread:missing"],
-      ]);
-      assert.deepEqual(shellReads, [["scalar:thread:missing"]]);
-
-      shellReads.length = 0;
-      batchFails = true;
-      assert.deepEqual(yield* collectSummary(after), expectedGroup);
-      assert.deepEqual(shellReads, [
-        ["thread:archived", "thread:active", "thread:missing"],
-        ["scalar:thread:archived"],
-        ["scalar:thread:active"],
-        ["scalar:thread:missing"],
-      ]);
-    }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
-);
-
-it.effect(
-  "shares each live event item across subscribers and dedupes bodies per subscriber",
-  () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread:shared-live");
-      const messageId = MessageId.make("message:shared-live");
-      const at = DateTime.makeUnsafe("2026-10-31T00:00:00.000Z");
-      const owner = {
-        threadId,
-        runId: null,
-        nodeId: null,
-        createdAt: at,
-        updatedAt: at,
-      };
-      // DateTime memoizes its formatted parts, so only the plain records are frozen.
-      const freeze = <A>(value: A): A => {
-        if (
-          typeof value === "object" &&
-          value !== null &&
-          !DateTime.isDateTime(value)
-        ) {
-          for (const child of Object.values(value)) freeze(child);
-          Object.freeze(value);
-        }
-        return value;
-      };
-      const live: ReadonlyArray<OrchestrationV2StoredEvent> = freeze([
-        {
-          sequence: 1,
-          commandId: null,
-          event: {
-            id: EventId.make("event:shared-live:message"),
-            type: "message.updated",
-            threadId,
-            occurredAt: at,
-            payload: {
-              ...owner,
-              id: messageId,
-              role: "assistant",
-              text: "Done",
-              attachments: [],
-              streaming: false,
-              createdBy: "agent",
-              creationSource: "provider",
-            },
-          },
-        },
-        {
-          sequence: 2,
-          commandId: null,
-          event: {
-            id: EventId.make("event:shared-live:reply"),
-            type: "turn-item.updated",
-            threadId,
-            occurredAt: at,
-            payload: {
-              ...owner,
-              id: TurnItemId.make("item:shared-live:reply"),
-              type: "assistant_message",
-              providerThreadId: null,
-              providerTurnId: null,
-              nativeItemRef: null,
-              parentItemId: null,
-              ordinal: 1,
-              title: null,
-              status: "completed",
-              messageId,
-              text: "Done",
-              streaming: false,
-              startedAt: at,
-              completedAt: at,
-            },
-          },
-        },
-      ] as ReadonlyArray<OrchestrationV2StoredEvent>);
-      const stringify = yield* Effect.acquireRelease(
-        Effect.sync(() => vi.spyOn(JSON, "stringify")),
-        (spy) => Effect.sync(() => spy.mockRestore()),
-      );
-      // The EventSink hands every subscriber the same projected objects.
-      const subscribe = (acceptDedupedBodies: boolean) =>
-        subscribeOrchestrationV2Thread({
-          threadId,
-          afterSequence: 0,
-          acceptDedupedBodies,
-        }).pipe(
-          Effect.flatMap(Stream.runCollect),
-          Effect.map((items) => Array.from(items)),
-          Effect.provideService(ThreadManagement.ThreadManagementService, {
-            ensureLegacyTranscript: () => Effect.void,
-            streamStoredEventsFrom: () => Stream.fromIterable(live),
-          } as unknown as ThreadManagement.ThreadManagementService["Service"]),
-        );
-      const [deduped, first, second] = yield* Effect.forEach(
-        [true, false, false],
-        subscribe,
-      );
-
-      assert.lengthOf(first!, live.length);
-      first!.forEach((item, index) => {
-        assert.strictEqual(item, second![index]);
-        assert.strictEqual(
-          item.kind === "event" && item.event,
-          live[index]!.event,
-        );
-      });
-      assert.strictEqual(deduped![0], first![0]);
-      const reply = deduped![1];
-      assert.deepInclude(
-        reply?.kind === "event" ? reply.event.payload : undefined,
-        {
-          text: "",
-          textOmitted: true,
-        },
-      );
-      // The live buffer sizes each shared item once, not once per subscriber.
-      assert.lengthOf(
-        stringify.mock.calls.filter(([value]) => value?.kind === "event"),
-        live.length,
-      );
-    }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
-);
-
-it.effect(
-  "shell snapshots omit idle children and older settled threads only on request",
-  () =>
-    Effect.gen(function* () {
-      const shell = (
-        id: string,
-        parent: string | null,
-        activityRunStatus: "running" | null,
-        settledDaysAgo: number | null = null,
-      ) =>
-        ({
-          id: ThreadId.make(id),
-          projectId: "project",
-          archivedAt: null,
-          status: activityRunStatus ?? "completed",
-          activityRunStatus,
-          pendingRuntimeRequest: null,
-          pendingBackgroundTasks: [],
-          settledOverride: settledDaysAgo === null ? null : "settled",
-          settledAt:
-            settledDaysAgo === null
-              ? null
-              : DateTime.makeUnsafe(-settledDaysAgo * 86_400_000),
-          lineage: {
-            parentThreadId: parent === null ? null : ThreadId.make(parent),
-            relationshipToParent: parent === null ? null : "subagent",
-            rootThreadId: ThreadId.make(parent ?? id),
-          },
-        }) as unknown as OrchestrationV2ThreadShell;
-      const threads = [
-        shell("parent", null, null),
-        shell("idle", "parent", null),
-        shell("live", "parent", "running"),
-        ...Array.from({ length: 25 }, (_, index) =>
-          shell(`recent-${index}`, null, null, 1),
         ),
-        shell("old", null, null, 30),
-        shell("remote-parent", null, null, 40),
-        shell("remote-child-parent", "parent", null),
-      ];
-      const firstSnapshot = (input: {
-        readonly omitIdleSubagents?: boolean;
-        readonly omitOlderSettled?: boolean;
-      }) =>
-        subscribeOrchestrationV2Shell(input).pipe(
-          Effect.flatMap((stream) =>
-            stream.pipe(Stream.take(1), Stream.runCollect),
-          ),
-          Effect.map(([item]) =>
-            item?.kind === "snapshot" ? item.snapshot : null,
-          ),
-          Effect.provideService(ThreadManagement.ThreadManagementService, {
-            listActiveShellIndex: () =>
-              Effect.succeed(
-                threads.map((thread) => ({
-                  ...thread,
-                  pinnedAt: null,
-                  snoozedUntil: null,
-                  mayBeLive: thread.activityRunStatus !== null,
-                  hasRemoteTasks: thread.id.startsWith("remote-"),
-                })),
-              ),
-            readShellSnapshot: (options?: {
-              readonly threadIds?: ReadonlyArray<string>;
-            }) =>
-              Effect.succeed(
-                Effect.succeed({
-                  schemaVersion: 1,
-                  snapshotSequence: 0,
-                  threads: threads.filter(
-                    (thread) => options?.threadIds?.includes(thread.id) ?? true,
-                  ),
-                  archivedThreads: [],
-                }),
-              ),
-          } as unknown as ThreadManagement.ThreadManagementService["Service"]),
-          Effect.provideService(ProjectStore.ProjectStoreV2, {
-            listShells: () => Effect.succeed([]),
-          } as unknown as ProjectStore.ProjectStoreV2["Service"]),
-          Effect.provideService(ProjectService.ProjectService, {
-            getShell: () => Effect.succeedNone,
-          } as unknown as ProjectService.ProjectService["Service"]),
-          Effect.provideServiceEffect(
-            ProjectEnrichment.ProjectEnrichmentService,
-            PubSub.unbounded().pipe(
-              Effect.map(
-                (changes) =>
-                  ({
-                    subscribeChanges: PubSub.subscribe(changes),
-                  }) as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"],
-              ),
+        Effect.provideService(ThreadManagement.ThreadManagementService, {
+          listActiveSubagentThreadIds: () => Effect.succeed([]),
+          getShellSnapshot: (options?: { readonly threadIds?: ReadonlyArray<string> }) =>
+            Effect.suspend(() => {
+              shellReads.push(options?.threadIds);
+              return batchFails
+                ? Effect.fail("batch failed")
+                : Effect.succeed({
+                    schemaVersion: 1,
+                    snapshotSequence: Number.MAX_SAFE_INTEGER,
+                    threads: [shell("thread:active")],
+                    archivedThreads: [shell("thread:archived", now)],
+                  });
+            }),
+          getThreadShell: (threadId: string) =>
+            Effect.sync(() => {
+              shellReads.push([`scalar:${threadId}`]);
+              return threadId === "thread:missing"
+                ? null
+                : shell(threadId, threadId === "thread:archived" ? now : null);
+            }),
+        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
+        Effect.provideService(ProjectStore.ProjectStoreV2, {
+          listShells: () => Effect.succeed([]),
+        } as unknown as ProjectStore.ProjectStoreV2["Service"]),
+        Effect.provideService(ProjectService.ProjectService, {
+          getShell: () => Effect.succeedSome(project),
+        } as unknown as ProjectService.ProjectService["Service"]),
+        Effect.provideServiceEffect(
+          ProjectEnrichment.ProjectEnrichmentService,
+          PubSub.unbounded().pipe(
+            Effect.map(
+              (changes) =>
+                ({
+                  subscribeChanges: PubSub.subscribe(changes),
+                }) as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"],
             ),
           ),
-        );
+        ),
+      );
 
-      const recent = threads.slice(3, 28).map((thread) => thread.id);
-      const full = yield* firstSnapshot({});
-      assert.deepEqual(
-        full?.threads.map((thread) => thread.id),
-        threads.map((thread) => thread.id),
+    const collectSummary = (afterSequence: number) =>
+      collect(afterSequence).pipe(
+        Effect.map((items) =>
+          items.flatMap((item): ReadonlyArray<ReadonlyArray<string | number>> =>
+            item.kind === "thread.updated"
+              ? [[item.kind, item.sequence, item.thread.id]]
+              : item.kind === "thread.removed"
+                ? [[item.kind, item.sequence, item.threadId]]
+                : item.kind === "project.updated"
+                  ? [[item.kind, item.sequence, item.project.id]]
+                  : [],
+          ),
+        ),
       );
-      assert.isUndefined(full?.olderSettled);
-      const withoutChildren = yield* firstSnapshot({ omitIdleSubagents: true });
-      assert.deepEqual(
-        withoutChildren?.threads.map((thread) => thread.id),
-        [
-          "parent",
-          "live",
-          ...recent,
-          "old",
-          "remote-parent",
-          "remote-child-parent",
-        ],
+    const expectedGroup = [
+      ["thread.removed", archived, "thread:archived"],
+      ["project.updated", projectUpdated, project.id],
+      ["thread.updated", active, "thread:active"],
+      ["thread.removed", missing, "thread:missing"],
+    ];
+
+    assert.deepEqual(yield* collectSummary(after), expectedGroup);
+    assert.deepEqual(shellReads, [["thread:archived", "thread:active", "thread:missing"]]);
+
+    shellReads.length = 0;
+    assert.deepEqual(yield* collectSummary(active), [
+      ["thread.removed", missing, "thread:missing"],
+    ]);
+    assert.deepEqual(shellReads, [["scalar:thread:missing"]]);
+
+    shellReads.length = 0;
+    batchFails = true;
+    assert.deepEqual(yield* collectSummary(after), expectedGroup);
+    assert.deepEqual(shellReads, [
+      ["thread:archived", "thread:active", "thread:missing"],
+      ["scalar:thread:archived"],
+      ["scalar:thread:active"],
+      ["scalar:thread:missing"],
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+);
+
+it.effect("shares each live event item across subscribers and dedupes bodies per subscriber", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:shared-live");
+    const messageId = MessageId.make("message:shared-live");
+    const at = DateTime.makeUnsafe("2026-10-31T00:00:00.000Z");
+    const owner = {
+      threadId,
+      runId: null,
+      nodeId: null,
+      createdAt: at,
+      updatedAt: at,
+    };
+    // DateTime memoizes its formatted parts, so only the plain records are frozen.
+    const freeze = <A>(value: A): A => {
+      if (typeof value === "object" && value !== null && !DateTime.isDateTime(value)) {
+        for (const child of Object.values(value)) freeze(child);
+        Object.freeze(value);
+      }
+      return value;
+    };
+    const live: ReadonlyArray<OrchestrationV2StoredEvent> = freeze([
+      {
+        sequence: 1,
+        commandId: null,
+        event: {
+          id: EventId.make("event:shared-live:message"),
+          type: "message.updated",
+          threadId,
+          occurredAt: at,
+          payload: {
+            ...owner,
+            id: messageId,
+            role: "assistant",
+            text: "Done",
+            attachments: [],
+            streaming: false,
+            createdBy: "agent",
+            creationSource: "provider",
+          },
+        },
+      },
+      {
+        sequence: 2,
+        commandId: null,
+        event: {
+          id: EventId.make("event:shared-live:reply"),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: at,
+          payload: {
+            ...owner,
+            id: TurnItemId.make("item:shared-live:reply"),
+            type: "assistant_message",
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            title: null,
+            status: "completed",
+            messageId,
+            text: "Done",
+            streaming: false,
+            startedAt: at,
+            completedAt: at,
+          },
+        },
+      },
+    ] as ReadonlyArray<OrchestrationV2StoredEvent>);
+    const stringify = yield* Effect.acquireRelease(
+      Effect.sync(() => vi.spyOn(JSON, "stringify")),
+      (spy) => Effect.sync(() => spy.mockRestore()),
+    );
+    // The EventSink hands every subscriber the same projected objects.
+    const subscribe = (acceptDedupedBodies: boolean) =>
+      subscribeOrchestrationV2Thread({
+        threadId,
+        afterSequence: 0,
+        acceptDedupedBodies,
+      }).pipe(
+        Effect.flatMap(Stream.runCollect),
+        Effect.map((items) => Array.from(items)),
+        Effect.provideService(ThreadManagement.ThreadManagementService, {
+          ensureLegacyTranscript: () => Effect.void,
+          streamStoredEventsFrom: () => Stream.fromIterable(live),
+        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
       );
-      // A linked environment's clients nest its task under its parent, so that parent stays: an
-      // older settled thread or an idle subagent.
-      const withoutOld = yield* firstSnapshot({
-        omitIdleSubagents: true,
-        omitOlderSettled: true,
-      });
-      assert.deepEqual(
-        withoutOld?.threads.map((thread) => thread.id),
-        ["parent", "live", ...recent, "remote-parent", "remote-child-parent"],
+    const [deduped, first, second] = yield* Effect.forEach([true, false, false], subscribe);
+
+    assert.lengthOf(first!, live.length);
+    first!.forEach((item, index) => {
+      assert.strictEqual(item, second![index]);
+      assert.strictEqual(item.kind === "event" && item.event, live[index]!.event);
+    });
+    assert.strictEqual(deduped![0], first![0]);
+    const reply = deduped![1];
+    assert.deepInclude(reply?.kind === "event" ? reply.event.payload : undefined, {
+      text: "",
+      textOmitted: true,
+    });
+    // The live buffer sizes each shared item once, not once per subscriber.
+    assert.lengthOf(
+      stringify.mock.calls.filter(([value]) => value?.kind === "event"),
+      live.length,
+    );
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+);
+
+it.effect("shell snapshots omit idle children and older settled threads only on request", () =>
+  Effect.gen(function* () {
+    const shell = (
+      id: string,
+      parent: string | null,
+      activityRunStatus: "running" | null,
+      settledDaysAgo: number | null = null,
+    ) =>
+      ({
+        id: ThreadId.make(id),
+        projectId: "project",
+        archivedAt: null,
+        status: activityRunStatus ?? "completed",
+        activityRunStatus,
+        pendingRuntimeRequest: null,
+        pendingBackgroundTasks: [],
+        settledOverride: settledDaysAgo === null ? null : "settled",
+        settledAt:
+          settledDaysAgo === null ? null : DateTime.makeUnsafe(-settledDaysAgo * 86_400_000),
+        lineage: {
+          parentThreadId: parent === null ? null : ThreadId.make(parent),
+          relationshipToParent: parent === null ? null : "subagent",
+          rootThreadId: ThreadId.make(parent ?? id),
+        },
+      }) as unknown as OrchestrationV2ThreadShell;
+    const threads = [
+      shell("parent", null, null),
+      shell("idle", "parent", null),
+      shell("live", "parent", "running"),
+      ...Array.from({ length: 25 }, (_, index) => shell(`recent-${index}`, null, null, 1)),
+      shell("old", null, null, 30),
+      shell("remote-parent", null, null, 40),
+      shell("remote-child-parent", "parent", null),
+    ];
+    const firstSnapshot = (input: {
+      readonly omitIdleSubagents?: boolean;
+      readonly omitOlderSettled?: boolean;
+    }) =>
+      subscribeOrchestrationV2Shell(input).pipe(
+        Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect)),
+        Effect.map(([item]) => (item?.kind === "snapshot" ? item.snapshot : null)),
+        Effect.provideService(ThreadManagement.ThreadManagementService, {
+          listActiveShellIndex: () =>
+            Effect.succeed(
+              threads.map((thread) => ({
+                ...thread,
+                pinnedAt: null,
+                snoozedUntil: null,
+                mayBeLive: thread.activityRunStatus !== null,
+                hasRemoteTasks: thread.id.startsWith("remote-"),
+              })),
+            ),
+          readShellSnapshot: (options?: { readonly threadIds?: ReadonlyArray<string> }) =>
+            Effect.succeed(
+              Effect.succeed({
+                schemaVersion: 1,
+                snapshotSequence: 0,
+                threads: threads.filter(
+                  (thread) => options?.threadIds?.includes(thread.id) ?? true,
+                ),
+                archivedThreads: [],
+              }),
+            ),
+        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
+        Effect.provideService(ProjectStore.ProjectStoreV2, {
+          listShells: () => Effect.succeed([]),
+        } as unknown as ProjectStore.ProjectStoreV2["Service"]),
+        Effect.provideService(ProjectService.ProjectService, {
+          getShell: () => Effect.succeedNone,
+        } as unknown as ProjectService.ProjectService["Service"]),
+        Effect.provideServiceEffect(
+          ProjectEnrichment.ProjectEnrichmentService,
+          PubSub.unbounded().pipe(
+            Effect.map(
+              (changes) =>
+                ({
+                  subscribeChanges: PubSub.subscribe(changes),
+                }) as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"],
+            ),
+          ),
+        ),
       );
-      assert.deepEqual(withoutOld?.olderSettled?.counts, [
-        { projectId: ProjectId.make("project"), count: 2 },
-      ]);
-    }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+
+    const recent = threads.slice(3, 28).map((thread) => thread.id);
+    const full = yield* firstSnapshot({});
+    assert.deepEqual(
+      full?.threads.map((thread) => thread.id),
+      threads.map((thread) => thread.id),
+    );
+    assert.isUndefined(full?.olderSettled);
+    const withoutChildren = yield* firstSnapshot({ omitIdleSubagents: true });
+    assert.deepEqual(
+      withoutChildren?.threads.map((thread) => thread.id),
+      ["parent", "live", ...recent, "old", "remote-parent", "remote-child-parent"],
+    );
+    // A linked environment's clients nest its task under its parent, so that parent stays: an
+    // older settled thread or an idle subagent.
+    const withoutOld = yield* firstSnapshot({
+      omitIdleSubagents: true,
+      omitOlderSettled: true,
+    });
+    assert.deepEqual(
+      withoutOld?.threads.map((thread) => thread.id),
+      ["parent", "live", ...recent, "remote-parent", "remote-child-parent"],
+    );
+    assert.deepEqual(withoutOld?.olderSettled?.counts, [
+      { projectId: ProjectId.make("project"), count: 2 },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
@@ -1078,9 +986,7 @@ const layerConfigSources = Layer.mergeAll(
   AssetSigner.layer.pipe(Layer.provide(ServerSecretStore.layer)),
   WorkspacePreviewRevisions.layer,
   ServerSettings.layer.pipe(
-    Layer.provide(
-      Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest()),
-    ),
+    Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
   ),
 ).pipe(
   Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
@@ -1169,10 +1075,7 @@ it.live.each([
         ),
       );
       const server = Context.get(context, HttpServer.HttpServer);
-      const origin = HttpServer.formatAddress(server.address).replace(
-        /^http/,
-        "ws",
-      );
+      const origin = HttpServer.formatAddress(server.address).replace(/^http/, "ws");
       const socket = yield* Effect.acquireRelease(
         Effect.sync(
           () =>
@@ -1224,9 +1127,7 @@ it.effect.each([
       const finishRemoteDiscovery = yield* Deferred.make<void>();
       const targets = [{ kind: "mdns" as const, host: "test.local" }];
       const direct = discovery.startsWith("direct-");
-      const bound = [
-        { kind: "lan" as const, httpBaseUrl: "http://192.168.1.10:3773/" },
-      ];
+      const bound = [{ kind: "lan" as const, httpBaseUrl: "http://192.168.1.10:3773/" }];
       const endpoints = [
         ...bound,
         { kind: "tailnet" as const, httpBaseUrl: "https://test.ts.net/" },
@@ -1264,24 +1165,19 @@ it.effect.each([
             ),
         }),
         Layer.mock(DirectEndpoints.DirectEndpoints)({
-          resolveAvailable: () =>
-            Effect.succeed(discovery === "direct-cached" ? endpoints : bound),
+          resolveAvailable: () => Effect.succeed(discovery === "direct-cached" ? endpoints : bound),
           resolve: () =>
             direct
               ? Deferred.succeed(directStarted, undefined).pipe(
                   Effect.andThen(
-                    discovery === "direct-cached"
-                      ? Effect.void
-                      : Deferred.await(finishDirect),
+                    discovery === "direct-cached" ? Effect.void : Deferred.await(finishDirect),
                   ),
                   Effect.andThen(
                     discovery === "direct-failed"
                       ? Effect.die("probe failed")
                       : Effect.succeed(endpoints),
                   ),
-                  Effect.onExit(() =>
-                    Deferred.succeed(directStopped, undefined),
-                  ),
+                  Effect.onExit(() => Deferred.succeed(directStopped, undefined)),
                 )
               : Effect.succeed(bound),
         }),
@@ -1330,13 +1226,9 @@ it.effect.each([
           ...WS_RPC_SERVER_OPTIONS,
           onFromServer: (response) =>
             response._tag === "Chunk"
-              ? Effect.forEach(
-                  response.values,
-                  (event) => Queue.offer(responses, event),
-                  {
-                    discard: true,
-                  },
-                )
+              ? Effect.forEach(response.values, (event) => Queue.offer(responses, event), {
+                  discard: true,
+                })
               : Effect.void,
         },
       ).pipe(
@@ -1373,8 +1265,7 @@ it.effect.each([
       yield* Deferred.succeed(finishDiscovery, undefined);
       const snapshot = yield* Queue.take(responses);
       assert.equal(snapshot.type, "snapshot");
-      if (snapshot.type !== "snapshot")
-        return yield* Effect.die("Missing initial snapshot");
+      if (snapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
       assert.deepEqual(
         snapshot.config.remoteOpenTargets,
         discovery === "cached" || direct ? targets : [],
@@ -1406,10 +1297,7 @@ it.effect.each([
           secretReferences: true,
         }),
       );
-      const expectedKeybindings = [
-        duringAck.keybindings,
-        latestKeybindings.keybindings,
-      ];
+      const expectedKeybindings = [duringAck.keybindings, latestKeybindings.keybindings];
       // The two sources can interleave, but each must retain its own publication order.
       for (let i = 0; i < 4; i++) {
         const event = yield* Queue.take(responses);
@@ -1419,10 +1307,7 @@ it.effect.each([
           assert.equal(event.type, "keybindingsUpdated");
           if (event.type !== "keybindingsUpdated")
             return yield* Effect.die("Unexpected config event");
-          assert.deepEqual(
-            event.payload.keybindings,
-            expectedKeybindings.shift(),
-          );
+          assert.deepEqual(event.payload.keybindings, expectedKeybindings.shift());
           assert.deepEqual(event.payload.issues, []);
         }
         yield* acknowledge;
@@ -1434,8 +1319,7 @@ it.effect.each([
         yield* Deferred.succeed(finishRemoteDiscovery, undefined);
         const resolved = yield* Queue.take(responses);
         assert.equal(resolved.type, "snapshot");
-        if (resolved.type !== "snapshot")
-          return yield* Effect.die("Missing remote targets");
+        if (resolved.type !== "snapshot") return yield* Effect.die("Missing remote targets");
         assert.deepEqual(resolved.config.remoteOpenTargets, targets);
         assert.deepEqual(
           resolved.config.settings,
@@ -1443,10 +1327,7 @@ it.effect.each([
             secretReferences: true,
           }),
         );
-        assert.deepEqual(
-          resolved.config.keybindings,
-          latestKeybindings.keybindings,
-        );
+        assert.deepEqual(resolved.config.keybindings, latestKeybindings.keybindings);
         yield* acknowledge;
       }
       if (direct) {
@@ -1455,8 +1336,7 @@ it.effect.each([
           yield* Deferred.succeed(finishDirect, undefined);
           const resolved = yield* Queue.take(responses);
           assert.equal(resolved.type, "snapshot");
-          if (resolved.type !== "snapshot")
-            return yield* Effect.die("Missing direct endpoints");
+          if (resolved.type !== "snapshot") return yield* Effect.die("Missing direct endpoints");
           assert.deepEqual(resolved.config.directEndpoints, endpoints);
           assert.deepEqual(
             resolved.config.settings,
@@ -1464,10 +1344,7 @@ it.effect.each([
               secretReferences: true,
             }),
           );
-          assert.deepEqual(
-            resolved.config.keybindings,
-            latestKeybindings.keybindings,
-          );
+          assert.deepEqual(resolved.config.keybindings, latestKeybindings.keybindings);
           yield* acknowledge;
         } else if (discovery === "direct-failed") {
           yield* Deferred.succeed(finishDirect, undefined);
@@ -1495,749 +1372,693 @@ it.effect.each([
     ),
 );
 
-it.effect(
-  "access changes made while the snapshot loads reach the client after it",
-  () =>
-    Effect.gen(function* () {
-      const pairingChanges =
-        yield* PubSub.unbounded<PairingGrantStore.BootstrapCredentialChange>();
-      const sessionChanges =
-        yield* PubSub.unbounded<SessionStore.SessionCredentialChange>();
-      const subscribed = yield* Queue.unbounded<void>();
-      const subscribe = <A>(changes: PubSub.PubSub<A>) =>
-        Stream.unwrap(
-          PubSub.subscribe(changes).pipe(
-            Effect.tap(() => Queue.offer(subscribed, undefined)),
-            Effect.map(Stream.fromSubscription),
+it.effect("access changes made while the snapshot loads reach the client after it", () =>
+  Effect.gen(function* () {
+    const pairingChanges = yield* PubSub.unbounded<PairingGrantStore.BootstrapCredentialChange>();
+    const sessionChanges = yield* PubSub.unbounded<SessionStore.SessionCredentialChange>();
+    const subscribed = yield* Queue.unbounded<void>();
+    const subscribe = <A>(changes: PubSub.PubSub<A>) =>
+      Stream.unwrap(
+        PubSub.subscribe(changes).pipe(
+          Effect.tap(() => Queue.offer(subscribed, undefined)),
+          Effect.map(Stream.fromSubscription),
+        ),
+      );
+    const revokedElsewhere = AuthSessionId.make("revoked-elsewhere");
+    const responses = yield* Queue.unbounded<AuthAccessStreamEvent>();
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) =>
+        response._tag === "Chunk"
+          ? Effect.forEach(
+              response.values,
+              (event) => Queue.offer(responses, event as AuthAccessStreamEvent),
+              {
+                discard: true,
+              },
+            )
+          : Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("current"),
+            subject: "current",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.merge(RpcAuthorization.layer([AuthAccessReadScope])),
+          Layer.provide(
+            Layer.mergeAll(
+              layerUnusedConfigRpcServices,
+              Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+              Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+              Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+              Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/unused",
+              }),
+              Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+              Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+              Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+                listPairingLinks: () => Effect.succeed([]),
+                listConnectDevices: () => Effect.succeed([]),
+                // Another client revokes a session after the snapshot read it.
+                listClientSessions: () =>
+                  PubSub.publish(sessionChanges, {
+                    type: "clientRemoved",
+                    sessionId: revokedElsewhere,
+                  }).pipe(Effect.as([])),
+              }),
+              Layer.mock(PairingGrantStore.PairingGrantStore)({
+                streamChanges: subscribe(pairingChanges),
+              }),
+              Layer.mock(SessionStore.SessionStore)({
+                cookieName: "auth-access-test",
+                legacyCookieName: undefined,
+                streamChanges: subscribe(sessionChanges),
+              }),
+            ),
           ),
-        );
-      const revokedElsewhere = AuthSessionId.make("revoked-elsewhere");
-      const responses = yield* Queue.unbounded<AuthAccessStreamEvent>();
-      const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+        ),
+      ),
+    );
+    const requestId = RpcMessage.RequestId("auth-access");
+    yield* server.write(0, {
+      _tag: "Request",
+      id: requestId,
+      tag: WS_METHODS.subscribeAuthAccess,
+      payload: {},
+      headers: Headers.empty,
+    });
+    const snapshot = yield* Queue.take(responses);
+    assert.equal(snapshot.type, "snapshot");
+    yield* server.write(0, { _tag: "Ack", requestId });
+    yield* Queue.take(subscribed);
+    yield* Queue.take(subscribed);
+
+    // A later change arrives either way, so a dropped revocation fails as a mismatch.
+    yield* PubSub.publish(pairingChanges, {
+      type: "pairingLinkRemoved",
+      id: "later",
+    });
+    const next = yield* Queue.take(responses);
+    assert.deepEqual(next, {
+      version: 1,
+      revision: 2,
+      type: "clientRemoved",
+      payload: { sessionId: revokedElsewhere },
+    });
+    yield* server.write(0, { _tag: "Ack", requestId });
+    assert.equal((yield* Queue.take(responses)).type, "pairingLinkRemoved");
+    yield* server.write(0, { _tag: "Ack", requestId });
+
+    // Device trust has no incremental event, so a change re-sends the whole snapshot.
+    yield* PubSub.publish(pairingChanges, { type: "connectDevicesChanged" });
+    assert.deepEqual(yield* Queue.take(responses), {
+      version: 1,
+      revision: 4,
+      type: "snapshot",
+      payload: { pairingLinks: [], clientSessions: [], connectDevices: [] },
+    });
+    yield* server.write(0, {
+      _tag: "Interrupt",
+      requestId,
+      interruptors: [],
+    });
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+  ),
+);
+
+it.effect("on-demand clients get provider config without workspace snapshots", () =>
+  Effect.gen(function* () {
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const snapshotFor = (cwd: string, checkedAt: string) => ({
+      cwd,
+      checkedAt,
+      slashCommands: [{ name: `${cwd.slice(1)}-command` }],
+      skills: [],
+    });
+    const provider: ServerProvider = {
+      instanceId,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-10-25T00:00:00.000Z",
+      models: [],
+      slashCommands: [{ name: "machine-command", description: "A machine command" }],
+      skills: [
+        {
+          name: "machine-skill",
+          description: "Machine skill",
+          path: "/skills/machine-skill",
+          enabled: true,
+        },
+      ],
+      workspaceSnapshots: [
+        snapshotFor("/a", "2026-10-25T00:00:00.000Z"),
+        snapshotFor("/b", "2026-10-25T00:00:00.000Z"),
+      ],
+    };
+    let scansCwd = true;
+    let registryProviders: ReadonlyArray<ServerProvider> = [provider];
+    const providerChanges = yield* Queue.unbounded<ReadonlyArray<ServerProvider>>();
+    const pulled = yield* Queue.unbounded<void>();
+    const responses = yield* Queue.unbounded<unknown>();
+    const configRpcServices = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ExternalLauncher.ExternalLauncher)({
+        resolveAvailableEditors: () => Effect.succeed([]),
+        resolveFileManagerRevealKind: () => Effect.undefined,
+      }),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.sync(() => registryProviders),
+        streamChanges: Stream.fromQueue(providerChanges).pipe(
+          Stream.tap(() => Queue.offer(pulled, undefined)),
+        ),
+        refresh: () => Effect.sync(() => registryProviders),
+        refreshWorkspaceSnapshot: () => Effect.sync(() => registryProviders),
+      }),
+      Layer.mock(ProjectService.ProjectService)({
+        workspaceScanDirectory: (cwd) => Effect.succeed(cwd),
+      }),
+      Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+        listInstances: Effect.sync(() => [
+          (scansCwd
+            ? { instanceId, snapshotForCwd: () => Effect.die("unused") }
+            : { instanceId }) as never,
+        ]),
+        getInstance: () =>
+          Effect.sync(
+            () =>
+              (scansCwd
+                ? { instanceId, snapshotForCwd: () => Effect.die("unused") }
+                : { instanceId }) as never,
+          ),
+      }),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({
+        current: Effect.succeed([]),
+        streamChanges: Stream.make([]),
+        refresh: Effect.void,
+      }),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
+        resolveTargets: () => Effect.succeed([]),
+      }),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({
+        resolve: () => Effect.succeed([]),
+        resolveAvailable: () => Effect.succeed([]),
+      }),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        scratchRoot: Effect.succeedNone,
+        namedProjectsRoot: process.cwd(),
+      }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({
+        getDescriptor: Effect.succeed({
+          environmentId: EnvironmentId.make("config-test"),
+          label: "Config test",
+          platform: { os: "linux", arch: "x64" },
+          serverVersion: "0.0.0",
+          capabilities: { repositoryIdentity: false },
+        }),
+      }),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+        getDescriptor: () =>
+          Effect.succeed({
+            policy: "loopback-browser",
+            bootstrapMethods: [],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "config-test-session",
+          }),
+      }),
+    );
+    const server = yield* RpcServer.makeNoSerialization(
+      RpcGroup.make(WsSubscribeServerConfigRpc, WsServerRefreshProvidersRpc),
+      {
         ...WS_RPC_SERVER_OPTIONS,
         onFromServer: (response) =>
           response._tag === "Chunk"
-            ? Effect.forEach(
-                response.values,
-                (event) =>
-                  Queue.offer(responses, event as AuthAccessStreamEvent),
-                {
-                  discard: true,
-                },
-              )
-            : Effect.void,
-      }).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("current"),
-              subject: "current",
-              method: "browser-session-cookie",
-              scopes: [],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(
-            Layer.merge(RpcAuthorization.layer([AuthAccessReadScope])),
-            Layer.provide(
-              Layer.mergeAll(
-                layerUnusedConfigRpcServices,
-                Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-                Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-                Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-                Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-                Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-                Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-                  namedProjectsRoot: "/unused",
-                }),
-                Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-                Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-                Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-                  listPairingLinks: () => Effect.succeed([]),
-                  listConnectDevices: () => Effect.succeed([]),
-                  // Another client revokes a session after the snapshot read it.
-                  listClientSessions: () =>
-                    PubSub.publish(sessionChanges, {
-                      type: "clientRemoved",
-                      sessionId: revokedElsewhere,
-                    }).pipe(Effect.as([])),
-                }),
-                Layer.mock(PairingGrantStore.PairingGrantStore)({
-                  streamChanges: subscribe(pairingChanges),
-                }),
-                Layer.mock(SessionStore.SessionStore)({
-                  cookieName: "auth-access-test",
-                  legacyCookieName: undefined,
-                  streamChanges: subscribe(sessionChanges),
-                }),
-              ),
-            ),
-          ),
-        ),
-      );
-      const requestId = RpcMessage.RequestId("auth-access");
-      yield* server.write(0, {
-        _tag: "Request",
-        id: requestId,
-        tag: WS_METHODS.subscribeAuthAccess,
-        payload: {},
-        headers: Headers.empty,
-      });
-      const snapshot = yield* Queue.take(responses);
-      assert.equal(snapshot.type, "snapshot");
-      yield* server.write(0, { _tag: "Ack", requestId });
-      yield* Queue.take(subscribed);
-      yield* Queue.take(subscribed);
-
-      // A later change arrives either way, so a dropped revocation fails as a mismatch.
-      yield* PubSub.publish(pairingChanges, {
-        type: "pairingLinkRemoved",
-        id: "later",
-      });
-      const next = yield* Queue.take(responses);
-      assert.deepEqual(next, {
-        version: 1,
-        revision: 2,
-        type: "clientRemoved",
-        payload: { sessionId: revokedElsewhere },
-      });
-      yield* server.write(0, { _tag: "Ack", requestId });
-      assert.equal((yield* Queue.take(responses)).type, "pairingLinkRemoved");
-      yield* server.write(0, { _tag: "Ack", requestId });
-
-      // Device trust has no incremental event, so a change re-sends the whole snapshot.
-      yield* PubSub.publish(pairingChanges, { type: "connectDevicesChanged" });
-      assert.deepEqual(yield* Queue.take(responses), {
-        version: 1,
-        revision: 4,
-        type: "snapshot",
-        payload: { pairingLinks: [], clientSessions: [], connectDevices: [] },
-      });
-      yield* server.write(0, {
-        _tag: "Interrupt",
-        requestId,
-        interruptors: [],
-      });
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Layer.fresh(layerConfigSources),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
-        ),
-      ),
-    ),
-);
-
-it.effect(
-  "on-demand clients get provider config without workspace snapshots",
-  () =>
-    Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("claudeAgent");
-      const snapshotFor = (cwd: string, checkedAt: string) => ({
-        cwd,
-        checkedAt,
-        slashCommands: [{ name: `${cwd.slice(1)}-command` }],
-        skills: [],
-      });
-      const provider: ServerProvider = {
-        instanceId,
-        driver: ProviderDriverKind.make("claudeAgent"),
-        enabled: true,
-        installed: true,
-        version: "1.0.0",
-        status: "ready",
-        auth: { status: "authenticated" },
-        checkedAt: "2026-10-25T00:00:00.000Z",
-        models: [],
-        slashCommands: [
-          { name: "machine-command", description: "A machine command" },
-        ],
-        skills: [
-          {
-            name: "machine-skill",
-            description: "Machine skill",
-            path: "/skills/machine-skill",
-            enabled: true,
-          },
-        ],
-        workspaceSnapshots: [
-          snapshotFor("/a", "2026-10-25T00:00:00.000Z"),
-          snapshotFor("/b", "2026-10-25T00:00:00.000Z"),
-        ],
-      };
-      let scansCwd = true;
-      let registryProviders: ReadonlyArray<ServerProvider> = [provider];
-      const providerChanges =
-        yield* Queue.unbounded<ReadonlyArray<ServerProvider>>();
-      const pulled = yield* Queue.unbounded<void>();
-      const responses = yield* Queue.unbounded<unknown>();
-      const configRpcServices = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(ExternalLauncher.ExternalLauncher)({
-          resolveAvailableEditors: () => Effect.succeed([]),
-          resolveFileManagerRevealKind: () => Effect.undefined,
-        }),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.sync(() => registryProviders),
-          streamChanges: Stream.fromQueue(providerChanges).pipe(
-            Stream.tap(() => Queue.offer(pulled, undefined)),
-          ),
-          refresh: () => Effect.sync(() => registryProviders),
-          refreshWorkspaceSnapshot: () => Effect.sync(() => registryProviders),
-        }),
-        Layer.mock(ProjectService.ProjectService)({
-          workspaceScanDirectory: (cwd) => Effect.succeed(cwd),
-        }),
-        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-          listInstances: Effect.sync(() => [
-            (scansCwd
-              ? { instanceId, snapshotForCwd: () => Effect.die("unused") }
-              : { instanceId }) as never,
-          ]),
-          getInstance: () =>
-            Effect.sync(
-              () =>
-                (scansCwd
-                  ? { instanceId, snapshotForCwd: () => Effect.die("unused") }
-                  : { instanceId }) as never,
-            ),
-        }),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({
-          current: Effect.succeed([]),
-          streamChanges: Stream.make([]),
-          refresh: Effect.void,
-        }),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
-          resolveTargets: () => Effect.succeed([]),
-        }),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({
-          resolve: () => Effect.succeed([]),
-          resolveAvailable: () => Effect.succeed([]),
-        }),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          scratchRoot: Effect.succeedNone,
-          namedProjectsRoot: process.cwd(),
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({
-          getDescriptor: Effect.succeed({
-            environmentId: EnvironmentId.make("config-test"),
-            label: "Config test",
-            platform: { os: "linux", arch: "x64" },
-            serverVersion: "0.0.0",
-            capabilities: { repositoryIdentity: false },
-          }),
-        }),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-          getDescriptor: () =>
-            Effect.succeed({
-              policy: "loopback-browser",
-              bootstrapMethods: [],
-              sessionMethods: ["browser-session-cookie"],
-              sessionCookieName: "config-test-session",
-            }),
-        }),
-      );
-      const server = yield* RpcServer.makeNoSerialization(
-        RpcGroup.make(WsSubscribeServerConfigRpc, WsServerRefreshProvidersRpc),
-        {
-          ...WS_RPC_SERVER_OPTIONS,
-          onFromServer: (response) =>
-            response._tag === "Chunk"
-              ? Effect.forEach(
-                  response.values,
-                  (value) => Queue.offer(responses, value),
-                  {
-                    discard: true,
-                  },
-                )
-              : response._tag === "Exit" && response.exit._tag === "Success"
-                ? Queue.offer(responses, response.exit.value)
-                : Effect.void,
-        },
-      ).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("config-test"),
-              subject: "config-test",
-              method: "browser-session-cookie",
-              scopes: [],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(Layer.provide(configRpcServices)),
-        ),
-      );
-      const configRequest = RpcMessage.RequestId("config");
-      yield* server.write(0, {
-        _tag: "Request",
-        id: configRequest,
-        tag: WS_METHODS.subscribeServerConfig,
-        payload: {
-          workspaceSnapshotsOnDemand: true,
-          providerCatalogsOnDemand: true,
-        },
-        headers: Headers.empty,
-      });
-      const snapshot = (yield* Queue.take(
-        responses,
-      )) as ServerConfigStreamEvent;
-      if (snapshot.type !== "snapshot")
-        return yield* Effect.die("Missing initial snapshot");
-      assert.isUndefined(snapshot.config.providers[0]?.workspaceSnapshots);
-      // The cwd snapshot the client fetches carries the catalog, so only command names are sent.
-      assert.deepEqual(snapshot.config.providers[0]?.slashCommands, [
-        { name: "machine-command" },
-      ]);
-      assert.deepEqual(snapshot.config.providers[0]?.skills, [
-        { name: "machine-skill", path: "/skills/machine-skill", enabled: true },
-      ]);
-      yield* server.write(0, { _tag: "Ack", requestId: configRequest });
-
-      // A rescan that only touches a snapshot sends nothing; the next real change does.
-      yield* Queue.offer(providerChanges, [
-        {
-          ...provider,
-          workspaceSnapshots: [snapshotFor("/a", "2026-10-25T00:05:00.000Z")],
-        },
-      ]);
-      yield* Queue.take(pulled);
-      yield* TestClock.adjust("1 second");
-      // Late /usage-limits discovery still reaches the client, so it refetches its cwd snapshot.
-      yield* Queue.offer(providerChanges, [
-        {
-          ...provider,
-          status: "warning",
-          slashCommands: [...provider.slashCommands, USAGE_LIMITS_COMMAND],
-        },
-      ]);
-      yield* Queue.take(pulled);
-      yield* TestClock.adjust("1 second");
-      const update = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
-      if (update.type !== "providerStatuses")
-        return yield* Effect.die("Expected provider update");
-      assert.equal(update.payload.providers[0]?.status, "warning");
-      assert.isUndefined(update.payload.providers[0]?.workspaceSnapshots);
-      assert.deepEqual(update.payload.providers[0]?.slashCommands, [
-        { name: "machine-command" },
-        { name: USAGE_LIMITS_COMMAND.name },
-      ]);
-      yield* server.write(0, { _tag: "Ack", requestId: configRequest });
-      // A replacement that cannot scan a cwd sends its full machine catalog.
-      scansCwd = false;
-      yield* Queue.offer(providerChanges, [{ ...provider, status: "warning" }]);
-      yield* Queue.take(pulled);
-      yield* TestClock.adjust("1 second");
-      const replaced = (yield* Queue.take(
-        responses,
-      )) as ServerConfigStreamEvent;
-      if (replaced.type !== "providerStatuses")
-        return yield* Effect.die("Expected provider update");
-      assert.deepEqual(
-        replaced.payload.providers[0]?.slashCommands,
-        provider.slashCommands,
-      );
-      assert.deepEqual(replaced.payload.providers[0]?.skills, provider.skills);
-
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("refresh"),
-        tag: WS_METHODS.serverRefreshProviders,
-        payload: { instanceId, cwd: "/b", workspaceSnapshotsOnDemand: true },
-        headers: Headers.empty,
-      });
-      const refreshed = (yield* Queue.take(responses)) as {
-        readonly providers: ReadonlyArray<ServerProvider>;
-      };
-      assert.deepEqual(
-        refreshed.providers.map((entry) => [
-          entry.workspaceSnapshots,
-          entry.slashCommands,
-        ]),
-        [[[snapshotFor("/b", "2026-10-25T00:00:00.000Z")], []]],
-      );
-      // A failed scan still gives a client without the machine catalog its commands.
-      scansCwd = true;
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("refresh-failed-scan"),
-        tag: WS_METHODS.serverRefreshProviders,
-        payload: {
-          instanceId,
-          cwd: "/c",
-          workspaceSnapshotsOnDemand: true,
-          providerCatalogsOnDemand: true,
-        },
-        headers: Headers.empty,
-      });
-      const fallback = (yield* Queue.take(responses)) as {
-        readonly providers: ReadonlyArray<ServerProvider>;
-      };
-      assert.deepEqual(fallback.providers[0]?.workspaceSnapshots, [
-        {
-          cwd: "/c",
-          checkedAt: provider.checkedAt,
-          slashCommands: provider.slashCommands,
-          slashCommandsPending: true,
-          skills: provider.skills,
-        },
-      ]);
-      yield* server.write(0, {
-        _tag: "Interrupt",
-        requestId: configRequest,
-        interruptors: [],
-      });
-
-      // A client that takes digests and deltas, against a catalog of over 200 KB.
-      const heavy: ServerProvider = {
-        ...provider,
-        slashCommands: Array.from({ length: 250 }, (_, index) => ({
-          name: `command-${index}`,
-          description: "d".repeat(400),
-        })),
-        skills: Array.from({ length: 200 }, (_, index) => ({
-          name: `skill-${index}`,
-          description: "d".repeat(500),
-          path: `/home/user/.claude/skills/skill-${index}/SKILL.md`,
-          enabled: true,
-        })),
-      };
-      registryProviders = [heavy];
-      const lightRequest = RpcMessage.RequestId("light-config");
-      yield* server.write(0, {
-        _tag: "Request",
-        id: lightRequest,
-        tag: WS_METHODS.subscribeServerConfig,
-        payload: {
-          workspaceSnapshotsOnDemand: true,
-          providerCatalogsOnDemand: true,
-          providerCatalogDigests: true,
-          providerStatusDeltas: true,
-        },
-        headers: Headers.empty,
-      });
-      const light = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
-      if (light.type !== "snapshot")
-        return yield* Effect.die("Missing light snapshot");
-      const digest = light.config.providers[0]?.catalogDigest;
-      assert.isString(digest);
-      assert.deepEqual(
-        [
-          light.config.providers[0]?.slashCommands,
-          light.config.providers[0]?.skills,
-        ],
-        [[], []],
-      );
-      // Budget for the first config a phone decodes: the catalog stays out of it.
-      assert.isBelow(JSON.stringify(light.config.providers).length, 1024);
-      yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
-
-      // A health check sends the provider without the lists the client already holds.
-      yield* Queue.offer(providerChanges, [
-        { ...heavy, checkedAt: "2026-10-25T00:10:00.000Z" },
-      ]);
-      yield* Queue.take(pulled);
-      yield* TestClock.adjust("1 second");
-      const delta = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
-      if (delta.type !== "providerStatusDeltas")
-        return yield* Effect.die("Expected provider deltas");
-      assert.deepEqual(
-        delta.payload.providers.map((entry) => [
-          entry.checkedAt,
-          entry.catalogDigest,
-          entry.models,
-          entry.slashCommands,
-          entry.skills,
-        ]),
-        [["2026-10-25T00:10:00.000Z", digest, undefined, undefined, undefined]],
-      );
-      yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
-
-      // A changed description changes the digest, so the client loads the lists again.
-      yield* Queue.offer(providerChanges, [
-        {
-          ...heavy,
-          checkedAt: "2026-10-25T00:20:00.000Z",
-          skills: heavy.skills.map((skill, index) =>
-            index === 0 ? { ...skill, description: "changed" } : skill,
-          ),
-        },
-      ]);
-      yield* Queue.take(pulled);
-      yield* TestClock.adjust("1 second");
-      const redescribed = (yield* Queue.take(
-        responses,
-      )) as ServerConfigStreamEvent;
-      if (redescribed.type !== "providerStatusDeltas") {
-        return yield* Effect.die("Expected provider deltas");
-      }
-      assert.notEqual(redescribed.payload.providers[0]?.catalogDigest, digest);
-      yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
-
-      // A caller that only waits for a machine refresh gets no provider list back.
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("refresh-omitted"),
-        tag: WS_METHODS.serverRefreshProviders,
-        payload: { workspaceSnapshotsOnDemand: true, omitProviders: true },
-        headers: Headers.empty,
-      });
-      assert.deepEqual(yield* Queue.take(responses), { providers: [] });
-
-      // The cwd snapshot brings the lists the digest stands for, under the same digest.
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("refresh-machine-catalog"),
-        tag: WS_METHODS.serverRefreshProviders,
-        payload: {
-          instanceId,
-          cwd: "/b",
-          workspaceSnapshotsOnDemand: true,
-          providerCatalogsOnDemand: true,
-          omitProviders: true,
-          machineCatalog: true,
-        },
-        headers: Headers.empty,
-      });
-      const loaded = (yield* Queue.take(responses)) as {
-        readonly providers: ReadonlyArray<ServerProvider>;
-      };
-      assert.equal(loaded.providers[0]?.catalogDigest, digest);
-      assert.deepEqual(loaded.providers[0]?.slashCommands[0], {
-        name: "command-0",
-      });
-      assert.deepEqual(loaded.providers[0]?.skills[0], {
-        name: "skill-0",
-        path: "/home/user/.claude/skills/skill-0/SKILL.md",
-        enabled: true,
-      });
-      assert.lengthOf(loaded.providers[0]?.workspaceSnapshots ?? [], 1);
-      yield* server.write(0, {
-        _tag: "Interrupt",
-        requestId: lightRequest,
-        interruptors: [],
-      });
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Layer.fresh(layerConfigSources),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
-        ),
-      ),
-    ),
-);
-
-it.effect(
-  "a missing thread worktree gets its project's skills in the cwd snapshot",
-  () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const serverConfig = yield* ServerConfigModule.ServerConfig;
-      const instanceId = ProviderInstanceId.make("claudeAgent");
-      const projectId = ProjectId.make("project:skills");
-      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-missing-worktree-project-",
-      });
-      const skillPath = path.join(
-        workspaceRoot,
-        ".claude",
-        "skills",
-        "finalize",
-        "SKILL.md",
-      );
-      yield* fileSystem.makeDirectory(path.dirname(skillPath), {
-        recursive: true,
-      });
-      yield* fileSystem.writeFileString(
-        skillPath,
-        "---\nname: finalize\n---\n",
-      );
-      // Removed with `git worktree remove`; only the next turn start recreates it.
-      const worktreePath = path.join(
-        serverConfig.worktreesDir,
-        "proj",
-        "t3-6f94fb95",
-      );
-      const thread = {
-        id: ThreadId.make("thread:worktree"),
-        projectId,
-        archivedAt: null,
-        worktreePath,
-        branch: "t3/reply-ok",
-      } as unknown as OrchestrationV2ThreadShell;
-      const project = {
-        id: projectId,
-        title: "proj",
-        workspaceRoot,
-        defaultModelSelection: null,
-        scripts: [],
-        createdAt: "2026-11-07T00:00:00.000Z",
-        updatedAt: "2026-11-07T00:00:00.000Z",
-      } satisfies OrchestrationProjectShell;
-      const provider: ServerProvider = {
-        instanceId,
-        driver: ProviderDriverKind.make("claudeAgent"),
-        enabled: true,
-        installed: true,
-        version: "1.0.0",
-        status: "ready",
-        auth: { status: "authenticated" },
-        checkedAt: "2026-11-07T00:00:00.000Z",
-        models: [],
-        slashCommands: [],
-        skills: [],
-      };
-      // Like Claude's probe: project skills come from the scanned cwd, and a missing cwd is final.
-      const scan = (cwd: string) =>
-        fileSystem
-          .exists(path.join(cwd, ".claude", "skills", "finalize", "SKILL.md"))
-          .pipe(
-            Effect.orDie,
-            Effect.map((found) => ({
-              cwd,
-              checkedAt: "2026-11-07T00:00:00.000Z",
-              slashCommands: [],
-              slashCommandsPending: false,
-              skills: found
-                ? [
-                    {
-                      name: "finalize",
-                      path: path.join(cwd, ".claude/skills/finalize"),
-                      enabled: true,
-                    },
-                  ]
-                : [],
-            })),
-          );
-      const responses = yield* Queue.unbounded<unknown>();
-      const services = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([provider]),
-          refreshWorkspaceSnapshot: (input) =>
-            Effect.map(scan(input.scanCwd ?? input.cwd), (snapshot) => [
-              {
-                ...provider,
-                workspaceSnapshots: [{ ...snapshot, cwd: input.cwd }],
-              },
-            ]),
-        }),
-        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-          listInstances: Effect.succeed([]),
-          getInstance: () =>
-            Effect.succeed({ instanceId, snapshotForCwd: scan } as never),
-        }),
-        Layer.effect(ProjectService.ProjectService, ProjectService.make).pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.mock(ProjectionStore.ProjectionStoreV2)({
-                readShellSnapshot: (options) =>
-                  Effect.succeed(
-                    Effect.succeed({
-                      schemaVersion: 1,
-                      snapshotSequence: 0,
-                      threads: [thread].filter(
-                        (candidate) =>
-                          options?.worktreePath === undefined ||
-                          candidate.worktreePath === options.worktreePath,
-                      ),
-                      archivedThreads: [],
-                    } as never),
-                  ),
-              }),
-              Layer.mock(ProjectStore.ProjectStoreV2)({
-                get: () => Effect.succeedSome(project as never),
-              }),
-              Layer.mock(ProjectEnrichment.ProjectEnrichmentService)({}),
-              Layer.mock(WorkspacePaths.WorkspacePaths)({}),
-              Layer.mock(EventSink.EventSinkV2)({}),
-              IdAllocator.layer,
-              Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({}),
-              Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
-            ),
-          ),
-        ),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({
-          current: Effect.succeed([]),
-        }),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          scratchRoot: Effect.succeedNone,
-          namedProjectsRoot: process.cwd(),
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-      );
-      const server = yield* RpcServer.makeNoSerialization(
-        RpcGroup.make(WsServerRefreshProvidersRpc),
-        {
-          ...WS_RPC_SERVER_OPTIONS,
-          onFromServer: (response) =>
-            response._tag === "Exit" && response.exit._tag === "Success"
+            ? Effect.forEach(response.values, (value) => Queue.offer(responses, value), {
+                discard: true,
+              })
+            : response._tag === "Exit" && response.exit._tag === "Success"
               ? Queue.offer(responses, response.exit.value)
-              : response._tag === "Exit"
-                ? Queue.offer(responses, response.exit)
-                : Effect.void,
-        },
-      ).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("worktree-skills-test"),
-              subject: "worktree-skills-test",
-              method: "browser-session-cookie",
-              scopes: [],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(Layer.provide(services)),
-        ),
-      );
-
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("refresh"),
-        tag: WS_METHODS.serverRefreshProviders,
-        payload: {
-          instanceId,
-          cwd: worktreePath,
-          workspaceSnapshotsOnDemand: true,
-        },
-        headers: Headers.empty,
-      });
-      const refreshed = (yield* Queue.take(responses)) as {
-        readonly providers: ReadonlyArray<ServerProvider>;
-      };
-      const snapshot = refreshed.providers[0]?.workspaceSnapshots?.find(
-        (candidate) => candidate.cwd === worktreePath,
-      );
-      assert.deepEqual(
-        snapshot?.skills?.map((skill) => skill.name),
-        ["finalize"],
-        "the thread's removed worktree should list the project's skills",
-      );
-    }).pipe(
+              : Effect.void,
+      },
+    ).pipe(
       Effect.provide(
-        Layer.mergeAll(
-          Layer.fresh(layerConfigSources),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("config-test"),
+            subject: "config-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(Layer.provide(configRpcServices)),
+      ),
+    );
+    const configRequest = RpcMessage.RequestId("config");
+    yield* server.write(0, {
+      _tag: "Request",
+      id: configRequest,
+      tag: WS_METHODS.subscribeServerConfig,
+      payload: {
+        workspaceSnapshotsOnDemand: true,
+        providerCatalogsOnDemand: true,
+      },
+      headers: Headers.empty,
+    });
+    const snapshot = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (snapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
+    assert.isUndefined(snapshot.config.providers[0]?.workspaceSnapshots);
+    // The cwd snapshot the client fetches carries the catalog, so only command names are sent.
+    assert.deepEqual(snapshot.config.providers[0]?.slashCommands, [{ name: "machine-command" }]);
+    assert.deepEqual(snapshot.config.providers[0]?.skills, [
+      { name: "machine-skill", path: "/skills/machine-skill", enabled: true },
+    ]);
+    yield* server.write(0, { _tag: "Ack", requestId: configRequest });
+
+    // A rescan that only touches a snapshot sends nothing; the next real change does.
+    yield* Queue.offer(providerChanges, [
+      {
+        ...provider,
+        workspaceSnapshots: [snapshotFor("/a", "2026-10-25T00:05:00.000Z")],
+      },
+    ]);
+    yield* Queue.take(pulled);
+    yield* TestClock.adjust("1 second");
+    // Late /usage-limits discovery still reaches the client, so it refetches its cwd snapshot.
+    yield* Queue.offer(providerChanges, [
+      {
+        ...provider,
+        status: "warning",
+        slashCommands: [...provider.slashCommands, USAGE_LIMITS_COMMAND],
+      },
+    ]);
+    yield* Queue.take(pulled);
+    yield* TestClock.adjust("1 second");
+    const update = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (update.type !== "providerStatuses") return yield* Effect.die("Expected provider update");
+    assert.equal(update.payload.providers[0]?.status, "warning");
+    assert.isUndefined(update.payload.providers[0]?.workspaceSnapshots);
+    assert.deepEqual(update.payload.providers[0]?.slashCommands, [
+      { name: "machine-command" },
+      { name: USAGE_LIMITS_COMMAND.name },
+    ]);
+    yield* server.write(0, { _tag: "Ack", requestId: configRequest });
+    // A replacement that cannot scan a cwd sends its full machine catalog.
+    scansCwd = false;
+    yield* Queue.offer(providerChanges, [{ ...provider, status: "warning" }]);
+    yield* Queue.take(pulled);
+    yield* TestClock.adjust("1 second");
+    const replaced = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (replaced.type !== "providerStatuses") return yield* Effect.die("Expected provider update");
+    assert.deepEqual(replaced.payload.providers[0]?.slashCommands, provider.slashCommands);
+    assert.deepEqual(replaced.payload.providers[0]?.skills, provider.skills);
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: { instanceId, cwd: "/b", workspaceSnapshotsOnDemand: true },
+      headers: Headers.empty,
+    });
+    const refreshed = (yield* Queue.take(responses)) as {
+      readonly providers: ReadonlyArray<ServerProvider>;
+    };
+    assert.deepEqual(
+      refreshed.providers.map((entry) => [entry.workspaceSnapshots, entry.slashCommands]),
+      [[[snapshotFor("/b", "2026-10-25T00:00:00.000Z")], []]],
+    );
+    // A failed scan still gives a client without the machine catalog its commands.
+    scansCwd = true;
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh-failed-scan"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: {
+        instanceId,
+        cwd: "/c",
+        workspaceSnapshotsOnDemand: true,
+        providerCatalogsOnDemand: true,
+      },
+      headers: Headers.empty,
+    });
+    const fallback = (yield* Queue.take(responses)) as {
+      readonly providers: ReadonlyArray<ServerProvider>;
+    };
+    assert.deepEqual(fallback.providers[0]?.workspaceSnapshots, [
+      {
+        cwd: "/c",
+        checkedAt: provider.checkedAt,
+        slashCommands: provider.slashCommands,
+        slashCommandsPending: true,
+        skills: provider.skills,
+      },
+    ]);
+    yield* server.write(0, {
+      _tag: "Interrupt",
+      requestId: configRequest,
+      interruptors: [],
+    });
+
+    // A client that takes digests and deltas, against a catalog of over 200 KB.
+    const heavy: ServerProvider = {
+      ...provider,
+      slashCommands: Array.from({ length: 250 }, (_, index) => ({
+        name: `command-${index}`,
+        description: "d".repeat(400),
+      })),
+      skills: Array.from({ length: 200 }, (_, index) => ({
+        name: `skill-${index}`,
+        description: "d".repeat(500),
+        path: `/home/user/.claude/skills/skill-${index}/SKILL.md`,
+        enabled: true,
+      })),
+    };
+    registryProviders = [heavy];
+    const lightRequest = RpcMessage.RequestId("light-config");
+    yield* server.write(0, {
+      _tag: "Request",
+      id: lightRequest,
+      tag: WS_METHODS.subscribeServerConfig,
+      payload: {
+        workspaceSnapshotsOnDemand: true,
+        providerCatalogsOnDemand: true,
+        providerCatalogDigests: true,
+        providerStatusDeltas: true,
+      },
+      headers: Headers.empty,
+    });
+    const light = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (light.type !== "snapshot") return yield* Effect.die("Missing light snapshot");
+    const digest = light.config.providers[0]?.catalogDigest;
+    assert.isString(digest);
+    assert.deepEqual(
+      [light.config.providers[0]?.slashCommands, light.config.providers[0]?.skills],
+      [[], []],
+    );
+    // Budget for the first config a phone decodes: the catalog stays out of it.
+    assert.isBelow(JSON.stringify(light.config.providers).length, 1024);
+    yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
+
+    // A health check sends the provider without the lists the client already holds.
+    yield* Queue.offer(providerChanges, [{ ...heavy, checkedAt: "2026-10-25T00:10:00.000Z" }]);
+    yield* Queue.take(pulled);
+    yield* TestClock.adjust("1 second");
+    const delta = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (delta.type !== "providerStatusDeltas") return yield* Effect.die("Expected provider deltas");
+    assert.deepEqual(
+      delta.payload.providers.map((entry) => [
+        entry.checkedAt,
+        entry.catalogDigest,
+        entry.models,
+        entry.slashCommands,
+        entry.skills,
+      ]),
+      [["2026-10-25T00:10:00.000Z", digest, undefined, undefined, undefined]],
+    );
+    yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
+
+    // A changed description changes the digest, so the client loads the lists again.
+    yield* Queue.offer(providerChanges, [
+      {
+        ...heavy,
+        checkedAt: "2026-10-25T00:20:00.000Z",
+        skills: heavy.skills.map((skill, index) =>
+          index === 0 ? { ...skill, description: "changed" } : skill,
         ),
+      },
+    ]);
+    yield* Queue.take(pulled);
+    yield* TestClock.adjust("1 second");
+    const redescribed = (yield* Queue.take(responses)) as ServerConfigStreamEvent;
+    if (redescribed.type !== "providerStatusDeltas") {
+      return yield* Effect.die("Expected provider deltas");
+    }
+    assert.notEqual(redescribed.payload.providers[0]?.catalogDigest, digest);
+    yield* server.write(0, { _tag: "Ack", requestId: lightRequest });
+
+    // A caller that only waits for a machine refresh gets no provider list back.
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh-omitted"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: { workspaceSnapshotsOnDemand: true, omitProviders: true },
+      headers: Headers.empty,
+    });
+    assert.deepEqual(yield* Queue.take(responses), { providers: [] });
+
+    // The cwd snapshot brings the lists the digest stands for, under the same digest.
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh-machine-catalog"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: {
+        instanceId,
+        cwd: "/b",
+        workspaceSnapshotsOnDemand: true,
+        providerCatalogsOnDemand: true,
+        omitProviders: true,
+        machineCatalog: true,
+      },
+      headers: Headers.empty,
+    });
+    const loaded = (yield* Queue.take(responses)) as {
+      readonly providers: ReadonlyArray<ServerProvider>;
+    };
+    assert.equal(loaded.providers[0]?.catalogDigest, digest);
+    assert.deepEqual(loaded.providers[0]?.slashCommands[0], {
+      name: "command-0",
+    });
+    assert.deepEqual(loaded.providers[0]?.skills[0], {
+      name: "skill-0",
+      path: "/home/user/.claude/skills/skill-0/SKILL.md",
+      enabled: true,
+    });
+    assert.lengthOf(loaded.providers[0]?.workspaceSnapshots ?? [], 1);
+    yield* server.write(0, {
+      _tag: "Interrupt",
+      requestId: lightRequest,
+      interruptors: [],
+    });
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
       ),
     ),
+  ),
+);
+
+it.effect("a missing thread worktree gets its project's skills in the cwd snapshot", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const serverConfig = yield* ServerConfigModule.ServerConfig;
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const projectId = ProjectId.make("project:skills");
+    const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-missing-worktree-project-",
+    });
+    const skillPath = path.join(workspaceRoot, ".claude", "skills", "finalize", "SKILL.md");
+    yield* fileSystem.makeDirectory(path.dirname(skillPath), {
+      recursive: true,
+    });
+    yield* fileSystem.writeFileString(skillPath, "---\nname: finalize\n---\n");
+    // Removed with `git worktree remove`; only the next turn start recreates it.
+    const worktreePath = path.join(serverConfig.worktreesDir, "proj", "t3-6f94fb95");
+    const thread = {
+      id: ThreadId.make("thread:worktree"),
+      projectId,
+      archivedAt: null,
+      worktreePath,
+      branch: "t3/reply-ok",
+    } as unknown as OrchestrationV2ThreadShell;
+    const project = {
+      id: projectId,
+      title: "proj",
+      workspaceRoot,
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-11-07T00:00:00.000Z",
+      updatedAt: "2026-11-07T00:00:00.000Z",
+    } satisfies OrchestrationProjectShell;
+    const provider: ServerProvider = {
+      instanceId,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-11-07T00:00:00.000Z",
+      models: [],
+      slashCommands: [],
+      skills: [],
+    };
+    // Like Claude's probe: project skills come from the scanned cwd, and a missing cwd is final.
+    const scan = (cwd: string) =>
+      fileSystem.exists(path.join(cwd, ".claude", "skills", "finalize", "SKILL.md")).pipe(
+        Effect.orDie,
+        Effect.map((found) => ({
+          cwd,
+          checkedAt: "2026-11-07T00:00:00.000Z",
+          slashCommands: [],
+          slashCommandsPending: false,
+          skills: found
+            ? [
+                {
+                  name: "finalize",
+                  path: path.join(cwd, ".claude/skills/finalize"),
+                  enabled: true,
+                },
+              ]
+            : [],
+        })),
+      );
+    const responses = yield* Queue.unbounded<unknown>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.succeed([provider]),
+        refreshWorkspaceSnapshot: (input) =>
+          Effect.map(scan(input.scanCwd ?? input.cwd), (snapshot) => [
+            {
+              ...provider,
+              workspaceSnapshots: [{ ...snapshot, cwd: input.cwd }],
+            },
+          ]),
+      }),
+      Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+        listInstances: Effect.succeed([]),
+        getInstance: () => Effect.succeed({ instanceId, snapshotForCwd: scan } as never),
+      }),
+      Layer.effect(ProjectService.ProjectService, ProjectService.make).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ProjectionStore.ProjectionStoreV2)({
+              readShellSnapshot: (options) =>
+                Effect.succeed(
+                  Effect.succeed({
+                    schemaVersion: 1,
+                    snapshotSequence: 0,
+                    threads: [thread].filter(
+                      (candidate) =>
+                        options?.worktreePath === undefined ||
+                        candidate.worktreePath === options.worktreePath,
+                    ),
+                    archivedThreads: [],
+                  } as never),
+                ),
+            }),
+            Layer.mock(ProjectStore.ProjectStoreV2)({
+              get: () => Effect.succeedSome(project as never),
+            }),
+            Layer.mock(ProjectEnrichment.ProjectEnrichmentService)({}),
+            Layer.mock(WorkspacePaths.WorkspacePaths)({}),
+            Layer.mock(EventSink.EventSinkV2)({}),
+            IdAllocator.layer,
+            Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({}),
+            Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
+          ),
+        ),
+      ),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({
+        current: Effect.succeed([]),
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        scratchRoot: Effect.succeedNone,
+        namedProjectsRoot: process.cwd(),
+      }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(
+      RpcGroup.make(WsServerRefreshProvidersRpc),
+      {
+        ...WS_RPC_SERVER_OPTIONS,
+        onFromServer: (response) =>
+          response._tag === "Exit" && response.exit._tag === "Success"
+            ? Queue.offer(responses, response.exit.value)
+            : response._tag === "Exit"
+              ? Queue.offer(responses, response.exit)
+              : Effect.void,
+      },
+    ).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("worktree-skills-test"),
+            subject: "worktree-skills-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(Layer.provide(services)),
+      ),
+    );
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: {
+        instanceId,
+        cwd: worktreePath,
+        workspaceSnapshotsOnDemand: true,
+      },
+      headers: Headers.empty,
+    });
+    const refreshed = (yield* Queue.take(responses)) as {
+      readonly providers: ReadonlyArray<ServerProvider>;
+    };
+    const snapshot = refreshed.providers[0]?.workspaceSnapshots?.find(
+      (candidate) => candidate.cwd === worktreePath,
+    );
+    assert.deepEqual(
+      snapshot?.skills?.map((skill) => skill.name),
+      ["finalize"],
+      "the thread's removed worktree should list the project's skills",
+    );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+  ),
 );
 
 it.effect(
@@ -2245,9 +2066,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const browser = yield* ServerBrowser.ServerBrowser;
-      const requested = Effect.fnUntraced(function* (
-        scopes: ReadonlyArray<AuthEnvironmentScope>,
-      ) {
+      const requested = Effect.fnUntraced(function* (scopes: ReadonlyArray<AuthEnvironmentScope>) {
         const seen: TaskFolders.ProjectCommandsNow[] = [];
         const exits = yield* Queue.unbounded<string>();
         const services = Layer.mergeAll(
@@ -2263,9 +2082,7 @@ it.effect(
                 }),
               ),
             removeIfTaskFolder: (input) =>
-              Effect.sync(() => seen.push(input.projectCommands)).pipe(
-                Effect.as(true),
-              ),
+              Effect.sync(() => seen.push(input.projectCommands)).pipe(Effect.as(true)),
           }),
           Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
             refreshStatus: () => Effect.die("unused"),
@@ -2285,9 +2102,7 @@ it.effect(
         const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
           ...WS_RPC_SERVER_OPTIONS,
           onFromServer: (response) =>
-            response._tag === "Exit"
-              ? Queue.offer(exits, response.exit._tag)
-              : Effect.void,
+            response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
         }).pipe(
           Effect.provide(
             layerWsRpc(
@@ -2301,10 +2116,7 @@ it.effect(
               browser,
               () => Effect.void,
               { secretReferences: true },
-            ).pipe(
-              Layer.provide(services),
-              Layer.merge(RpcAuthorization.layer(scopes)),
-            ),
+            ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
           ),
         );
         yield* server.write(0, {
@@ -2336,19 +2148,13 @@ it.effect(
         "request-not-permitted",
       ]);
       assert.deepEqual(
-        yield* requested([
-          AuthSourceControlWriteScope,
-          AuthOrchestrationOperateScope,
-        ]),
+        yield* requested([AuthSourceControlWriteScope, AuthOrchestrationOperateScope]),
         ["permitted", "permitted"],
       );
-      assert.deepEqual(
-        yield* requested([
-          AuthSourceControlWriteScope,
-          AuthTerminalOperateScope,
-        ]),
-        ["permitted", "permitted"],
-      );
+      assert.deepEqual(yield* requested([AuthSourceControlWriteScope, AuthTerminalOperateScope]), [
+        "permitted",
+        "permitted",
+      ]);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
@@ -2367,16 +2173,13 @@ it.effect(
       const browser = yield* ServerBrowser.ServerBrowser;
       const projectId = ProjectId.make("project:layout");
       const approval = { kind: "create", command: "make worktree" } as const;
-      const requested = Effect.fnUntraced(function* (
-        scopes: ReadonlyArray<AuthEnvironmentScope>,
-      ) {
+      const requested = Effect.fnUntraced(function* (scopes: ReadonlyArray<AuthEnvironmentScope>) {
         const recorded: unknown[] = [];
         const exits = yield* Queue.unbounded<string>();
         const services = Layer.mergeAll(
           layerUnusedConfigRpcServices,
           Layer.mock(TaskFolders.TaskFolders)({
-            layoutCommands: () =>
-              Effect.succeed({ commands: [{ ...approval, approved: true }] }),
+            layoutCommands: () => Effect.succeed({ commands: [{ ...approval, approved: true }] }),
           }),
           Layer.mock(LayoutCommandApprovalWrites.LayoutCommandApprovalWrites)({
             set: (input) => Effect.sync(() => void recorded.push(input)),
@@ -2397,9 +2200,7 @@ it.effect(
         const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
           ...WS_RPC_SERVER_OPTIONS,
           onFromServer: (response) =>
-            response._tag === "Exit"
-              ? Queue.offer(exits, response.exit._tag)
-              : Effect.void,
+            response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
         }).pipe(
           Effect.provide(
             layerWsRpc(
@@ -2413,10 +2214,7 @@ it.effect(
               browser,
               () => Effect.void,
               { secretReferences: true },
-            ).pipe(
-              Layer.provide(services),
-              Layer.merge(RpcAuthorization.layer(scopes)),
-            ),
+            ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
           ),
         );
         yield* server.write(0, {
@@ -2436,9 +2234,7 @@ it.effect(
       });
       assert.deepEqual(
         yield* requested(
-          AuthEnvironmentScope.literals.filter(
-            (scope) => scope !== AuthTerminalOperateScope,
-          ),
+          AuthEnvironmentScope.literals.filter((scope) => scope !== AuthTerminalOperateScope),
         ),
         { exit: "Failure", recorded: [] },
       );
@@ -2457,125 +2253,28 @@ it.effect(
     ),
 );
 
-it.effect(
-  "a git action that fails partway still refreshes the repository status",
-  () =>
-    Effect.gen(function* () {
-      const failure = new GitManagerError({
-        operation: "test",
-        cwd: "/repo",
-        detail: "push failed",
-      });
-      const refreshFailure = new GitManagerError({
-        operation: "refresh",
-        cwd: "/repo",
-        detail: "refresh failed",
-      });
-      const refreshed = yield* Deferred.make<string>();
-      const exits = yield* Queue.unbounded<Exit.Exit<unknown, unknown>>();
-      const services = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
-          runStackedAction: () => Effect.fail(failure),
-        }),
-        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
-          refreshStatus: (cwd) =>
-            Deferred.succeed(refreshed, cwd).pipe(
-              Effect.andThen(Effect.fail(refreshFailure)),
-            ),
-        }),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          namedProjectsRoot: "/unused",
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-      );
-      const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
-        ...WS_RPC_SERVER_OPTIONS,
-        onFromServer: (response) =>
-          response._tag === "Exit"
-            ? Queue.offer(exits, response.exit)
-            : Effect.void,
-      }).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("git-test"),
-              subject: "git-test",
-              method: "browser-session-cookie",
-              scopes: [AuthSourceControlWriteScope],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(
-            Layer.provide(services),
-            Layer.merge(RpcAuthorization.layer([AuthSourceControlWriteScope])),
-          ),
-        ),
-      );
-      yield* server.write(0, {
-        _tag: "Request",
-        id: RpcMessage.RequestId("git"),
-        tag: WS_METHODS.gitRunStackedAction,
-        payload: { actionId: "action", cwd: "/repo", action: "commit_push" },
-        headers: Headers.empty,
-      });
-      const exit = yield* Queue.take(exits);
-      assert.deepEqual(
-        Exit.isFailure(exit) ? Cause.squash(exit.cause) : exit,
-        failure,
-      );
-      assert.equal(yield* Deferred.await(refreshed), "/repo");
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Layer.fresh(layerConfigSources),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
-        ),
-      ),
-    ),
-);
-
-it.effect("a publish whose push fails still refreshes the new remote", () =>
+it.effect("a git action that fails partway still refreshes the repository status", () =>
   Effect.gen(function* () {
-    const refreshes = yield* Queue.unbounded<string>();
-    const exits = yield* Queue.unbounded<string>();
+    const failure = new GitManagerError({
+      operation: "test",
+      cwd: "/repo",
+      detail: "push failed",
+    });
+    const refreshFailure = new GitManagerError({
+      operation: "refresh",
+      cwd: "/repo",
+      detail: "refresh failed",
+    });
+    const refreshed = yield* Deferred.make<string>();
+    const exits = yield* Queue.unbounded<Exit.Exit<unknown, unknown>>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
-      Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)(
-        {
-          publishRepository: (input) =>
-            Effect.fail(
-              new SourceControlRepositoryError({
-                provider: input.provider,
-                operation: "publishRepository",
-                detail:
-                  'Created owner/repo and added it as remote "origin", but the push failed.',
-              }),
-            ),
-        },
-      ),
-      Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-        resolve: (cwd, options) =>
-          Queue.offer(
-            refreshes,
-            `identity ${cwd} refresh=${options?.refresh === true}`,
-          ).pipe(Effect.as(null)),
+      Layer.mock(GitWorkflowService.GitWorkflowService)({
+        runStackedAction: () => Effect.fail(failure),
       }),
       Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
         refreshStatus: (cwd) =>
-          Queue.offer(refreshes, `status ${cwd}`).pipe(
-            Effect.andThen(Effect.die("unused")),
-          ),
+          Deferred.succeed(refreshed, cwd).pipe(Effect.andThen(Effect.fail(refreshFailure))),
       }),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
@@ -2592,9 +2291,89 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
     const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
-        response._tag === "Exit"
-          ? Queue.offer(exits, response.exit._tag)
-          : Effect.void,
+        response._tag === "Exit" ? Queue.offer(exits, response.exit) : Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("git-test"),
+            subject: "git-test",
+            method: "browser-session-cookie",
+            scopes: [AuthSourceControlWriteScope],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(RpcAuthorization.layer([AuthSourceControlWriteScope])),
+        ),
+      ),
+    );
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("git"),
+      tag: WS_METHODS.gitRunStackedAction,
+      payload: { actionId: "action", cwd: "/repo", action: "commit_push" },
+      headers: Headers.empty,
+    });
+    const exit = yield* Queue.take(exits);
+    assert.deepEqual(Exit.isFailure(exit) ? Cause.squash(exit.cause) : exit, failure);
+    assert.equal(yield* Deferred.await(refreshed), "/repo");
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+  ),
+);
+
+it.effect("a publish whose push fails still refreshes the new remote", () =>
+  Effect.gen(function* () {
+    const refreshes = yield* Queue.unbounded<string>();
+    const exits = yield* Queue.unbounded<string>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+        publishRepository: (input) =>
+          Effect.fail(
+            new SourceControlRepositoryError({
+              provider: input.provider,
+              operation: "publishRepository",
+              detail: 'Created owner/repo and added it as remote "origin", but the push failed.',
+            }),
+          ),
+      }),
+      Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+        resolve: (cwd, options) =>
+          Queue.offer(refreshes, `identity ${cwd} refresh=${options?.refresh === true}`).pipe(
+            Effect.as(null),
+          ),
+      }),
+      Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+        refreshStatus: (cwd) =>
+          Queue.offer(refreshes, `status ${cwd}`).pipe(Effect.andThen(Effect.die("unused"))),
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/unused",
+      }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) =>
+        response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
     }).pipe(
       Effect.provide(
         layerWsRpc(
@@ -2685,9 +2464,7 @@ it.effect.each([
             : yield* Stream.runCollect(
                 yield* subscribeOrchestrationV2Shell({
                   afterSequence: first!.sequence,
-                  ...(httpSnapshotFallback
-                    ? { httpSnapshotFallback: true as const }
-                    : {}),
+                  ...(httpSnapshotFallback ? { httpSnapshotFallback: true as const } : {}),
                 }),
               );
         return items;
@@ -2713,22 +2490,18 @@ it.effect.each([
         Effect.exit,
       );
       assert.deepEqual(
-        Exit.isFailure(exit)
-          ? Cause.squash(exit.cause)
-          : Array.from(exit.value),
+        Exit.isFailure(exit) ? Cause.squash(exit.cause) : Array.from(exit.value),
         httpSnapshotFallback ? [{ kind: "snapshot-required" }] : "snapshot",
       );
     }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
 
-it.effect(
-  "thread resume replays a deleted thread's deletion and nothing recorded before it",
-  () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const now = "2026-10-13T00:00:00.000Z";
-      const threadId = ThreadId.make("thread:deleted-resume");
-      const insert = (version: number, type: string, payload: object) => sql`
+it.effect("thread resume replays a deleted thread's deletion and nothing recorded before it", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-10-13T00:00:00.000Z";
+    const threadId = ThreadId.make("thread:deleted-resume");
+    const insert = (version: number, type: string, payload: object) => sql`
       INSERT INTO orchestration_events (
         event_id, aggregate_kind, stream_id, stream_version, event_type,
         occurred_at, actor_kind, payload_json, metadata_json, application_event_version
@@ -2737,57 +2510,55 @@ it.effect(
         ${now}, 'server', ${JSON.stringify(payload)}, '{}', 2
       )
     `;
-      const detached = {
-        providerSessionId: "session:deleted-resume",
-        detachedAt: now,
-      };
-      yield* insert(0, "provider-session.detached", detached);
-      yield* insert(1, "provider-session.detached", detached);
-      yield* insert(2, "thread.deleted", {
-        createdBy: "user",
-        creationSource: "web",
-        id: threadId,
-        projectId: "project:deleted-resume",
-        title: "Deleted",
-        providerInstanceId: "codex",
-        modelSelection: { instanceId: "codex", model: "default" },
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        activeProviderThreadId: null,
-        lineage: {
-          parentThreadId: null,
-          relationshipToParent: null,
-          rootThreadId: threadId,
-        },
-        forkedFrom: null,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-        deletedAt: now,
-        settledOverride: null,
-        settledAt: null,
-        lastVisitedAt: null,
-      });
+    const detached = {
+      providerSessionId: "session:deleted-resume",
+      detachedAt: now,
+    };
+    yield* insert(0, "provider-session.detached", detached);
+    yield* insert(1, "provider-session.detached", detached);
+    yield* insert(2, "thread.deleted", {
+      createdBy: "user",
+      creationSource: "web",
+      id: threadId,
+      projectId: "project:deleted-resume",
+      title: "Deleted",
+      providerInstanceId: "codex",
+      modelSelection: { instanceId: "codex", model: "default" },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: threadId,
+      },
+      forkedFrom: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+      deletedAt: now,
+      settledOverride: null,
+      settledAt: null,
+      lastVisitedAt: null,
+    });
 
-      const items = yield* subscribeOrchestrationV2Thread({
-        threadId,
-        afterSequence: 0,
-      }).pipe(
-        Effect.flatMap(Stream.runCollect),
-        Effect.provideService(ThreadManagement.ThreadManagementService, {
-          ensureLegacyTranscript: () => Effect.void,
-          streamStoredEventsFrom: () => Stream.empty,
-        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
-      );
-      assert.deepEqual(
-        Array.from(items).map(
-          (item) => item.kind === "event" && item.event.type,
-        ),
-        ["thread.deleted"],
-      );
-    }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+    const items = yield* subscribeOrchestrationV2Thread({
+      threadId,
+      afterSequence: 0,
+    }).pipe(
+      Effect.flatMap(Stream.runCollect),
+      Effect.provideService(ThreadManagement.ThreadManagementService, {
+        ensureLegacyTranscript: () => Effect.void,
+        streamStoredEventsFrom: () => Stream.empty,
+      } as unknown as ThreadManagement.ThreadManagementService["Service"]),
+    );
+    assert.deepEqual(
+      Array.from(items).map((item) => item.kind === "event" && item.event.type),
+      ["thread.deleted"],
+    );
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
 
 // A prune pass can delete replayed rows after the boundary check; the read must not be trusted.
@@ -2871,10 +2642,7 @@ it.effect.each(["thread", "shell"] as const)(
       yield* sql`DELETE FROM orchestration_events WHERE sequence = ${second!.sequence}`;
       yield* Deferred.succeed(releaseRead, undefined);
       const exit = yield* Fiber.join(fiber);
-      assert.deepEqual(
-        Exit.isFailure(exit) ? Cause.squash(exit.cause) : exit,
-        "snapshot",
-      );
+      assert.deepEqual(Exit.isFailure(exit) ? Cause.squash(exit.cause) : exit, "snapshot");
     }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
 
@@ -2996,9 +2764,7 @@ it.effect.each([
       );
       // A snapshot load dies with "snapshot", so success means the resume replayed nothing.
       assert.deepEqual(
-        Exit.isFailure(exit)
-          ? Cause.squash(exit.cause)
-          : Array.from(exit.value),
+        Exit.isFailure(exit) ? Cause.squash(exit.cause) : Array.from(exit.value),
         kinds,
       );
     }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
@@ -3140,206 +2906,181 @@ const seedAcpThread = Effect.fn(function* (
   return threadId;
 });
 
-it.effect(
-  "ACP session RPCs list a thread missing its history and repair it on import",
-  () =>
-    Effect.gen(function* () {
-      const projections = yield* ProjectionStore.ProjectionStoreV2;
-      const sql = yield* SqlClient.SqlClient;
-      const pending = yield* seedAcpThread("pending", {
-        imported: false,
-        ran: false,
-      });
-      const complete = yield* seedAcpThread("complete", {
-        imported: true,
-        ran: false,
-      });
-      const ran = yield* seedAcpThread("ran", { imported: false, ran: true });
-      const owned = yield* seedAcpThread("existing-t3-thread", {
-        imported: false,
-        ran: true,
-        nativeId: "owned-session",
-      });
-      const repaired: Array<ThreadId> = [];
-      const deleted: Array<string> = [];
-      const session = (sessionId: string) => ({
-        sessionId,
-        cwd: "/workspace/acp",
-        additionalDirectories: [],
-        title: null,
-        updatedAt: null,
-        importedThreadId: null,
-      });
-      const instance = {
-        driverKind: acpDriver,
-        snapshot: {
-          getSnapshot: Effect.succeed({
-            nativeSessions: { canList: true, canLoad: true, canDelete: true },
+it.effect("ACP session RPCs list a thread missing its history and repair it on import", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const pending = yield* seedAcpThread("pending", {
+      imported: false,
+      ran: false,
+    });
+    const complete = yield* seedAcpThread("complete", {
+      imported: true,
+      ran: false,
+    });
+    const ran = yield* seedAcpThread("ran", { imported: false, ran: true });
+    const owned = yield* seedAcpThread("existing-t3-thread", {
+      imported: false,
+      ran: true,
+      nativeId: "owned-session",
+    });
+    const repaired: Array<ThreadId> = [];
+    const deleted: Array<string> = [];
+    const session = (sessionId: string) => ({
+      sessionId,
+      cwd: "/workspace/acp",
+      additionalDirectories: [],
+      title: null,
+      updatedAt: null,
+      importedThreadId: null,
+    });
+    const instance = {
+      driverKind: acpDriver,
+      snapshot: {
+        getSnapshot: Effect.succeed({
+          nativeSessions: { canList: true, canLoad: true, canDelete: true },
+        }),
+      },
+      acpSessionManagement: {
+        listSessions: () =>
+          Effect.succeed({
+            sessions: ["new", "pending", "complete", "ran", "owned-session"].map(session),
+            nextCursor: null,
+            canLoad: true,
+            canResume: true,
+            canDelete: true,
           }),
-        },
-        acpSessionManagement: {
-          listSessions: () =>
-            Effect.succeed({
-              sessions: [
-                "new",
-                "pending",
-                "complete",
-                "ran",
-                "owned-session",
-              ].map(session),
-              nextCursor: null,
-              canLoad: true,
-              canResume: true,
-              canDelete: true,
-            }),
-          deleteSession: ({ sessionId }: { readonly sessionId: string }) =>
-            Effect.sync(() => {
-              deleted.push(sessionId);
-            }),
-        },
-      } as unknown as ProviderInstance;
-      const dependencies = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.fresh(layerConfigSources),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          namedProjectsRoot: "/unused",
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-        Layer.mock(ProjectService.ProjectService)({
-          getById: () =>
-            Effect.succeedSome({
-              id: acpProjectId,
-              title: "ACP",
-              workspaceRoot: "/workspace/acp",
-              defaultModelSelection: null,
-              scripts: [],
-              createdAt: "2026-10-23T00:00:00.000Z",
-              updatedAt: "2026-10-23T00:00:00.000Z",
-              deletedAt: null,
-            }),
-        }),
-        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-          getInstance: () => Effect.succeed(instance),
-        }),
-        Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)(
-          {
-            withSessionMutation: (effect) => effect,
-          },
-        ),
-        Layer.mock(ThreadManagement.ThreadManagementService)({
-          getThreadShell: (threadId) =>
-            projections
-              .getThreadShell(threadId)
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new Orchestrator.OrchestratorProjectionError({
-                      threadId,
-                      cause,
-                    }),
-                ),
-              ),
-        }),
-        // Repairing an existing thread must not launch another one.
-        Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-        Layer.mock(AgentSessionImporter.AgentSessionImporter)({
-          importNativeHistory: ({ threadId }) =>
-            Effect.sync(() => repaired.push(threadId)).pipe(Effect.as(1)),
-        }),
-        Layer.succeed(SqlClient.SqlClient, sql),
-      );
-      const services = AcpRegistrySessions.layer.pipe(
-        Layer.provideMerge(dependencies),
-      );
-      const client = yield* RpcTest.makeClient(acpSessionRpcs).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("acp-test"),
-              subject: "acp-test",
-              method: "browser-session-cookie",
-              scopes: [],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(
-            Layer.provide(services),
-            Layer.merge(
-              RpcAuthorization.layer([
-                AuthOrchestrationReadScope,
-                AuthOrchestrationOperateScope,
-              ]),
+        deleteSession: ({ sessionId }: { readonly sessionId: string }) =>
+          Effect.sync(() => {
+            deleted.push(sessionId);
+          }),
+      },
+    } as unknown as ProviderInstance;
+    const dependencies = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.fresh(layerConfigSources),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/unused",
+      }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: () =>
+          Effect.succeedSome({
+            id: acpProjectId,
+            title: "ACP",
+            workspaceRoot: "/workspace/acp",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: "2026-10-23T00:00:00.000Z",
+            updatedAt: "2026-10-23T00:00:00.000Z",
+            deletedAt: null,
+          }),
+      }),
+      Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+        getInstance: () => Effect.succeed(instance),
+      }),
+      Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)({
+        withSessionMutation: (effect) => effect,
+      }),
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadShell: (threadId) =>
+          projections.getThreadShell(threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new Orchestrator.OrchestratorProjectionError({
+                  threadId,
+                  cause,
+                }),
             ),
           ),
-        ),
-      );
-
-      const listed = yield* client[WS_METHODS.serverListAcpRegistrySessions]({
-        instanceId: acpInstanceId,
-        projectId: acpProjectId,
-      });
-      assert.deepEqual(
-        listed.sessions.map(
-          ({ sessionId, importedThreadId, nativeHistoryPending }) => [
-            sessionId,
-            importedThreadId,
-            nativeHistoryPending,
-          ],
-        ),
-        [
-          ["new", null, undefined],
-          ["pending", pending, true],
-          ["complete", complete, undefined],
-          ["ran", ran, undefined],
-          ["owned-session", owned, undefined],
-        ],
-      );
-
-      const imported = yield* client[WS_METHODS.serverImportAcpRegistrySession](
-        {
-          instanceId: acpInstanceId,
-          projectId: acpProjectId,
-          sessionId: "pending",
-        },
-      );
-      assert.deepEqual(imported, { threadId: pending, imported: true });
-      assert.deepEqual(repaired, [pending]);
-      const reopened = yield* client[WS_METHODS.serverImportAcpRegistrySession](
-        {
-          instanceId: acpInstanceId,
-          projectId: acpProjectId,
-          sessionId: "owned-session",
-        },
-      );
-      assert.deepEqual(reopened, { threadId: owned, imported: false });
-      assert.deepEqual(repaired, [pending]);
-      const deletion = yield* client[WS_METHODS.serverDeleteAcpRegistrySession](
-        {
-          instanceId: acpInstanceId,
-          projectId: acpProjectId,
-          sessionId: "owned-session",
-        },
-      ).pipe(Effect.exit);
-      assert.isTrue(Exit.isFailure(deletion));
-      assert.deepEqual(deleted, []);
-    }).pipe(
+      }),
+      // Repairing an existing thread must not launch another one.
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(AgentSessionImporter.AgentSessionImporter)({
+        importNativeHistory: ({ threadId }) =>
+          Effect.sync(() => repaired.push(threadId)).pipe(Effect.as(1)),
+      }),
+      Layer.succeed(SqlClient.SqlClient, sql),
+    );
+    const services = AcpRegistrySessions.layer.pipe(Layer.provideMerge(dependencies));
+    const client = yield* RpcTest.makeClient(acpSessionRpcs).pipe(
       Effect.provide(
-        Layer.mergeAll(
-          EventSink.layer.pipe(Layer.provideMerge(acpStores)),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("acp-test"),
+            subject: "acp-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(
+            RpcAuthorization.layer([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+          ),
         ),
       ),
+    );
+
+    const listed = yield* client[WS_METHODS.serverListAcpRegistrySessions]({
+      instanceId: acpInstanceId,
+      projectId: acpProjectId,
+    });
+    assert.deepEqual(
+      listed.sessions.map(({ sessionId, importedThreadId, nativeHistoryPending }) => [
+        sessionId,
+        importedThreadId,
+        nativeHistoryPending,
+      ]),
+      [
+        ["new", null, undefined],
+        ["pending", pending, true],
+        ["complete", complete, undefined],
+        ["ran", ran, undefined],
+        ["owned-session", owned, undefined],
+      ],
+    );
+
+    const imported = yield* client[WS_METHODS.serverImportAcpRegistrySession]({
+      instanceId: acpInstanceId,
+      projectId: acpProjectId,
+      sessionId: "pending",
+    });
+    assert.deepEqual(imported, { threadId: pending, imported: true });
+    assert.deepEqual(repaired, [pending]);
+    const reopened = yield* client[WS_METHODS.serverImportAcpRegistrySession]({
+      instanceId: acpInstanceId,
+      projectId: acpProjectId,
+      sessionId: "owned-session",
+    });
+    assert.deepEqual(reopened, { threadId: owned, imported: false });
+    assert.deepEqual(repaired, [pending]);
+    const deletion = yield* client[WS_METHODS.serverDeleteAcpRegistrySession]({
+      instanceId: acpInstanceId,
+      projectId: acpProjectId,
+      sessionId: "owned-session",
+    }).pipe(Effect.exit);
+    assert.isTrue(Exit.isFailure(deletion));
+    assert.deepEqual(deleted, []);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        EventSink.layer.pipe(Layer.provideMerge(acpStores)),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
     ),
+  ),
 );
 
 const workflowTags = [
@@ -3427,12 +3168,9 @@ const makeWorkflowClient = Effect.fn("test.makeWorkflowClient")(function* (
             })
           : Effect.fail(new Workflows.WorkflowRunNotFoundError({ runId })),
       answer: (runId, name, value, answeredBy) =>
-        Effect.sync(() =>
-          calls.push({ answer: [runId, name], value, answeredBy }),
-        ),
+        Effect.sync(() => calls.push({ answer: [runId, name], value, answeredBy })),
       resume: (runId) => Effect.sync(() => calls.push({ resume: runId })),
-      cancel: (runId, reason) =>
-        Effect.sync(() => calls.push({ cancel: runId, reason })),
+      cancel: (runId, reason) => Effect.sync(() => calls.push({ cancel: runId, reason })),
     }),
   );
   return yield* RpcTest.makeClient(workflowRpcs).pipe(
@@ -3448,10 +3186,7 @@ const makeWorkflowClient = Effect.fn("test.makeWorkflowClient")(function* (
         yield* ServerBrowser.ServerBrowser,
         () => Effect.void,
         { secretReferences: true },
-      ).pipe(
-        Layer.provide(services),
-        Layer.merge(RpcAuthorization.layer(scopes)),
-      ),
+      ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
     ),
   );
 });
@@ -3462,263 +3197,221 @@ const layerWorkflowRpcTest = Layer.mergeAll(
 );
 
 /** A client for the ACP Registry RPCs; `calls` records what reached the agent or the catalog. */
-const makeAcpRegistryClient = Effect.fn("test.makeAcpRegistryClient")(
-  function* (
-    calls: Array<string>,
-    options: {
-      readonly nativeSessions?: { readonly canList: boolean };
-      readonly managedPolicy?: ManagedPolicySummary;
-    },
-  ) {
-    const scopes = [AuthOrchestrationReadScope, AuthProvidersManageScope];
-    const instance = {
-      driverKind: acpDriver,
-      snapshot: {
-        getSnapshot: Effect.succeed({ nativeSessions: options.nativeSessions }),
-      },
-    } as unknown as ProviderInstance;
-    const services = Layer.mergeAll(
-      layerUnusedConfigRpcServices,
-      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-        namedProjectsRoot: "/unused",
-      }),
-      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-      ServerSettings.layerTest({}, options.managedPolicy),
-      Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({
-        prepare: ({ agentId }) =>
-          Effect.sync(() => calls.push(`prepare:${agentId}`)).pipe(
-            Effect.as({
-              agentId,
-              version: "1.0.0",
-              distribution: "npx",
-              prepared: true,
-            } as const),
-          ),
-      }),
-      Layer.mock(AcpRegistrySessions.AcpRegistrySessions)({
-        project: () =>
-          Effect.succeed({ workspaceRoot: "/workspace/acp" } as never),
-        sessionManager: () =>
-          Effect.succeed({
-            instance,
-            manager: {
-              listSessions: () =>
-                Effect.sync(() => calls.push("listSessions")).pipe(
-                  Effect.as({ sessions: [], nextCursor: null }),
-                ),
-            } as unknown as NonNullable<
-              ProviderInstance["acpSessionManagement"]
-            >,
-          }),
-      }),
-    );
-    return yield* RpcTest.makeClient(acpSessionRpcs).pipe(
-      Effect.provide(
-        layerWsRpc(
-          {
-            sessionId: AuthSessionId.make("acp-test"),
-            subject: "acp-test",
-            method: "browser-session-cookie",
-            scopes,
-          },
-          {},
-          yield* ServerBrowser.ServerBrowser,
-          () => Effect.void,
-          { secretReferences: true },
-        ).pipe(
-          Layer.provide(services),
-          Layer.merge(RpcAuthorization.layer(scopes)),
-        ),
-      ),
-    );
+const makeAcpRegistryClient = Effect.fn("test.makeAcpRegistryClient")(function* (
+  calls: Array<string>,
+  options: {
+    readonly nativeSessions?: { readonly canList: boolean };
+    readonly managedPolicy?: ManagedPolicySummary;
   },
-);
-
-it.effect(
-  "listing ACP sessions reaches only an agent that advertises listing",
-  () =>
-    Effect.gen(function* () {
-      const calls: Array<string> = [];
-      const input = { instanceId: acpInstanceId, projectId: acpProjectId };
-
-      const unprobed = yield* makeAcpRegistryClient(calls, {});
-      const refused = yield* unprobed[WS_METHODS.serverListAcpRegistrySessions](
-        input,
-      ).pipe(Effect.flip);
-      assert.strictEqual(
-        refused._tag === "AcpRegistryOperationError"
-          ? refused.reason
-          : refused._tag,
-        "session_list_unsupported",
-      );
-      assert.deepEqual(calls, []);
-
-      const probed = yield* makeAcpRegistryClient(calls, {
-        nativeSessions: { canList: true },
-      });
-      yield* probed[WS_METHODS.serverListAcpRegistrySessions](input);
-      assert.deepEqual(calls, ["listSessions"]);
-    }).pipe(Effect.provide(layerWorkflowRpcTest)),
-);
-
-it.effect(
-  "preparing an ACP Registry agent follows the policy's allowed providers",
-  () =>
-    Effect.gen(function* () {
-      const calls: Array<string> = [];
-      const policy = (
-        ...allowedDrivers: ReadonlyArray<string>
-      ): ManagedPolicySummary => ({
-        organization: "Example Corp",
-        lockedSettings: [],
-        limits: {
-          providers: {
-            allowedDrivers: [
-              ProviderDriverKind.make("codex"),
-              ...allowedDrivers.map((driver) =>
-                ProviderDriverKind.make(driver),
+) {
+  const scopes = [AuthOrchestrationReadScope, AuthProvidersManageScope];
+  const instance = {
+    driverKind: acpDriver,
+    snapshot: {
+      getSnapshot: Effect.succeed({ nativeSessions: options.nativeSessions }),
+    },
+  } as unknown as ProviderInstance;
+  const services = Layer.mergeAll(
+    layerUnusedConfigRpcServices,
+    Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+    Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+    Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+    Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/unused",
+    }),
+    Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+    Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    ServerSettings.layerTest({}, options.managedPolicy),
+    Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({
+      prepare: ({ agentId }) =>
+        Effect.sync(() => calls.push(`prepare:${agentId}`)).pipe(
+          Effect.as({
+            agentId,
+            version: "1.0.0",
+            distribution: "npx",
+            prepared: true,
+          } as const),
+        ),
+    }),
+    Layer.mock(AcpRegistrySessions.AcpRegistrySessions)({
+      project: () => Effect.succeed({ workspaceRoot: "/workspace/acp" } as never),
+      sessionManager: () =>
+        Effect.succeed({
+          instance,
+          manager: {
+            listSessions: () =>
+              Effect.sync(() => calls.push("listSessions")).pipe(
+                Effect.as({ sessions: [], nextCursor: null }),
               ),
-            ],
-            lockedInstanceFields: {},
-          },
-        },
-      });
-
-      const excluded = yield* makeAcpRegistryClient(calls, {
-        managedPolicy: policy(),
-      });
-      const refused = yield* excluded[WS_METHODS.serverPrepareAcpRegistryAgent](
+          } as unknown as NonNullable<ProviderInstance["acpSessionManagement"]>,
+        }),
+    }),
+  );
+  return yield* RpcTest.makeClient(acpSessionRpcs).pipe(
+    Effect.provide(
+      layerWsRpc(
         {
-          agentId: "example-agent",
+          sessionId: AuthSessionId.make("acp-test"),
+          subject: "acp-test",
+          method: "browser-session-cookie",
+          scopes,
         },
-      ).pipe(Effect.flip);
-      assert.strictEqual(
-        refused._tag === "AcpRegistryOperationError"
-          ? refused.message
-          : refused._tag,
-        "Example Corp's policy does not allow the ACP Registry provider.",
-      );
-      assert.deepEqual(calls, []);
+        {},
+        yield* ServerBrowser.ServerBrowser,
+        () => Effect.void,
+        { secretReferences: true },
+      ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
+    ),
+  );
+});
 
-      const included = yield* makeAcpRegistryClient(calls, {
-        managedPolicy: policy("acpRegistry"),
-      });
-      yield* included[WS_METHODS.serverPrepareAcpRegistryAgent]({
-        agentId: "example-agent",
-      });
-      const unmanaged = yield* makeAcpRegistryClient(calls, {});
-      yield* unmanaged[WS_METHODS.serverPrepareAcpRegistryAgent]({
-        agentId: "example-agent",
-      });
-      assert.deepEqual(calls, [
-        "prepare:example-agent",
-        "prepare:example-agent",
-      ]);
-    }).pipe(Effect.provide(layerWorkflowRpcTest)),
+it.effect("listing ACP sessions reaches only an agent that advertises listing", () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = [];
+    const input = { instanceId: acpInstanceId, projectId: acpProjectId };
+
+    const unprobed = yield* makeAcpRegistryClient(calls, {});
+    const refused = yield* unprobed[WS_METHODS.serverListAcpRegistrySessions](input).pipe(
+      Effect.flip,
+    );
+    assert.strictEqual(
+      refused._tag === "AcpRegistryOperationError" ? refused.reason : refused._tag,
+      "session_list_unsupported",
+    );
+    assert.deepEqual(calls, []);
+
+    const probed = yield* makeAcpRegistryClient(calls, {
+      nativeSessions: { canList: true },
+    });
+    yield* probed[WS_METHODS.serverListAcpRegistrySessions](input);
+    assert.deepEqual(calls, ["listSessions"]);
+  }).pipe(Effect.provide(layerWorkflowRpcTest)),
 );
 
-it.effect(
-  "workflow RPCs read a run and pass an answer, a resume and a cancel to the service",
-  () =>
-    Effect.gen(function* () {
-      const calls: Array<unknown> = [];
-      const client = yield* makeWorkflowClient(
-        [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
-        calls,
-      );
-
-      assert.deepEqual(
-        yield* client[WS_METHODS.workflowsGet]({ runId: "run-1" }),
-        {
-          run: workflowRun,
-          steps: [workflowStep],
-          references: [],
+it.effect("preparing an ACP Registry agent follows the policy's allowed providers", () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = [];
+    const policy = (...allowedDrivers: ReadonlyArray<string>): ManagedPolicySummary => ({
+      organization: "Example Corp",
+      lockedSettings: [],
+      limits: {
+        providers: {
+          allowedDrivers: [
+            ProviderDriverKind.make("codex"),
+            ...allowedDrivers.map((driver) => ProviderDriverKind.make(driver)),
+          ],
+          lockedInstanceFields: {},
         },
-      );
-      const missing = yield* client[WS_METHODS.workflowsGet]({
-        runId: "gone",
-      }).pipe(Effect.flip);
-      assert.deepEqual(
-        [missing._tag, missing.message],
-        ["WorkflowRequestError", "Workflow run gone was not found."],
-      );
+      },
+    });
 
-      yield* client[WS_METHODS.workflowsAnswer]({
+    const excluded = yield* makeAcpRegistryClient(calls, {
+      managedPolicy: policy(),
+    });
+    const refused = yield* excluded[WS_METHODS.serverPrepareAcpRegistryAgent]({
+      agentId: "example-agent",
+    }).pipe(Effect.flip);
+    assert.strictEqual(
+      refused._tag === "AcpRegistryOperationError" ? refused.message : refused._tag,
+      "Example Corp's policy does not allow the ACP Registry provider.",
+    );
+    assert.deepEqual(calls, []);
+
+    const included = yield* makeAcpRegistryClient(calls, {
+      managedPolicy: policy("acpRegistry"),
+    });
+    yield* included[WS_METHODS.serverPrepareAcpRegistryAgent]({
+      agentId: "example-agent",
+    });
+    const unmanaged = yield* makeAcpRegistryClient(calls, {});
+    yield* unmanaged[WS_METHODS.serverPrepareAcpRegistryAgent]({
+      agentId: "example-agent",
+    });
+    assert.deepEqual(calls, ["prepare:example-agent", "prepare:example-agent"]);
+  }).pipe(Effect.provide(layerWorkflowRpcTest)),
+);
+
+it.effect("workflow RPCs read a run and pass an answer, a resume and a cancel to the service", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const client = yield* makeWorkflowClient(
+      [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+      calls,
+    );
+
+    assert.deepEqual(yield* client[WS_METHODS.workflowsGet]({ runId: "run-1" }), {
+      run: workflowRun,
+      steps: [workflowStep],
+      references: [],
+    });
+    const missing = yield* client[WS_METHODS.workflowsGet]({
+      runId: "gone",
+    }).pipe(Effect.flip);
+    assert.deepEqual(
+      [missing._tag, missing.message],
+      ["WorkflowRequestError", "Workflow run gone was not found."],
+    );
+
+    yield* client[WS_METHODS.workflowsAnswer]({
+      runId: "run-1",
+      name: "approve",
+      choice: "yes",
+      reason: "Looks good",
+    });
+    yield* client[WS_METHODS.workflowsAnswer]({
+      runId: "run-1",
+      name: "approve",
+      choice: "no",
+    });
+    yield* client[WS_METHODS.workflowsResume]({ runId: "run-1" });
+    yield* client[WS_METHODS.workflowsCancel]({ runId: "run-1" });
+    yield* client[WS_METHODS.workflowsCancel]({
+      runId: "run-1",
+      reason: "Wrong branch",
+    });
+
+    assert.deepEqual(calls, [
+      {
+        answer: ["run-1", "approve"],
+        value: { choice: "yes", reason: "Looks good" },
+        answeredBy: { label: "Pixel 9", sessionId: "workflow-test" },
+      },
+      {
+        answer: ["run-1", "approve"],
+        value: { choice: "no" },
+        answeredBy: { label: "Pixel 9", sessionId: "workflow-test" },
+      },
+      { resume: "run-1" },
+      { cancel: "run-1", reason: undefined },
+      { cancel: "run-1", reason: "Wrong branch" },
+    ]);
+  }).pipe(Effect.provide(layerWorkflowRpcTest), Effect.scoped),
+);
+
+it.effect("a session that can only read sees a workflow run but cannot steer it", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const client = yield* makeWorkflowClient([AuthOrchestrationReadScope], calls);
+
+    assert.equal((yield* client[WS_METHODS.workflowsGet]({ runId: "run-1" })).run.runId, "run-1");
+    const refused = yield* Effect.all([
+      client[WS_METHODS.workflowsAnswer]({
         runId: "run-1",
         name: "approve",
         choice: "yes",
-        reason: "Looks good",
-      });
-      yield* client[WS_METHODS.workflowsAnswer]({
-        runId: "run-1",
-        name: "approve",
-        choice: "no",
-      });
-      yield* client[WS_METHODS.workflowsResume]({ runId: "run-1" });
-      yield* client[WS_METHODS.workflowsCancel]({ runId: "run-1" });
-      yield* client[WS_METHODS.workflowsCancel]({
-        runId: "run-1",
-        reason: "Wrong branch",
-      });
-
-      assert.deepEqual(calls, [
-        {
-          answer: ["run-1", "approve"],
-          value: { choice: "yes", reason: "Looks good" },
-          answeredBy: { label: "Pixel 9", sessionId: "workflow-test" },
-        },
-        {
-          answer: ["run-1", "approve"],
-          value: { choice: "no" },
-          answeredBy: { label: "Pixel 9", sessionId: "workflow-test" },
-        },
-        { resume: "run-1" },
-        { cancel: "run-1", reason: undefined },
-        { cancel: "run-1", reason: "Wrong branch" },
-      ]);
-    }).pipe(Effect.provide(layerWorkflowRpcTest), Effect.scoped),
-);
-
-it.effect(
-  "a session that can only read sees a workflow run but cannot steer it",
-  () =>
-    Effect.gen(function* () {
-      const calls: Array<unknown> = [];
-      const client = yield* makeWorkflowClient(
-        [AuthOrchestrationReadScope],
-        calls,
-      );
-
-      assert.equal(
-        (yield* client[WS_METHODS.workflowsGet]({ runId: "run-1" })).run.runId,
-        "run-1",
-      );
-      const refused = yield* Effect.all([
-        client[WS_METHODS.workflowsAnswer]({
-          runId: "run-1",
-          name: "approve",
-          choice: "yes",
-        }).pipe(Effect.flip),
-        client[WS_METHODS.workflowsResume]({ runId: "run-1" }).pipe(
-          Effect.flip,
-        ),
-        client[WS_METHODS.workflowsCancel]({ runId: "run-1" }).pipe(
-          Effect.flip,
-        ),
-      ]);
-      assert.deepEqual(
-        refused.map((error) => error._tag),
-        Array.from({ length: 3 }, () => "EnvironmentAuthorizationError"),
-      );
-      assert.deepEqual(calls, []);
-    }).pipe(Effect.provide(layerWorkflowRpcTest), Effect.scoped),
+      }).pipe(Effect.flip),
+      client[WS_METHODS.workflowsResume]({ runId: "run-1" }).pipe(Effect.flip),
+      client[WS_METHODS.workflowsCancel]({ runId: "run-1" }).pipe(Effect.flip),
+    ]);
+    assert.deepEqual(
+      refused.map((error) => error._tag),
+      Array.from({ length: 3 }, () => "EnvironmentAuthorizationError"),
+    );
+    assert.deepEqual(calls, []);
+  }).pipe(Effect.provide(layerWorkflowRpcTest), Effect.scoped),
 );
 
 it.effect("routes Gerrit commands and direct uploads at the RPC boundary", () =>
@@ -3770,14 +3463,9 @@ it.effect("routes Gerrit commands and direct uploads at the RPC boundary", () =>
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
-    const group = RpcGroup.make(
-      WsPullRequestsGerritCommandRpc,
-      WsGerritUploadCommitRpc,
-    );
+    const group = RpcGroup.make(WsPullRequestsGerritCommandRpc, WsGerritUploadCommitRpc);
     type Rpcs = RpcGroup.Rpcs<typeof group>;
-    let client!: Effect.Success<
-      ReturnType<typeof RpcClient.makeNoSerialization<Rpcs, never>>
-    >;
+    let client!: Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<Rpcs, never>>>;
     const server = yield* RpcServer.makeNoSerialization(group, {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) => client.write(response),
@@ -3801,18 +3489,13 @@ it.effect("routes Gerrit commands and direct uploads at the RPC boundary", () =>
       supportsAck: true,
       onFromClient: ({ message }) => server.write(0, message),
     });
-    const error = yield* client.client[WS_METHODS.pullRequestsGerritCommand](
-      ref,
-    ).pipe(Effect.flip);
+    const error = yield* client.client[WS_METHODS.pullRequestsGerritCommand](ref).pipe(Effect.flip);
     assert.match(error.message, /does not support Gerrit commands/);
     assert.deepEqual(commandInput, ref);
-    assert.deepEqual(
-      yield* client.client[WS_METHODS.gerritUploadCommit](upload),
-      {
-        result: { pushed: true },
-        change: null,
-      },
-    );
+    assert.deepEqual(yield* client.client[WS_METHODS.gerritUploadCommit](upload), {
+      result: { pushed: true },
+      change: null,
+    });
     assert.deepEqual(uploadInput, upload);
   }).pipe(
     Effect.provide(
@@ -3826,94 +3509,84 @@ it.effect("routes Gerrit commands and direct uploads at the RPC boundary", () =>
   ),
 );
 
-it.effect(
-  "removes internal hook failure causes at both production Gerrit RPC handlers",
-  () =>
-    Effect.gen(function* () {
-      const cause = new Error("private process output and credential sentinel");
-      const internal = new GerritHookError({ reason: "filesystem", cause });
-      const failed = Effect.fail(internal);
-      const services = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(GerritService.GerritService)({
-          readHook: () => failed,
-          installHook: () => failed,
-        }),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          namedProjectsRoot: "/fixture",
-        }),
-        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-          getEnvironmentId: Effect.succeed(EnvironmentId.make("config-test")),
-        }),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-      );
-      const group = GerritWsRpcGroup;
-      type HookRpc = RpcGroup.Rpcs<typeof group>;
-      let client!: Effect.Success<
-        ReturnType<typeof RpcClient.makeNoSerialization<HookRpc, never>>
-      >;
-      const server = yield* RpcServer.makeNoSerialization(group, {
-        ...WS_RPC_SERVER_OPTIONS,
-        onFromServer: (response) => client.write(response),
-      }).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("hook-rpc-test"),
-              subject: "hook-rpc-test",
-              method: "browser-session-cookie",
-              scopes: [],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: false },
-          ).pipe(Layer.provide(services)),
-        ),
-      );
-      client = yield* RpcClient.makeNoSerialization(group, {
-        supportsAck: true,
-        onFromClient: ({ message }) => server.write(0, message),
-      });
-      const failures = [
-        yield* client.client[WS_METHODS.gerritHook]({ cwd: "/fixture" }).pipe(
-          Effect.flip,
-        ),
-        yield* client.client[WS_METHODS.gerritInstallHook]({
-          cwd: "/fixture",
-        }).pipe(Effect.flip),
-      ];
-      for (const failure of failures) {
-        assert.instanceOf(failure, GerritHookError);
-        if (failure._tag !== "GerritHookError")
-          return yield* Effect.die("Unexpected hook RPC error");
-        assert.notStrictEqual(failure, internal);
-        assert.isUndefined(failure.cause);
-        assert.equal(
-          failure.message,
-          "Gerrit commit-msg hook setup stopped: filesystem.",
-        );
-        assert.deepEqual(yield* encodeHookError(failure), {
-          _tag: "GerritHookError",
-          reason: "filesystem",
-        });
-      }
-      assert.strictEqual(internal.cause, cause);
+it.effect("removes internal hook failure causes at both production Gerrit RPC handlers", () =>
+  Effect.gen(function* () {
+    const cause = new Error("private process output and credential sentinel");
+    const internal = new GerritHookError({ reason: "filesystem", cause });
+    const failed = Effect.fail(internal);
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(GerritService.GerritService)({
+        readHook: () => failed,
+        installHook: () => failed,
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/fixture",
+      }),
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("config-test")),
+      }),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const group = GerritWsRpcGroup;
+    type HookRpc = RpcGroup.Rpcs<typeof group>;
+    let client!: Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<HookRpc, never>>>;
+    const server = yield* RpcServer.makeNoSerialization(group, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) => client.write(response),
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(
-          Layer.fresh(layerConfigSources),
-          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
-          Layer.mock(ServerBrowser.ServerBrowser)({}),
-        ),
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("hook-rpc-test"),
+            subject: "hook-rpc-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: false },
+        ).pipe(Layer.provide(services)),
       ),
-      Effect.scoped,
+    );
+    client = yield* RpcClient.makeNoSerialization(group, {
+      supportsAck: true,
+      onFromClient: ({ message }) => server.write(0, message),
+    });
+    const failures = [
+      yield* client.client[WS_METHODS.gerritHook]({ cwd: "/fixture" }).pipe(Effect.flip),
+      yield* client.client[WS_METHODS.gerritInstallHook]({
+        cwd: "/fixture",
+      }).pipe(Effect.flip),
+    ];
+    for (const failure of failures) {
+      assert.instanceOf(failure, GerritHookError);
+      if (failure._tag !== "GerritHookError") return yield* Effect.die("Unexpected hook RPC error");
+      assert.notStrictEqual(failure, internal);
+      assert.isUndefined(failure.cause);
+      assert.equal(failure.message, "Gerrit commit-msg hook setup stopped: filesystem.");
+      assert.deepEqual(yield* encodeHookError(failure), {
+        _tag: "GerritHookError",
+        reason: "filesystem",
+      });
+    }
+    assert.strictEqual(internal.cause, cause);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
     ),
+    Effect.scoped,
+  ),
 );

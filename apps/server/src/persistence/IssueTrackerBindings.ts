@@ -75,9 +75,7 @@ export class IssueTrackerBindingsRepository extends Context.Service<
   }
 >()("t3/persistence/IssueTrackerBindings/IssueTrackerBindingsRepository") {}
 
-const encodeAdditionalScopes = Schema.encodeEffect(
-  BindingRow.fields.additionalScopes,
-);
+const encodeAdditionalScopes = Schema.encodeEffect(BindingRow.fields.additionalScopes);
 
 function toSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): IssueTrackerBindingsRepositoryError =>
@@ -98,9 +96,7 @@ const make = Effect.gen(function* () {
     Request: Schema.UndefinedOr(ProjectId),
     Result: BindingRow,
     execute: (projectId) =>
-      projectId === undefined
-        ? select
-        : sql`${select} WHERE project_id = ${projectId}`,
+      projectId === undefined ? select : sql`${select} WHERE project_id = ${projectId}`,
   });
 
   const listAccountRows = SqlSchema.findAll({
@@ -115,34 +111,26 @@ const make = Effect.gen(function* () {
   });
 
   return IssueTrackerBindingsRepository.of({
-    list: Effect.fn("IssueTrackerBindingsRepository.list")(
-      (projectId?: ProjectId) =>
-        listRows(projectId).pipe(
-          Effect.map(
-            (rows) =>
-              new Map(
-                rows.map(
-                  ({ projectId, accountId, additionalScopes, ...binding }) =>
-                    [
-                      projectId,
-                      {
-                        ...binding,
-                        ...(accountId === null ? {} : { accountId }),
-                        ...(additionalScopes.length === 0
-                          ? {}
-                          : { additionalScopes }),
-                      },
-                    ] as const,
-                ),
+    list: Effect.fn("IssueTrackerBindingsRepository.list")((projectId?: ProjectId) =>
+      listRows(projectId).pipe(
+        Effect.map(
+          (rows) =>
+            new Map(
+              rows.map(
+                ({ projectId, accountId, additionalScopes, ...binding }) =>
+                  [
+                    projectId,
+                    {
+                      ...binding,
+                      ...(accountId === null ? {} : { accountId }),
+                      ...(additionalScopes.length === 0 ? {} : { additionalScopes }),
+                    },
+                  ] as const,
               ),
-          ),
-          Effect.mapError(
-            toSqlOrDecodeError(
-              "listIssueTrackerBindings",
-              "IssueTrackerBinding",
             ),
-          ),
         ),
+        Effect.mapError(toSqlOrDecodeError("listIssueTrackerBindings", "IssueTrackerBinding")),
+      ),
     ),
     set: Effect.fn("IssueTrackerBindingsRepository.set")(
       function* (input) {
@@ -165,9 +153,7 @@ const make = Effect.gen(function* () {
                 updated_at = excluded.updated_at
             `;
       },
-      Effect.mapError(
-        toSqlOrDecodeError("setIssueTrackerBinding", "IssueTrackerBinding"),
-      ),
+      Effect.mapError(toSqlOrDecodeError("setIssueTrackerBinding", "IssueTrackerBinding")),
     ),
     removeAccount: Effect.fn("IssueTrackerBindingsRepository.removeAccount")(
       function* ({ tracker, accountId }) {
@@ -189,9 +175,7 @@ const make = Effect.gen(function* () {
       ),
     ),
     listAccounts: listAccountRows(undefined).pipe(
-      Effect.mapError(
-        toSqlOrDecodeError("listIssueTrackerAccounts", "IssueTrackerAccount"),
-      ),
+      Effect.mapError(toSqlOrDecodeError("listIssueTrackerAccounts", "IssueTrackerAccount")),
     ),
     addAccount: Effect.fn("IssueTrackerBindingsRepository.addAccount")(
       function* (input) {

@@ -8,10 +8,7 @@ import { projectChangeRequestUrl } from "@t3tools/client-runtime/change-request-
 import { normalizeThreadPullRequestKey } from "@t3tools/client-runtime/thread-pull-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";
-import {
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -55,18 +52,12 @@ import { msg, T, useGT, useMessages, Var } from "gt-react";
 import { m } from "~/i18n/messages";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import {
-  type PullRequestDetailTab,
-  useRightPanelStore,
-} from "~/rightPanelStore";
+import { type PullRequestDetailTab, useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
-import {
-  resolveShortcutCommand,
-  type ShortcutMatchContext,
-} from "~/keybindings";
+import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import {
   usePullRequestDefaultMergeMethodResolver,
@@ -82,10 +73,7 @@ import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
-import {
-  pullRequestEnvironment,
-  usePullRequestTurnRefresh,
-} from "~/state/pullRequests";
+import { pullRequestEnvironment, usePullRequestTurnRefresh } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { PullRequestStackMenu } from "./PullRequestStackMenu";
 import { pullRequestCompletionScope } from "./PullRequestMarkdownTextarea";
@@ -102,12 +90,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
-import {
-  Tooltip,
-  TooltipPopup,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import {
   PullRequestChecksStatusLine,
@@ -115,10 +98,7 @@ import {
   PullRequestPrivateBadge,
   PullRequestDetailTabBar,
 } from "./PullRequestDetailLayout";
-import {
-  PullRequestDetailGhost,
-  PullRequestTimelineGhost,
-} from "./PullRequestGhosts";
+import { PullRequestDetailGhost, PullRequestTimelineGhost } from "./PullRequestGhosts";
 import { PullRequestCopyableCode } from "./PullRequestCopyableCode";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { SharedTooltipProvider } from "../ui/shared-tooltip";
@@ -201,14 +181,9 @@ import { PullRequestGuideTab } from "./PullRequestGuideTab";
 import { guideRunKey, useGuideRunStore } from "./guide/guideRunStore";
 import { useReviewGuideWriter } from "./guide/useReviewGuideWriter";
 
-import {
-  changeRequestTermKind,
-  type ChangeRequestTermKind,
-} from "./changeRequestTerm";
+import { changeRequestTermKind, type ChangeRequestTermKind } from "./changeRequestTerm";
 
-const actionFailureLabels = (
-  term: ChangeRequestTermKind,
-): Record<PullRequestAction, string> => ({
+const actionFailureLabels = (term: ChangeRequestTermKind): Record<PullRequestAction, string> => ({
   merge: m(
     msg(
       "Could not merge this {term, select, mr {merge request} cr {change} other {pull request}}",
@@ -242,33 +217,17 @@ const actionFailureLabels = (
   "approve-workflows": m(msg("Could not approve workflows")),
 });
 
-const actionFailureHints = (
-  term: ChangeRequestTermKind,
-): Record<PullRequestAction, string> => ({
+const actionFailureHints = (term: ChangeRequestTermKind): Record<PullRequestAction, string> => ({
   merge: m(
     msg(
       "The host refused the merge. Check that you have write access, that the checks it requires have passed, and that the branch is not conflicting.",
     ),
   ),
-  ready: m(
-    msg(
-      "The host refused it. Check that you have write access to this repository.",
-    ),
-  ),
-  draft: m(
-    msg(
-      "The host refused it. Check that you have write access to this repository.",
-    ),
-  ),
-  close: m(
-    msg(
-      "The host refused it. Check that you have write access, or that you opened it.",
-    ),
-  ),
+  ready: m(msg("The host refused it. Check that you have write access to this repository.")),
+  draft: m(msg("The host refused it. Check that you have write access to this repository.")),
+  close: m(msg("The host refused it. Check that you have write access, or that you opened it.")),
   reopen: m(
-    msg(
-      "The host refused it. Check that you have write access, and that the branch still exists.",
-    ),
+    msg("The host refused it. Check that you have write access, and that the branch still exists."),
   ),
   "update-branch": m(
     msg(
@@ -362,8 +321,7 @@ function pullRequestMarkdownContext(
     extensions: pullRequestMarkdownExtensions(
       provider === null || url === null ? null : { provider, url },
     ),
-    lineBreaks:
-      sourceControlClients.find(provider ?? "")?.hardLineBreaks ?? false,
+    lineBreaks: sourceControlClients.find(provider ?? "")?.hardLineBreaks ?? false,
     threadRef,
     repository,
   };
@@ -374,21 +332,15 @@ function pullRequestStackReference(
   reference: PullRequestRef,
   supportsThreadPullRequests: boolean,
 ) {
-  return detail === null ||
-    detail.capabilities.stacks !== true ||
-    !supportsThreadPullRequests
+  return detail === null || detail.capabilities.stacks !== true || !supportsThreadPullRequests
     ? null
     : {
         ...reference,
-        host:
-          reference.host ??
-          sourceControlClients.parseChangeRequestUrl(detail.url)?.link.host,
+        host: reference.host ?? sourceControlClients.parseChangeRequestUrl(detail.url)?.link.host,
       };
 }
 
-function linkedTab(
-  anchor: PullRequestAnchor | null,
-): PullRequestDetailTab | null {
+function linkedTab(anchor: PullRequestAnchor | null): PullRequestDetailTab | null {
   switch (anchor?.kind) {
     case "code":
     case "diff":
@@ -465,23 +417,14 @@ export function PullRequestDetailPanel({
   const projects = useProjects();
   const project = projects.find(
     (project) =>
-      project.id === requestedReference.projectId &&
-      project.environmentId === environmentId,
+      project.id === requestedReference.projectId && project.environmentId === environmentId,
   );
   const repositoryIdentity = project?.repositoryIdentity;
-  const supportsThreadPullRequests =
-    environmentConfigs.get(environmentId) !== undefined;
+  const supportsThreadPullRequests = environmentConfigs.get(environmentId) !== undefined;
   const reference = internPullRequestReference(
-    resolvePullRequestReference(
-      requestedReference,
-      repositoryIdentity,
-      supportsThreadPullRequests,
-    ),
+    resolvePullRequestReference(requestedReference, repositoryIdentity, supportsThreadPullRequests),
   );
-  const loadingCheckoutCommand = loadingPullRequestCheckoutCommand(
-    reference,
-    repositoryIdentity,
-  );
+  const loadingCheckoutCommand = loadingPullRequestCheckoutCommand(reference, repositoryIdentity);
   const unavailableHostUrl = projectChangeRequestUrl(
     repositoryIdentity,
     reference.repository,
@@ -514,9 +457,7 @@ export function PullRequestDetailPanel({
         })
       : null,
   );
-  useEnvironmentQuery(
-    pullRequestEnvironment.changeBreakdown({ environmentId, input: reference }),
-  );
+  useEnvironmentQuery(pullRequestEnvironment.changeBreakdown({ environmentId, input: reference }));
   const [threadPickerOpen, setThreadPickerOpen] = useState(false);
   const [openReviewRequest, setOpenReviewRequest] = useState(0);
   const {
@@ -539,9 +480,7 @@ export function PullRequestDetailPanel({
   );
   const guideKey = guideRunKey(environmentId, reference);
   const pageTab = useGuideRunStore((state) =>
-    tabOnPage && state.pageDetailTab?.key === guideKey
-      ? state.pageDetailTab.tab
-      : null,
+    tabOnPage && state.pageDetailTab?.key === guideKey ? state.pageDetailTab.tab : null,
   );
   const requestedTab = tabOnPage ? (pageTab ?? initialTab) : selectedTab;
   const isTabAvailable = (value: PullRequestDetailTab) =>
@@ -550,22 +489,17 @@ export function PullRequestDetailPanel({
   // An unavailable tab falls back without overwriting the saved selection.
   const tab = isTabAvailable(requestedTab) ? requestedTab : "summary";
   const selectTab = (next: PullRequestDetailTab) => {
-    if (tabOnPage)
-      useGuideRunStore.getState().showPageDetailTab(guideKey, next);
+    if (tabOnPage) useGuideRunStore.getState().showPageDetailTab(guideKey, next);
     else setTab(next);
     onTabChange?.(next);
   };
-  const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">(
-    "newest",
-  );
+  const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">("newest");
   const [codeCommitScope, setCodeCommitScope] = useState<{
     readonly pullRequestKey: string;
     readonly oid: string | null;
   }>(() => ({ pullRequestKey, oid: pullRequestLinkCommit(revealUrl) }));
   const selectedCodeCommitOid =
-    codeCommitScope.pullRequestKey === pullRequestKey
-      ? codeCommitScope.oid
-      : null;
+    codeCommitScope.pullRequestKey === pullRequestKey ? codeCommitScope.oid : null;
   const selectCodeCommit = (oid: string | null) => {
     setCodeCommitScope({ pullRequestKey, oid });
   };
@@ -606,8 +540,7 @@ export function PullRequestDetailPanel({
     }
     selectTab(next);
     // These name a tab, not a place in it.
-    if (revealAnchor?.kind === "code" || revealAnchor?.kind === "commits")
-      settleReveal(revealUrl);
+    if (revealAnchor?.kind === "code" || revealAnchor?.kind === "commits") settleReveal(revealUrl);
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a clicked link lives in the panel store and selects its tab even when the panel is already mounted
   useEffect(() => {
@@ -622,9 +555,7 @@ export function PullRequestDetailPanel({
   }));
   // Hidden Code tabs must not fetch later pull requests' diffs.
   const mountedTabs =
-    tabMountState.key === tabScopeKey
-      ? tabMountState.tabs
-      : new Set<PullRequestDetailTab>([tab]);
+    tabMountState.key === tabScopeKey ? tabMountState.tabs : new Set<PullRequestDetailTab>([tab]);
   if (tabMountState.key !== tabScopeKey) {
     setTabMountState({ key: tabScopeKey, tabs: new Set([tab]) });
   } else if (!tabMountState.tabs.has(tab)) {
@@ -645,9 +576,7 @@ export function PullRequestDetailPanel({
     Partial<Record<PullRequestDetailTab, boolean>>
   >(() => ({ summary: summaryCondensedByScopeKey.get(tabScopeKey) ?? false }));
   const condensed = condensedByTab[tab] ?? false;
-  const scrollerByTab = useRef<
-    Partial<Record<PullRequestDetailTab, HTMLElement | null>>
-  >({});
+  const scrollerByTab = useRef<Partial<Record<PullRequestDetailTab, HTMLElement | null>>>({});
   // Fresh ref callbacks would detach and reattach every scroller on each render.
   const [scrollerRefs] = useState(() => ({
     summary: (node: HTMLElement | null) => {
@@ -682,17 +611,12 @@ export function PullRequestDetailPanel({
       return;
     compensation.scroller.scrollTop = Math.max(0, compensation.target);
   }, [condensed, tab]);
-  const lastSelectedMergeMethod = useUiStateStore(
-    (state) => state.pullRequestMergeMethod,
+  const lastSelectedMergeMethod = useUiStateStore((state) => state.pullRequestMergeMethod);
+  const setLastSelectedMergeMethod = useUiStateStore((state) => state.setPullRequestMergeMethod);
+  const resolveProjectDefaultMergeMethod = usePullRequestDefaultMergeMethodResolver(
+    environmentId,
+    reference.projectId,
   );
-  const setLastSelectedMergeMethod = useUiStateStore(
-    (state) => state.setPullRequestMergeMethod,
-  );
-  const resolveProjectDefaultMergeMethod =
-    usePullRequestDefaultMergeMethodResolver(
-      environmentId,
-      reference.projectId,
-    );
   const projectDefaultMergeMethod = resolveProjectDefaultMergeMethod();
   const [mergeMethodSelection, setMergeMethodSelection] = useState<{
     readonly pullRequestKey: string;
@@ -705,9 +629,7 @@ export function PullRequestDetailPanel({
   const turnRefresh = usePullRequestTurnRefresh(environmentId);
   const handoffSummary = detail ?? sharedSummary;
   const terminology = sourceControlClients.get(
-    handoffSummary?.provider ??
-      listEntry?.provider ??
-      repositoryIdentity?.provider,
+    handoffSummary?.provider ?? listEntry?.provider ?? repositoryIdentity?.provider,
   ).changeRequest;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { copyToClipboard: copyReference } = useCopyToClipboard<string>({
@@ -730,8 +652,7 @@ export function PullRequestDetailPanel({
       }),
   });
   const copyFromShortcut = useEffectEvent((event: KeyboardEvent) => {
-    if (!shortcutsEnabled || event.defaultPrevented || isCommandPaletteOpen())
-      return;
+    if (!shortcutsEnabled || event.defaultPrevented || isCommandPaletteOpen()) return;
     const command = resolveShortcutCommand(event, keybindings, {
       context: getShortcutContext(),
     });
@@ -742,12 +663,9 @@ export function PullRequestDetailPanel({
       copyReference(
         `#${reference.number}`,
         m(
-          msg(
-            "Failed to copy {term, select, mr {MR} cr {change} other {PR}} number",
-            {
-              term: changeRequestTermKind(terminology),
-            },
-          ),
+          msg("Failed to copy {term, select, mr {MR} cr {change} other {PR}} number", {
+            term: changeRequestTermKind(terminology),
+          }),
         ),
       );
   });
@@ -761,14 +679,12 @@ export function PullRequestDetailPanel({
   const [seenAutoMergeKey, setSeenAutoMergeKey] = useState<string | null>(null);
   if (seenAutoMergeKey !== autoMergeKey) {
     setSeenAutoMergeKey(autoMergeKey);
-    if (detail?.autoMergeMethod !== undefined)
-      setMergeMethod(detail.autoMergeMethod);
+    if (detail?.autoMergeMethod !== undefined) setMergeMethod(detail.autoMergeMethod);
   }
   const repositoryUrl =
     detail === null
       ? null
-      : (sourceControlClients.parseChangeRequestUrl(detail.url)?.link
-          .repositoryUrl ?? null);
+      : (sourceControlClients.parseChangeRequestUrl(detail.url)?.link.repositoryUrl ?? null);
   const hostClient = sourceControlClients.get(detail?.provider);
   const openOnHostText = openOnHostLabel(hostClient, resolve);
   const markdownContext = pullRequestMarkdownContext(
@@ -787,8 +703,7 @@ export function PullRequestDetailPanel({
         handoffSummary.number,
         handoffSummary.headBranch,
         detail?.headRepositoryNameWithOwner,
-        sourceControlClients.parseChangeRequestUrl(handoffSummary.url)?.link
-          .repositoryUrl ?? null,
+        sourceControlClients.parseChangeRequestUrl(handoffSummary.url)?.link.repositoryUrl ?? null,
       )
     : loadingCheckoutCommand;
   const branchRefsQuery = useEnvironmentQuery(
@@ -805,15 +720,8 @@ export function PullRequestDetailPanel({
   );
   const isStackedPullRequest =
     detail !== null &&
-    isStackedPullRequestBase(
-      detail.baseBranch,
-      branchRefsQuery.data?.refs ?? [],
-    );
-  const stackReference = pullRequestStackReference(
-    detail,
-    reference,
-    supportsThreadPullRequests,
-  );
+    isStackedPullRequestBase(detail.baseBranch, branchRefsQuery.data?.refs ?? []);
+  const stackReference = pullRequestStackReference(detail, reference, supportsThreadPullRequests);
   const nativeStackQuery = usePullRequestStack(environmentId, stackReference);
   const nativeStack = nativeStackQuery.data;
   const supportsStackActions =
@@ -827,8 +735,7 @@ export function PullRequestDetailPanel({
     stackError: nativeStackQuery.error,
   });
   const stackOwnsMerge = supportsStackActions && nativeStack !== null;
-  const stackAutoMerge =
-    supportsStackActions && detail?.capabilities.stackAutoMerge === true;
+  const stackAutoMerge = supportsStackActions && detail?.capabilities.stackAutoMerge === true;
   const mergeBlockedReason = canMergeSinglePullRequest
     ? null
     : nativeStackQuery.error
@@ -848,9 +755,9 @@ export function PullRequestDetailPanel({
   };
   const [refreshToken, setRefreshToken] = useState(0);
   const seenHeadKey = `${environmentId}:${pullRequestKey}`;
-  const [storedSeenHead, setSeenHead] = useState<ReturnType<
-    typeof seenPullRequestHead
-  > | null>(null);
+  const [storedSeenHead, setSeenHead] = useState<ReturnType<typeof seenPullRequestHead> | null>(
+    null,
+  );
   // A stored answer paints first, so only a settled read counts as shown.
   const seenHead = seenPullRequestHead(
     storedSeenHead,
@@ -860,9 +767,7 @@ export function PullRequestDetailPanel({
   if (seenHead !== storedSeenHead) setSeenHead(seenHead);
   const shownHeadSha = seenHead.sha ?? detail?.headSha;
   const unseenHeadSha =
-    detail?.state === "open" && detail.headSha !== shownHeadSha
-      ? detail.headSha
-      : undefined;
+    detail?.state === "open" && detail.headSha !== shownHeadSha ? detail.headSha : undefined;
   const [activityRevision, setActivityRevision] = useState<{
     readonly key: string;
     readonly updatedAt: string;
@@ -871,8 +776,7 @@ export function PullRequestDetailPanel({
   const coreUpdatedAt = coreDetail?.updatedAt ?? null;
   if (
     coreUpdatedAt !== null &&
-    (activityRevision?.key !== tabScopeKey ||
-      activityRevision.updatedAt !== coreUpdatedAt)
+    (activityRevision?.key !== tabScopeKey || activityRevision.updatedAt !== coreUpdatedAt)
   ) {
     const next = { key: tabScopeKey, updatedAt: coreUpdatedAt };
     if (!shouldRefreshPullRequestActivity(activityRevision, next)) {
@@ -936,8 +840,7 @@ export function PullRequestDetailPanel({
     )
       ? activityQuery.dataUpdatedAt
       : null;
-  const revealReadFailed =
-    revealMissedAt !== null && activityQuery.error !== null;
+  const revealReadFailed = revealMissedAt !== null && activityQuery.error !== null;
   const readHostForReveal = useEffectEvent(() => {
     if (revealUrl === undefined || revealMissedAt === null) return;
     const read = revealHostRead.current;
@@ -954,10 +857,7 @@ export function PullRequestDetailPanel({
     }
     // A read that finished before the invalidation cannot show the item is missing. `after` is
     // stamped once the refetch was requested, so a read in that same millisecond is the new one.
-    if (
-      read.after !== null &&
-      (revealReadFailed || revealMissedAt >= read.after)
-    ) {
+    if (read.after !== null && (revealReadFailed || revealMissedAt >= read.after)) {
       settleReveal(revealUrl);
     }
   });
@@ -987,9 +887,7 @@ export function PullRequestDetailPanel({
   const postComment = useAtomCommand(pullRequestEnvironment.comment, {
     reportFailure: false,
   });
-  const [pendingAction, setPendingAction] = useState<PullRequestAction | null>(
-    null,
-  );
+  const [pendingAction, setPendingAction] = useState<PullRequestAction | null>(null);
   const actionPending = pendingAction !== null;
   const newThread = useNewThreadHandler();
   const { environments } = useEnvironments();
@@ -1010,23 +908,13 @@ export function PullRequestDetailPanel({
     readonly environmentId: EnvironmentId;
   } | null>(null);
   const chosenEnvironmentId =
-    actingScope?.pullRequestKey === pullRequestKey
-      ? actingScope.environmentId
-      : environmentId;
+    actingScope?.pullRequestKey === pullRequestKey ? actingScope.environmentId : environmentId;
   const acting =
-    pickableEnvironments.find(
-      (entry) => entry.environmentId === chosenEnvironmentId,
-    ) ?? null;
+    pickableEnvironments.find((entry) => entry.environmentId === chosenEnvironmentId) ?? null;
   const actingEnvironmentId = acting?.environmentId ?? environmentId;
   const checkoutRoot =
-    acting?.workspaceRoot ??
-    detail?.workspaceRoot ??
-    project?.workspaceRoot ??
-    null;
-  const canOperateThread = useEnvironmentScope(
-    actingEnvironmentId,
-    AuthOrchestrationOperateScope,
-  );
+    acting?.workspaceRoot ?? detail?.workspaceRoot ?? project?.workspaceRoot ?? null;
+  const canOperateThread = useEnvironmentScope(actingEnvironmentId, AuthOrchestrationOperateScope);
   const prepareThread = usePreparePullRequestThreadAction({
     environmentId: actingEnvironmentId,
     cwd: checkoutRoot,
@@ -1070,10 +958,9 @@ export function PullRequestDetailPanel({
       toastManager.add({
         type: "success",
         title: m(
-          msg(
-            "Revert {term, select, mr {merge request} cr {change} other {pull request}} opened",
-            { term: changeRequestTermKind(terminology) },
-          ),
+          msg("Revert {term, select, mr {merge request} cr {change} other {pull request}} opened", {
+            term: changeRequestTermKind(terminology),
+          }),
         ),
       });
     }
@@ -1101,12 +988,8 @@ export function PullRequestDetailPanel({
     return finishAction(action, method, updateMethod);
   };
 
-  const performCommentAction = async (
-    body: string,
-    action: "close" | "reopen",
-  ) => {
-    if (!canWriteSourceControl || pendingAction !== null)
-      return { commentPosted: false };
+  const performCommentAction = async (body: string, action: "close" | "reopen") => {
+    if (!canWriteSourceControl || pendingAction !== null) return { commentPosted: false };
     setPendingAction(action);
     const commentResult = await postComment({
       environmentId,
@@ -1134,10 +1017,7 @@ export function PullRequestDetailPanel({
   const attachTarget = composerDraftTarget ?? null;
   const canPrepareWorktree = prepareThread.isAllowed && canOperateThread;
   const canFixFindings = attachTarget !== null || canPrepareWorktree;
-  const handoffLabels = pullRequestHandoffLabels(
-    attachTarget !== null,
-    resolve,
-  );
+  const handoffLabels = pullRequestHandoffLabels(attachTarget !== null, resolve);
   const guideWriter = useReviewGuideWriter({
     environmentId,
     reference,
@@ -1178,11 +1058,7 @@ export function PullRequestDetailPanel({
         title: m(msg("Added to the composer")),
         description:
           task.prompt.length > 0
-            ? m(
-                msg(
-                  "The question is in the composer. Read it over, then send.",
-                ),
-              )
+            ? m(msg("The question is in the composer. Read it over, then send."))
             : m(
                 msg(
                   "The {term, select, mr {merge request} cr {change} other {pull request}} is in the composer. Type your question, then send.",
@@ -1195,40 +1071,30 @@ export function PullRequestDetailPanel({
       return;
     }
     setHandoff(kind);
-    const projectRef = scopeProjectRef(
-      actingEnvironmentId,
-      acting?.projectId ?? detail.projectId,
-    );
+    const projectRef = scopeProjectRef(actingEnvironmentId, acting?.projectId ?? detail.projectId);
     const opened = await openThreadWithTask(projectRef, task);
     setHandoff(null);
     if (opened !== null && options?.keepGuide === true) {
-      const draft = useComposerDraftStore
-        .getState()
-        .getDraftSession(opened.draftId);
+      const draft = useComposerDraftStore.getState().getDraftSession(opened.draftId);
       if (draft !== null) {
         useRightPanelStore
           .getState()
-          .openPullRequest(
-            scopeThreadRef(draft.environmentId, draft.threadId),
-            {
-              environmentId,
-              projectId: reference.projectId,
-              ...(reference.host === undefined ? {} : { host: reference.host }),
-              repository: reference.repository,
-              number: reference.number,
-              url: detail.url,
-              detailTab: "guide",
-            },
-          );
+          .openPullRequest(scopeThreadRef(draft.environmentId, draft.threadId), {
+            environmentId,
+            projectId: reference.projectId,
+            ...(reference.host === undefined ? {} : { host: reference.host }),
+            repository: reference.repository,
+            number: reference.number,
+            url: detail.url,
+            detailTab: "guide",
+          });
       }
     }
     if (opened === null) {
       toastManager.add({
         type: "error",
         title: m(msg("Could not open a thread")),
-        description: m(
-          msg("Try again from the project, or open a thread first."),
-        ),
+        description: m(msg("Try again from the project, or open a thread first.")),
       });
       return;
     }
@@ -1263,9 +1129,7 @@ export function PullRequestDetailPanel({
       toastManager.add({
         type: "success",
         title: m(msg("Added to the composer")),
-        description: m(
-          msg("The task is in the composer. Read it over, then send."),
-        ),
+        description: m(msg("The task is in the composer. Read it over, then send.")),
       });
       return;
     }
@@ -1306,9 +1170,7 @@ export function PullRequestDetailPanel({
       toastManager.update(toastId, {
         type: "error",
         title: m(msg("Could not open a thread for the checkout")),
-        description: m(
-          msg("Try again from the project, or open a thread first."),
-        ),
+        description: m(msg("Try again from the project, or open a thread first.")),
       });
       return;
     }
@@ -1328,9 +1190,7 @@ export function PullRequestDetailPanel({
           ),
         ),
         description: checkoutFailureDescription(
-          isAtomCommandInterrupted(prepared)
-            ? undefined
-            : squashAtomCommandFailure(prepared),
+          isAtomCommandInterrupted(prepared) ? undefined : squashAtomCommandFailure(prepared),
         ),
       });
       return;
@@ -1372,10 +1232,7 @@ export function PullRequestDetailPanel({
         prepared.value.isOnPullRequestHead
           ? {
               type: "success",
-              title:
-                mode === "local"
-                  ? m(msg("Checked out here"))
-                  : m(msg("Checked out")),
+              title: mode === "local" ? m(msg("Checked out here")) : m(msg("Checked out")),
               description:
                 mode === "local"
                   ? m(
@@ -1408,9 +1265,7 @@ export function PullRequestDetailPanel({
         ? {
             type: "success",
             title: m(msg("Checkout ready")),
-            description: m(
-              msg("The task is in the composer. Read it over, then send."),
-            ),
+            description: m(msg("The task is in the composer. Read it over, then send.")),
           }
         : offHeadPullRequestCheckoutToast(terminology),
     );
@@ -1446,11 +1301,7 @@ export function PullRequestDetailPanel({
     });
   };
 
-  const askAboutGuideStop = (
-    stop: PullRequestReviewGuideStop,
-    index: number,
-    question: string,
-  ) => {
+  const askAboutGuideStop = (stop: PullRequestReviewGuideStop, index: number, question: string) => {
     if (!detail) return;
     void startAsk(
       `guide-stop:${index}`,
@@ -1507,9 +1358,7 @@ export function PullRequestDetailPanel({
     const thread =
       subject.kind === "comment"
         ? detail.reviewThreads.find((candidate) =>
-            candidate.comments.some(
-              (comment) => comment.id === subject.comment.id,
-            ),
+            candidate.comments.some((comment) => comment.id === subject.comment.id),
           )
         : undefined;
     const comment = buildPullRequestCommentContext(
@@ -1527,12 +1376,11 @@ export function PullRequestDetailPanel({
       state: detail.state,
       isDraft: detail.isDraft,
     });
-    const hasReference = (
-      store.getComposerDraft(attachTarget)?.reviewComments ?? []
-    ).some((existing) => existing.pullRequest?.url === detail.url);
+    const hasReference = (store.getComposerDraft(attachTarget)?.reviewComments ?? []).some(
+      (existing) => existing.pullRequest?.url === detail.url,
+    );
     // The active editor may be answering a provider question rather than editing this draft.
-    if (!hasReference)
-      store.addReviewComment(attachTarget, reference, { insertAtCaret: false });
+    if (!hasReference) store.addReviewComment(attachTarget, reference, { insertAtCaret: false });
     store.addReviewComment(attachTarget, comment, { insertAtCaret: false });
     toastManager.add({
       type: "success",
@@ -1605,22 +1453,17 @@ export function PullRequestDetailPanel({
     setActingScope({ pullRequestKey, environmentId: next });
   const allowedMergeMethods = allowedPullRequestMergeMethods(detail);
   const currentMergeMethod =
-    mergeMethodSelection?.pullRequestKey === pullRequestKey
-      ? mergeMethodSelection.method
-      : null;
+    mergeMethodSelection?.pullRequestKey === pullRequestKey ? mergeMethodSelection.method : null;
   const selectedMergeMethod = resolvePullRequestMergeMethod(
     allowedMergeMethods,
     currentMergeMethod,
     projectDefaultMergeMethod,
     lastSelectedMergeMethod,
   );
-  const selectedMergeMethodLabel = resolve(
-    PULL_REQUEST_MERGE_METHOD_LABELS[selectedMergeMethod],
-  );
+  const selectedMergeMethodLabel = resolve(PULL_REQUEST_MERGE_METHOD_LABELS[selectedMergeMethod]);
   const pendingAutoMergeLabel = resolve(AUTO_MERGE_LABELS[selectedMergeMethod]);
   const conflicting = isPullRequestConflicting(detail);
-  const autoMergeArmed =
-    detail?.state === "open" && detail.autoMergeEnabled === true;
+  const autoMergeArmed = detail?.state === "open" && detail.autoMergeEnabled === true;
   const armedMergeMethod = detail?.autoMergeMethod;
   const armedAutoMergeLabel = armedMergeMethod
     ? resolve(AUTO_MERGE_LABELS[armedMergeMethod])
@@ -1635,13 +1478,9 @@ export function PullRequestDetailPanel({
   const can = (action: PullRequestAction) =>
     detail?.capabilities.actions.includes(action) === true &&
     detail.viewerPermissions.actions.includes(action);
-  const detailChecksState = detail
-    ? pullRequestChecksState(detail.checks)
-    : null;
+  const detailChecksState = detail ? pullRequestChecksState(detail.checks) : null;
   const latestChecksState =
-    sharedSummary?.checksState === undefined
-      ? detailChecksState
-      : sharedSummary.checksState;
+    sharedSummary?.checksState === undefined ? detailChecksState : sharedSummary.checksState;
   // List rollups can omit workflows awaiting approval. Only refreshed detail can clear those.
   const checksState =
     latestChecksState !== "failing" &&
@@ -1679,8 +1518,7 @@ export function PullRequestDetailPanel({
   const showsMergeNow =
     canMergeSinglePullRequest &&
     detail?.state === "open" &&
-    (primaryAction === "enable-auto-merge" ||
-      primaryAction === "auto-merge-armed") &&
+    (primaryAction === "enable-auto-merge" || primaryAction === "auto-merge-armed") &&
     can("merge") &&
     !detail.isDraft &&
     !conflicting &&
@@ -1692,17 +1530,12 @@ export function PullRequestDetailPanel({
     !conflicting &&
     allowedMergeMethods.length > 1;
   const statePresentation = detail
-    ? resolvePullRequestState(
-        { state: detail.state, isDraft: detail.isDraft },
-        resolve,
-      )
+    ? resolvePullRequestState({ state: detail.state, isDraft: detail.isDraft }, resolve)
     : null;
-  const showsDeleteBranch =
-    detail !== null && canDeletePullRequestBranch(detail);
+  const showsDeleteBranch = detail !== null && canDeletePullRequestBranch(detail);
   const environmentConnected = environments.some(
     (environment) =>
-      environment.environmentId === environmentId &&
-      environment.connection.phase === "connected",
+      environment.environmentId === environmentId && environment.connection.phase === "connected",
   );
   const confirmDeleteBranch = async () => {
     if (detail === null) return;
@@ -1714,8 +1547,7 @@ export function PullRequestDetailPanel({
             "This deletes {branch} from {repository}. Local branches and worktrees are not changed.",
             {
               branch: detail.headBranch,
-              repository:
-                detail.headRepositoryNameWithOwner ?? detail.repository,
+              repository: detail.headRepositoryNameWithOwner ?? detail.repository,
             },
           ),
         ),
@@ -1756,9 +1588,7 @@ export function PullRequestDetailPanel({
   const resolveConflictsControl = (
     <PullRequestResolveConflictsButton
       handoff={handoff}
-      unavailable={
-        attachTarget === null && (checkoutRoot === null || !canPrepareWorktree)
-      }
+      unavailable={attachTarget === null && (checkoutRoot === null || !canPrepareWorktree)}
       onResolve={startResolveConflicts}
     />
   );
@@ -1786,8 +1616,7 @@ export function PullRequestDetailPanel({
         actions={
           handoffSummary ? (
             <TooltipProvider delay={150} closeDelay={150} timeout={400}>
-              {handoffSummary.state === "open" &&
-              handoffSummary.mergeability === "conflicting"
+              {handoffSummary.state === "open" && handoffSummary.mergeability === "conflicting"
                 ? resolveConflictsControl
                 : null}
               {checkoutControl}
@@ -1832,9 +1661,7 @@ export function PullRequestDetailPanel({
           <div className="mr-4 flex h-7 shrink-0 select-none items-center justify-end gap-1">
             {detail ? (
               <TooltipProvider delay={150} closeDelay={150} timeout={400}>
-                {detail.visibility === "private" ? (
-                  <PullRequestPrivateBadge />
-                ) : null}
+                {detail.visibility === "private" ? <PullRequestPrivateBadge /> : null}
                 {context === "page" ? (
                   <PullRequestThreadLinks
                     display="count"
@@ -1844,14 +1671,8 @@ export function PullRequestDetailPanel({
                     threadRef={null}
                   />
                 ) : null}
-                {!nativeStack &&
-                supportsStackActions &&
-                nativeStackQuery.error ? (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={nativeStackQuery.refresh}
-                  >
+                {!nativeStack && supportsStackActions && nativeStackQuery.error ? (
+                  <Button variant="ghost" size="xs" onClick={nativeStackQuery.refresh}>
                     <T>Retry stack lookup</T>
                   </Button>
                 ) : null}
@@ -1861,11 +1682,7 @@ export function PullRequestDetailPanel({
                     terminology={terminology}
                     stack={nativeStack}
                     notice={nativeStackQuery.notice}
-                    onRetry={
-                      nativeStackQuery.error
-                        ? nativeStackQuery.refresh
-                        : undefined
-                    }
+                    onRetry={nativeStackQuery.error ? nativeStackQuery.refresh : undefined}
                     reference={reference}
                     environmentId={environmentId}
                     shownHeadSha={shownHeadSha}
@@ -1873,26 +1690,17 @@ export function PullRequestDetailPanel({
                     mergeMethod={selectedMergeMethod}
                     stale={!nativeStackQuery.isFresh}
                     canMerge={
-                      supportsStackActions &&
-                      can("merge") &&
-                      allowedMergeMethods.length > 0
+                      supportsStackActions && can("merge") && allowedMergeMethods.length > 0
                     }
                     canRebase={
-                      supportsStackActions &&
-                      detail.viewerPermissions.stackRebase === true
+                      supportsStackActions && detail.viewerPermissions.stackRebase === true
                     }
                     canAutoMerge={
-                      stackAutoMerge &&
-                      can("enable-auto-merge") &&
-                      allowedMergeMethods.length > 0
+                      stackAutoMerge && can("enable-auto-merge") && allowedMergeMethods.length > 0
                     }
-                    preferAutoMerge={
-                      checksState !== null && checksState !== "passing"
-                    }
+                    preferAutoMerge={checksState !== null && checksState !== "passing"}
                     autoMergeArmed={stackAutoMerge && autoMergeArmed}
-                    canCancelAutoMerge={
-                      stackAutoMerge && can("disable-auto-merge")
-                    }
+                    canCancelAutoMerge={stackAutoMerge && can("disable-auto-merge")}
                     onActed={() => {
                       refreshDetail();
                       onActed?.();
@@ -1924,9 +1732,7 @@ export function PullRequestDetailPanel({
                   threadRef={threadRef}
                   linkThreadRef={
                     threadRef ??
-                    (typeof composerDraftTarget === "object"
-                      ? composerDraftTarget
-                      : null)
+                    (typeof composerDraftTarget === "object" ? composerDraftTarget : null)
                   }
                   onThreadPickerOpenChange={setThreadPickerOpen}
                   refreshing={refreshing}
@@ -2015,10 +1821,7 @@ export function PullRequestDetailPanel({
                         <RelativeTime timestamp={detail.updatedAt} />
                       </span>
                     </span>
-                    <span
-                      aria-hidden
-                      className="h-3 w-px shrink-0 bg-border/70"
-                    />
+                    <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
                     <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
                       <PullRequestBaseBranch
                         terminology={terminology.singular}
@@ -2026,9 +1829,7 @@ export function PullRequestDetailPanel({
                         freshness={freshness}
                         stacked={isStackedPullRequest}
                         pending={actionPending}
-                        onUpdate={(method) =>
-                          void perform("update-branch", undefined, method)
-                        }
+                        onUpdate={(method) => void perform("update-branch", undefined, method)}
                         iconClassName="size-3"
                       />
                       <ArrowLeftIcon
@@ -2042,16 +1843,11 @@ export function PullRequestDetailPanel({
                         <TooltipTrigger
                           render={
                             <code className="flex min-w-0 flex-1">
-                              <MiddleTruncate
-                                value={detail.headBranch}
-                                showTitle={false}
-                              />
+                              <MiddleTruncate value={detail.headBranch} showTitle={false} />
                             </code>
                           }
                         />
-                        <TooltipPopup side="top">
-                          {detail.headBranch}
-                        </TooltipPopup>
+                        <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
                       </Tooltip>
                     </span>
                     <span className="ml-auto inline-flex shrink-0 items-baseline justify-end gap-2 text-2xs">
@@ -2065,10 +1861,7 @@ export function PullRequestDetailPanel({
                           },
                         )}
                       >
-                        <FileDiffIcon
-                          aria-hidden
-                          className="size-3 self-center"
-                        />
+                        <FileDiffIcon aria-hidden className="size-3 self-center" />
                         {detail.changedFiles.toLocaleString()}
                       </span>
                       <PullRequestChangeBreakdownStat
@@ -2164,9 +1957,7 @@ export function PullRequestDetailPanel({
                       freshness={freshness}
                       stacked={isStackedPullRequest}
                       pending={actionPending}
-                      onUpdate={(method) =>
-                        void perform("update-branch", undefined, method)
-                      }
+                      onUpdate={(method) => void perform("update-branch", undefined, method)}
                     />
                   }
                   head={
@@ -2178,9 +1969,7 @@ export function PullRequestDetailPanel({
                         unavailableMessage: msg(
                           "Clipboard API is unavailable while copying branch name.",
                         ),
-                        failureMessage: msg(
-                          "Failed to copy branch name to the clipboard.",
-                        ),
+                        failureMessage: msg("Failed to copy branch name to the clipboard."),
                       }}
                       copyLabel={gt(
                         "Copy {term, select, mr {merge request} cr {change} other {pull request}} branch",
@@ -2189,13 +1978,10 @@ export function PullRequestDetailPanel({
                       copiedLabel={gt("Branch name copied")}
                     />
                   }
-                  files={gt(
-                    "{count, plural, one {{formatted} file} other {{formatted} files}}",
-                    {
-                      count: detail.changedFiles,
-                      formatted: detail.changedFiles.toLocaleString(),
-                    },
-                  )}
+                  files={gt("{count, plural, one {{formatted} file} other {{formatted} files}}", {
+                    count: detail.changedFiles,
+                    formatted: detail.changedFiles.toLocaleString(),
+                  })}
                   diffStat={
                     <PullRequestChangeBreakdownStat
                       environmentId={environmentId}
@@ -2216,12 +2002,9 @@ export function PullRequestDetailPanel({
               <Alert variant="warning">
                 <TriangleAlertIcon />
                 <AlertDescription>
-                  {gt(
-                    "New commits were pushed. A merge or review still applies to {sha}.",
-                    {
-                      sha: shownHeadSha.slice(0, 7),
-                    },
-                  )}
+                  {gt("New commits were pushed. A merge or review still applies to {sha}.", {
+                    sha: shownHeadSha.slice(0, 7),
+                  })}
                 </AlertDescription>
                 <AlertAction>
                   <Button
@@ -2344,13 +2127,8 @@ export function PullRequestDetailPanel({
                           pullRequestReviewOutcomeToneClassName("approved"),
                         )}
                       >
-                        <PullRequestReviewOutcomeIcon
-                          outcome="approved"
-                          className="size-3"
-                        />
-                        <span aria-hidden>
-                          {approvalCount.toLocaleString()}
-                        </span>
+                        <PullRequestReviewOutcomeIcon outcome="approved" className="size-3" />
+                        <span aria-hidden>{approvalCount.toLocaleString()}</span>
                         <span className="sr-only">
                           {gt(
                             "{count, plural, one {{formatted} approval} other {{formatted} approvals}}",
@@ -2372,15 +2150,11 @@ export function PullRequestDetailPanel({
                         : gt("Show newest activity first")
                     }
                     onClick={() =>
-                      setTimelineOrder((value) =>
-                        value === "newest" ? "oldest" : "newest",
-                      )
+                      setTimelineOrder((value) => (value === "newest" ? "oldest" : "newest"))
                     }
                   >
                     <ArrowDownUpIcon aria-hidden className="size-3" />
-                    {timelineOrder === "newest"
-                      ? gt("Newest first")
-                      : gt("Oldest first")}
+                    {timelineOrder === "newest" ? gt("Newest first") : gt("Oldest first")}
                   </Button>
                 </div>
               ) : null}
@@ -2399,12 +2173,7 @@ export function PullRequestDetailPanel({
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
           onScrollCapture={(event) => {
             const scroller = scrollerByTab.current[tab];
-            if (
-              event.target !== scroller ||
-              scroller === null ||
-              scroller === undefined
-            )
-              return;
+            if (event.target !== scroller || scroller === null || scroller === undefined) return;
             const top = scroller.scrollTop;
             const previous = condensedByTab[tab] ?? false;
             const foldHeight = foldRef.current?.scrollHeight ?? 0;
@@ -2412,8 +2181,7 @@ export function PullRequestDetailPanel({
             if (previous) {
               if (top < 4 && foldHeight > 0) next = false;
             } else if (foldHeight > 0 && top > foldHeight + 32) {
-              const chromeDelta =
-                foldHeight - (condensedRowRef.current?.scrollHeight ?? 0);
+              const chromeDelta = foldHeight - (condensedRowRef.current?.scrollHeight ?? 0);
               compensationRef.current = {
                 tab,
                 scroller,
@@ -2422,8 +2190,7 @@ export function PullRequestDetailPanel({
               next = true;
             }
             if (next === previous) return;
-            if (tab === "summary")
-              summaryCondensedByScopeKey.set(tabScopeKey, next);
+            if (tab === "summary") summaryCondensedByScopeKey.set(tabScopeKey, next);
             setCondensedByTab({ ...condensedByTab, [tab]: next });
           }}
         >
@@ -2461,12 +2228,7 @@ export function PullRequestDetailPanel({
           ) : detail ? (
             <PullRequestMarkdownContext value={markdownContext}>
               {mountedTabs.has("summary") ? (
-                <div
-                  className={cn(
-                    "absolute inset-0",
-                    tab !== "summary" && "invisible",
-                  )}
-                >
+                <div className={cn("absolute inset-0", tab !== "summary" && "invisible")}>
                   <PullRequestSummaryTab
                     scrollerRef={scrollerRefs.summary}
                     revealUrl={tab === "summary" ? revealUrl : undefined}
@@ -2482,12 +2244,8 @@ export function PullRequestDetailPanel({
                     pendingFinding={handoff}
                     fixFindingLabel={handoffLabels.fixFinding}
                     fixCheckLabel={handoffLabels.fixCheck}
-                    {...(canFixFindings
-                      ? { onFixFinding: startFixFindingStable }
-                      : {})}
-                    {...(attachTarget === null
-                      ? {}
-                      : { onAddToChat: addCommentToChatStable })}
+                    {...(canFixFindings ? { onFixFinding: startFixFindingStable } : {})}
+                    {...(attachTarget === null ? {} : { onAddToChat: addCommentToChatStable })}
                     onRefresh={refreshDetail}
                     onRefreshChecks={refreshFromHostStable}
                   />
@@ -2495,10 +2253,7 @@ export function PullRequestDetailPanel({
               ) : null}
               {mountedTabs.has("guide") ? (
                 <div
-                  className={cn(
-                    "absolute inset-0",
-                    tab !== "guide" && "invisible",
-                  )}
+                  className={cn("absolute inset-0", tab !== "guide" && "invisible")}
                   // Read by the guide run notifier, which stays quiet for a guide on screen.
                   data-guide-shown={tab === "guide" ? guideKey : undefined}
                 >
@@ -2509,22 +2264,12 @@ export function PullRequestDetailPanel({
                     title={detail.title}
                     workspaceRoot={detail.workspaceRoot}
                     canComment={
-                      detail.capabilities.review.inlineComment &&
-                      detail.viewerPermissions.comment
+                      detail.capabilities.review.inlineComment && detail.viewerPermissions.comment
                     }
-                    rangeComments={
-                      detail.capabilities.review.rangeComment === true
-                    }
-                    completionScope={pullRequestCompletionScope(
-                      detail,
-                      environmentId,
-                      reference,
-                    )}
+                    rangeComments={detail.capabilities.review.rangeComment === true}
+                    completionScope={pullRequestCompletionScope(detail, environmentId, reference)}
                     onAskAboutLines={(comment, request) =>
-                      addSelectionToAgent(
-                        { comment, request },
-                        { keepGuide: true },
-                      )
+                      addSelectionToAgent({ comment, request }, { keepGuide: true })
                     }
                     onAskAboutStop={askAboutGuideStop}
                     onFinishReview={
@@ -2540,18 +2285,9 @@ export function PullRequestDetailPanel({
                 </div>
               ) : null}
               {mountedTabs.has("timeline") ? (
-                <div
-                  className={cn(
-                    "absolute inset-0",
-                    tab !== "timeline" && "invisible",
-                  )}
-                >
+                <div className={cn("absolute inset-0", tab !== "timeline" && "invisible")}>
                   {activityPending ? (
-                    <div
-                      tabIndex={-1}
-                      data-workspace-focus-default
-                      className="h-full outline-none"
-                    >
+                    <div tabIndex={-1} data-workspace-focus-default className="h-full outline-none">
                       <PullRequestTimelineGhost />
                     </div>
                   ) : activityError ? (
@@ -2571,21 +2307,14 @@ export function PullRequestDetailPanel({
                       reference={reference}
                       order={timelineOrder}
                       onOpenCommit={openCommit}
-                      {...(attachTarget === null
-                        ? {}
-                        : { onAddToChat: addCommentToChat })}
+                      {...(attachTarget === null ? {} : { onAddToChat: addCommentToChat })}
                       onRefresh={refreshDetail}
                     />
                   )}
                 </div>
               ) : null}
               {mountedTabs.has("code") ? (
-                <div
-                  className={cn(
-                    "absolute inset-0",
-                    tab !== "code" && "invisible",
-                  )}
-                >
+                <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                   <Suspense
                     fallback={
                       // Loading placeholders hold panel focus until the tab's scroller replaces them.
@@ -2613,12 +2342,8 @@ export function PullRequestDetailPanel({
                       onSelectedCommitChange={selectCodeCommit}
                       pendingFinding={handoff}
                       fixFindingLabel={handoffLabels.fixFinding}
-                      {...(canFixFindings
-                        ? { onFixFinding: startFixFinding }
-                        : {})}
-                      {...(attachTarget === null
-                        ? {}
-                        : { onAddToChat: addCommentToChat })}
+                      {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
+                      {...(attachTarget === null ? {} : { onAddToChat: addCommentToChat })}
                       onRefresh={refreshDetail}
                       refreshToken={refreshToken}
                       backgroundRefreshToken={turnRefresh ?? 0}

@@ -11,8 +11,7 @@ const requested = process.argv[2];
 if (!(SNAP_SHOT_MODIFIERS as readonly string[]).includes(requested ?? "")) {
   process.exit(1);
 }
-const [left, right] =
-  WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS[requested as SnapShotModifier];
+const [left, right] = WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS[requested as SnapShotModifier];
 const MODIFIER_VIRTUAL_KEYS = new Set([
   0x10,
   0x11,
@@ -83,13 +82,7 @@ async function openKeyboardActivity(): Promise<() => boolean> {
         library,
         funcName: "PeekMessageW",
         retType: DataType.Boolean,
-        paramsType: [
-          DataType.U8Array,
-          DataType.BigInt,
-          DataType.U32,
-          DataType.U32,
-          DataType.U32,
-        ],
+        paramsType: [DataType.U8Array, DataType.BigInt, DataType.U32, DataType.U32, DataType.U32],
         paramsValue: [message, window, WM_INPUT, WM_INPUT, PM_REMOVE],
       })
     ) {
@@ -113,15 +106,10 @@ async function openKeyboardActivity(): Promise<() => boolean> {
           RAW_INPUT_HEADER_SIZE,
         ],
       });
-      if (read === 0xffffffff || input.readUInt32LE(0) !== RIM_TYPEKEYBOARD)
-        continue;
+      if (read === 0xffffffff || input.readUInt32LE(0) !== RIM_TYPEKEYBOARD) continue;
       const flags = input.readUInt16LE(RAW_INPUT_HEADER_SIZE + 2);
       const virtualKey = input.readUInt16LE(RAW_INPUT_HEADER_SIZE + 6);
-      if (
-        (flags & RI_KEY_BREAK) === 0 &&
-        !MODIFIER_VIRTUAL_KEYS.has(virtualKey)
-      )
-        typed = true;
+      if ((flags & RI_KEY_BREAK) === 0 && !MODIFIER_VIRTUAL_KEYS.has(virtualKey)) typed = true;
     }
     return typed;
   };

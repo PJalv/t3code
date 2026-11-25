@@ -26,9 +26,7 @@ import * as LegacyV1ThreadImporter from "../orchestration-v2/legacy/LegacyV1Thre
 it.effect(
   "snapshots V1, imports transcripts lazily, and preserves both databases across switches",
   () => {
-    const directory = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-v1-v2-"),
-    );
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v1-v2-"));
     const sourcePath = NodePath.join(directory, "state.sqlite");
     const destinationPath = NodePath.join(directory, "statev2.sqlite");
     const threadId = ThreadId.make("legacy-thread");
@@ -50,14 +48,11 @@ it.effect(
       const original = NodeFS.readFileSync(sourcePath);
       const config = yield* ServerConfig.ServerConfig;
       const layerDatabase = SqlitePersistence.layerConfig.pipe(
-        Layer.provide(
-          ServerConfig.layer({ ...config, dbPath: destinationPath }),
-        ),
+        Layer.provide(ServerConfig.layer({ ...config, dbPath: destinationPath })),
       );
-      const layerStores = Layer.mergeAll(
-        EventStore.layer,
-        ProjectionStore.layer,
-      ).pipe(Layer.provideMerge(layerDatabase));
+      const layerStores = Layer.mergeAll(EventStore.layer, ProjectionStore.layer).pipe(
+        Layer.provideMerge(layerDatabase),
+      );
       const layerSink = EventSink.layer.pipe(Layer.provide(layerStores));
       const layerImporter = LegacyV1ThreadImporter.layer.pipe(
         Layer.provideMerge(Layer.mergeAll(layerStores, layerSink)),
@@ -93,11 +88,7 @@ it.effect(
       const v1 = new NodeSqlite.DatabaseSync(sourcePath);
       try {
         assert.equal(
-          v1
-            .prepare(
-              "SELECT MAX(migration_id) AS id FROM effect_sql_migrations",
-            )
-            .get()?.id,
+          v1.prepare("SELECT MAX(migration_id) AS id FROM effect_sql_migrations").get()?.id,
           52,
         );
         assert.equal(
@@ -114,182 +105,116 @@ it.effect(
       }
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        assert.equal(
-          (yield* sql`SELECT text FROM v2_work`)[0]?.text,
-          "Keep V2 work",
-        );
-        assert.equal(
-          (yield* sql`SELECT title FROM projection_threads`)[0]?.title,
-          "V1 thread",
-        );
+        assert.equal((yield* sql`SELECT text FROM v2_work`)[0]?.text, "Keep V2 work");
+        assert.equal((yield* sql`SELECT title FROM projection_threads`)[0]?.title, "V1 thread");
       }).pipe(Effect.provide(layerDatabase));
     }).pipe(
       Effect.provide(
-        ServerConfig.layerTest(directory, directory).pipe(
-          Layer.provideMerge(NodeServices.layer),
-        ),
+        ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),
       ),
       Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(directory, { recursive: true, force: true }),
-        ),
+        Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true })),
       ),
     );
   },
 );
 
-it.effect(
-  "includes committed WAL data and does not publish a failed snapshot",
-  () => {
-    const directory = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-v2-snapshot-"),
-    );
-    const sourcePath = NodePath.join(directory, "state.sqlite");
-    const destinationPath = NodePath.join(directory, "statev2.sqlite");
-    return Effect.gen(function* () {
-      NodeFS.writeFileSync(sourcePath, "invalid SQLite");
-      const failure = yield* Effect.flip(initializeV2Database(destinationPath));
-      assert.isFalse(
-        Predicate.isTagged(failure.cause, "V2DatabaseImportError"),
+it.effect("includes committed WAL data and does not publish a failed snapshot", () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-snapshot-"));
+  const sourcePath = NodePath.join(directory, "state.sqlite");
+  const destinationPath = NodePath.join(directory, "statev2.sqlite");
+  return Effect.gen(function* () {
+    NodeFS.writeFileSync(sourcePath, "invalid SQLite");
+    const failure = yield* Effect.flip(initializeV2Database(destinationPath));
+    assert.isFalse(Predicate.isTagged(failure.cause, "V2DatabaseImportError"));
+    assert.isFalse(NodeFS.existsSync(destinationPath));
+    NodeFS.unlinkSync(sourcePath);
+    const source = new NodeSqlite.DatabaseSync(sourcePath);
+    try {
+      source.exec(
+        "PRAGMA journal_mode=WAL; CREATE TABLE messages(text TEXT); INSERT INTO messages VALUES ('committed'); CREATE TABLE dropped(blob BLOB); INSERT INTO dropped VALUES (randomblob(65536)); DROP TABLE dropped; BEGIN; INSERT INTO messages VALUES ('uncommitted');",
       );
-      assert.isFalse(NodeFS.existsSync(destinationPath));
-      NodeFS.unlinkSync(sourcePath);
-      const source = new NodeSqlite.DatabaseSync(sourcePath);
+      yield* initializeV2Database(destinationPath);
+      const copy = new NodeSqlite.DatabaseSync(destinationPath, {
+        readOnly: true,
+      });
       try {
-        source.exec(
-          "PRAGMA journal_mode=WAL; CREATE TABLE messages(text TEXT); INSERT INTO messages VALUES ('committed'); CREATE TABLE dropped(blob BLOB); INSERT INTO dropped VALUES (randomblob(65536)); DROP TABLE dropped; BEGIN; INSERT INTO messages VALUES ('uncommitted');",
+        assert.deepEqual(
+          copy
+            .prepare("SELECT text FROM messages")
+            .all()
+            .map((row) => row.text),
+          ["committed"],
         );
-        yield* initializeV2Database(destinationPath);
-        const copy = new NodeSqlite.DatabaseSync(destinationPath, {
-          readOnly: true,
+        assert.deepEqual(copy.prepare("PRAGMA auto_vacuum").get(), {
+          auto_vacuum: 2,
         });
-        try {
-          assert.deepEqual(
-            copy
-              .prepare("SELECT text FROM messages")
-              .all()
-              .map((row) => row.text),
-            ["committed"],
-          );
-          assert.deepEqual(copy.prepare("PRAGMA auto_vacuum").get(), {
-            auto_vacuum: 2,
-          });
-          assert.deepEqual(copy.prepare("PRAGMA freelist_count").get(), {
-            freelist_count: 0,
-          });
-        } finally {
-          copy.close();
-        }
-        source.exec("ROLLBACK");
+        assert.deepEqual(copy.prepare("PRAGMA freelist_count").get(), {
+          freelist_count: 0,
+        });
       } finally {
-        source.close();
+        copy.close();
       }
-    }).pipe(
-      Effect.provide(NodeServices.layer),
-      Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(directory, { recursive: true, force: true }),
-        ),
-      ),
-    );
-  },
-);
+      source.exec("ROLLBACK");
+    } finally {
+      source.close();
+    }
+  }).pipe(
+    Effect.provide(NodeServices.layer),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
+  );
+});
 
-it.effect(
-  "starts fresh without V1 and never imports over existing V2 state",
-  () => {
-    const directory = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-v2-fresh-"),
+it.effect("starts fresh without V1 and never imports over existing V2 state", () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-fresh-"));
+  const destinationPath = NodePath.join(directory, "userdata", "statev2.sqlite");
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const layerDatabase = SqlitePersistence.layerConfig.pipe(
+      Layer.provide(ServerConfig.layer({ ...config, dbPath: destinationPath })),
     );
-    const destinationPath = NodePath.join(
-      directory,
-      "userdata",
-      "statev2.sqlite",
-    );
-    return Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      const layerDatabase = SqlitePersistence.layerConfig.pipe(
-        Layer.provide(
-          ServerConfig.layer({ ...config, dbPath: destinationPath }),
-        ),
-      );
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`CREATE TABLE v2_work (text TEXT)`;
-        yield* sql`INSERT INTO v2_work VALUES ('fresh V2 work')`;
-      }).pipe(Effect.provide(layerDatabase));
-      const sourcePath = NodePath.join(
-        NodePath.dirname(destinationPath),
-        "state.sqlite",
-      );
-      assert.isFalse(NodeFS.existsSync(sourcePath));
-      NodeFS.writeFileSync(
-        sourcePath,
-        "This source must never be opened once V2 exists",
-      );
-      yield* initializeV2Database(destinationPath);
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        assert.equal(
-          (yield* sql`SELECT text FROM v2_work`)[0]?.text,
-          "fresh V2 work",
-        );
-      }).pipe(Effect.provide(layerDatabase));
-    }).pipe(
-      Effect.provide(
-        ServerConfig.layerTest(directory, directory).pipe(
-          Layer.provideMerge(NodeServices.layer),
-        ),
-      ),
-      Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(directory, { recursive: true, force: true }),
-        ),
-      ),
-    );
-  },
-);
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE v2_work (text TEXT)`;
+      yield* sql`INSERT INTO v2_work VALUES ('fresh V2 work')`;
+    }).pipe(Effect.provide(layerDatabase));
+    const sourcePath = NodePath.join(NodePath.dirname(destinationPath), "state.sqlite");
+    assert.isFalse(NodeFS.existsSync(sourcePath));
+    NodeFS.writeFileSync(sourcePath, "This source must never be opened once V2 exists");
+    yield* initializeV2Database(destinationPath);
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      assert.equal((yield* sql`SELECT text FROM v2_work`)[0]?.text, "fresh V2 work");
+    }).pipe(Effect.provide(layerDatabase));
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
+  );
+});
 
-it.effect(
-  "removes copies left by a killed start, but not one that is still running",
-  () => {
-    const directory = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-v2-abandoned-"),
+it.effect("removes copies left by a killed start, but not one that is still running", () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-abandoned-"));
+  const killed = NodeChildProcess.spawnSync(process.execPath, ["-e", ""]).pid;
+  const running = `.v2-import-${process.pid}-Kq81Zx`;
+  const unrelated = ".v2-import-not-a-copy";
+  return Effect.gen(function* () {
+    for (const name of [`.v2-import-${killed}-Wm3nPa`, ".v2-import-Q3xZ9a", running]) {
+      NodeFS.mkdirSync(NodePath.join(directory, name));
+      NodeFS.writeFileSync(NodePath.join(directory, name, "snapshot.sqlite"), "partial copy");
+    }
+    NodeFS.mkdirSync(NodePath.join(directory, unrelated));
+    const destinationPath = NodePath.join(directory, "statev2.sqlite");
+    NodeFS.writeFileSync(destinationPath, "existing V2 database");
+    yield* initializeV2Database(destinationPath);
+    assert.deepEqual(
+      NodeFS.readdirSync(directory).sort(),
+      [running, unrelated, "statev2.sqlite"].sort(),
     );
-    const killed = NodeChildProcess.spawnSync(process.execPath, ["-e", ""]).pid;
-    const running = `.v2-import-${process.pid}-Kq81Zx`;
-    const unrelated = ".v2-import-not-a-copy";
-    return Effect.gen(function* () {
-      for (const name of [
-        `.v2-import-${killed}-Wm3nPa`,
-        ".v2-import-Q3xZ9a",
-        running,
-      ]) {
-        NodeFS.mkdirSync(NodePath.join(directory, name));
-        NodeFS.writeFileSync(
-          NodePath.join(directory, name, "snapshot.sqlite"),
-          "partial copy",
-        );
-      }
-      NodeFS.mkdirSync(NodePath.join(directory, unrelated));
-      const destinationPath = NodePath.join(directory, "statev2.sqlite");
-      NodeFS.writeFileSync(destinationPath, "existing V2 database");
-      yield* initializeV2Database(destinationPath);
-      assert.deepEqual(
-        NodeFS.readdirSync(directory).sort(),
-        [running, unrelated, "statev2.sqlite"].sort(),
-      );
-      assert.equal(
-        NodeFS.readFileSync(destinationPath, "utf8"),
-        "existing V2 database",
-      );
-    }).pipe(
-      Effect.provide(NodeServices.layer),
-      Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(directory, { recursive: true, force: true }),
-        ),
-      ),
-    );
-  },
-);
+    assert.equal(NodeFS.readFileSync(destinationPath, "utf8"), "existing V2 database");
+  }).pipe(
+    Effect.provide(NodeServices.layer),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
+  );
+});

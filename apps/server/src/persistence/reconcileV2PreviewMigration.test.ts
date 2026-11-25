@@ -106,24 +106,21 @@ describe("V2 preview upgrade", () => {
       const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
         SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
       `;
-        assert.deepStrictEqual(
-          history.map((row) => [row.migration_id, row.name] as const),
-          migrationManifest,
-        );
-        assert.deepStrictEqual(
-          yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
-          [{ created_at: "2026-09-15 00:00:00" }],
-        );
-        yield* sql`
+      assert.deepStrictEqual(
+        history.map((row) => [row.migration_id, row.name] as const),
+        migrationManifest,
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
+        [{ created_at: "2026-09-15 00:00:00" }],
+      );
+      yield* sql`
         INSERT INTO pull_request_files_viewed
           (provider, host, repository, number, viewer, path, revision, viewed_at)
         VALUES ('github', 'github.com', 'owner/repo', 1, 'viewer', 'file.ts', 'revision', '2026-09-17')
       `;
-        assert.strictEqual(
-          (yield* sql`SELECT * FROM pull_request_files_viewed`).length,
-          1,
-        );
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+      assert.strictEqual((yield* sql`SELECT * FROM pull_request_files_viewed`).length, 1);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect.each([false, true])(
@@ -138,8 +135,7 @@ describe("V2 preview upgrade", () => {
             "54_OrchestrationV2": OrchestrationV2,
             ...(withIndexes
               ? {
-                  "55_RemoveRedundantProjectionIndexes":
-                    RemoveRedundantProjectionIndexes,
+                  "55_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes,
                 }
               : {}),
           }),
@@ -157,19 +153,15 @@ describe("V2 preview upgrade", () => {
         const columns = yield* sql<{
           readonly name: string;
         }>`PRAGMA table_info(projection_threads)`;
-        assert.ok(
-          columns.some((column) => column.name === "auto_settle_disabled_at"),
-        );
+        assert.ok(columns.some((column) => column.name === "auto_settle_disabled_at"));
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect(
-    "rolls back schema and ledger together on failure and can retry",
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* seedPreview;
-        yield* sql`
+  it.effect("rolls back schema and ledger together on failure and can retry", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedPreview;
+      yield* sql`
         CREATE TRIGGER fail_preview_upgrade BEFORE INSERT ON effect_sql_migrations
         WHEN NEW.name = 'PullRequestFilesViewed'
         BEGIN SELECT RAISE(ABORT, 'injected failure'); END
@@ -257,20 +249,17 @@ describe("V2 preview upgrade", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect(
-    "refuses unexpected later migrations without modifying their history",
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* seedPreview;
-        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
-        const history =
-          yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-        assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
-        assert.deepStrictEqual(
-          yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
-          history,
-        );
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  it.effect("refuses unexpected later migrations without modifying their history", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedPreview;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
+      const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+      assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
+      assert.deepStrictEqual(
+        yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
+        history,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

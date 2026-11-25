@@ -7,11 +7,7 @@ import { page } from "vite-plus/test/browser";
 
 const mocks = vi.hoisted(() => ({
   update:
-    vi.fn<
-      (
-        input: unknown,
-      ) => Promise<{ _tag: "Success" } | { _tag: "Failure"; cause: unknown }>
-    >(),
+    vi.fn<(input: unknown) => Promise<{ _tag: "Success" } | { _tag: "Failure"; cause: unknown }>>(),
   notify: vi.fn(),
 }));
 vi.mock(
@@ -23,10 +19,7 @@ vi.mock(
   () => ({ useAtomCommand: () => mocks.update }) as never,
 );
 
-vi.mock(
-  import("../ui/toast"),
-  () => ({ toastManager: { add: mocks.notify } }) as never,
-);
+vi.mock(import("../ui/toast"), () => ({ toastManager: { add: mocks.notify } }) as never);
 vi.mock(import("~/state/server"), async () => {
   const { Atom } = await import("effect/reactivity");
   return { primaryServerKeybindingsAtom: Atom.make([]) } as never;
@@ -94,9 +87,7 @@ function setup() {
       pullRequestKey="owner/repo/7"
       detail={detail}
       observedAt={detail.observedAt}
-      terminology={
-        sourceControlClients.get(gerrit ? "gerrit" : "github").changeRequest
-      }
+      terminology={sourceControlClients.get(gerrit ? "gerrit" : "github").changeRequest}
       threadRef={null}
       linkThreadRef={null}
       onThreadPickerOpenChange={() => {}}
@@ -142,27 +133,17 @@ it("uses Gerrit action labels for both open and closed changes", async () => {
   const control = setup();
   await using screen = await render(control(openDetail, true));
   await screen.getByRole("button", { name: "More change actions" }).click();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Mark work in progress" }))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Submit now" }))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Abandon change" }))
-    .toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Mark work in progress" })).toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Submit now" })).toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Abandon change" })).toBeVisible();
   await screen.rerender(control({ ...openDetail, state: "closed" }, true));
-  await expect
-    .element(page.getByRole("menuitem", { name: "Restore change" }))
-    .toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Restore change" })).toBeVisible();
 });
 
 it("saves maintainer edits, locks while saving, and restores the saved value when a save fails", async () => {
   const control = setup();
   await using screen = await render(control());
-  await screen
-    .getByRole("button", { name: "More pull request actions" })
-    .click();
+  await screen.getByRole("button", { name: "More pull request actions" }).click();
   const checkbox = page.getByRole("menuitemcheckbox", {
     name: "Allow edits from maintainers",
   });
@@ -201,9 +182,7 @@ it("saves maintainer edits, locks while saving, and restores the saved value whe
 it("keeps a saved choice through a stale refresh, then follows the host", async () => {
   const control = setup();
   await using screen = await render(control());
-  await screen
-    .getByRole("button", { name: "More pull request actions" })
-    .click();
+  await screen.getByRole("button", { name: "More pull request actions" }).click();
   const checkbox = page.getByRole("menuitemcheckbox", {
     name: "Allow edits from maintainers",
   });
@@ -219,22 +198,16 @@ it("keeps a saved choice through a stale refresh, then follows the host", async 
   await expect.element(page.getByRole("status")).not.toBeInTheDocument();
   await screen.rerender(control({ ...openDetail, observedAt: 2 }));
   await expect.element(checkbox).not.toBeChecked();
-  await screen.rerender(
-    control({ ...openDetail, maintainerCanModify: false, observedAt: 3 }),
-  );
+  await screen.rerender(control({ ...openDetail, maintainerCanModify: false, observedAt: 3 }));
   await expect.element(checkbox).not.toBeChecked();
-  await screen.rerender(
-    control({ ...openDetail, maintainerCanModify: true, observedAt: 4 }),
-  );
+  await screen.rerender(control({ ...openDetail, maintainerCanModify: true, observedAt: 4 }));
   await expect.element(checkbox).toBeChecked();
 });
 
 it("follows the host's first reading after a save, even when it matches the old value", async () => {
   const control = setup();
   await using screen = await render(control());
-  await screen
-    .getByRole("button", { name: "More pull request actions" })
-    .click();
+  await screen.getByRole("button", { name: "More pull request actions" }).click();
   const checkbox = page.getByRole("menuitemcheckbox", {
     name: "Allow edits from maintainers",
   });
@@ -270,11 +243,7 @@ it.each<[string, Detail]>([
 ])("hides maintainer edits on a pull request that is %s", async (_, detail) => {
   const control = setup();
   await using screen = await render(control(detail));
-  await screen
-    .getByRole("button", { name: "More pull request actions" })
-    .click();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Open on GitHub" }))
-    .toBeVisible();
+  await screen.getByRole("button", { name: "More pull request actions" }).click();
+  await expect.element(page.getByRole("menuitem", { name: "Open on GitHub" })).toBeVisible();
   expect(document.querySelector('[role="menuitemcheckbox"]')).toBeNull();
 });
