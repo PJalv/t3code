@@ -115,9 +115,17 @@ it.effect("captures baseline and completion snapshots when the opt-out is absent
     };
     const refs = new Set<string>();
     const captureCheckpoint = vi.fn((input: CheckpointStore.CaptureCheckpointInput) =>
-      Effect.sync(() => {
+      Effect.sync((): CheckpointStore.CheckpointRange => {
         refs.add(input.checkpointRef);
-        return null;
+        // A real capture records the range the later diff reads; the mocked diff ignores it.
+        return {
+          from: "from",
+          to: input.checkpointRef,
+          fromCapturedAt: "0",
+          startHead: "",
+          endHead: "",
+          unchanged: false,
+        };
       }),
     );
     const testLayer = CheckpointService.layer.pipe(
