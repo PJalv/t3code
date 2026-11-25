@@ -21,7 +21,6 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";

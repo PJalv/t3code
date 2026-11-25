@@ -42,9 +42,7 @@ const openDeletedTempFiles = () =>
   NodeFS.readdirSync("/proc/self/fd").flatMap((fd) => {
     try {
       const target = NodeFS.readlinkSync(`/proc/self/fd/${fd}`);
-      return target.includes("/etilqs_") && target.endsWith(" (deleted)")
-        ? [target]
-        : [];
+      return target.includes("/etilqs_") && target.endsWith(" (deleted)") ? [target] : [];
     } catch {
       return [];
     }
@@ -53,9 +51,7 @@ const openDeletedTempFiles = () =>
 it.effect.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
   "keeps a write transaction's statement journal off the temp directory",
   () => {
-    const tempDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-sqlite-temp-"),
-    );
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-temp-"));
     const persistence = SqlitePersistence.layerFromPath(
       NodePath.join(tempDir, "state.sqlite"),
     ).pipe(Layer.provide(NodeServices.layer));
@@ -78,24 +74,16 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
       assert.deepEqual(opened, []);
     }).pipe(
       Effect.provide(persistence),
-      Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(tempDir, { recursive: true, force: true }),
-        ),
-      ),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
     );
   },
 );
 
 it.effect("drops planner statistics a database already has", () => {
-  const tempDir = NodeFS.mkdtempSync(
-    NodePath.join(NodeOS.tmpdir(), "t3-sqlite-stats-"),
-  );
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-stats-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
   const persistence = () =>
-    SqlitePersistence.layerFromPath(dbPath).pipe(
-      Layer.provide(NodeServices.layer),
-    );
+    SqlitePersistence.layerFromPath(dbPath).pipe(Layer.provide(NodeServices.layer));
 
   return Effect.gen(function* () {
     yield* Effect.gen(function* () {
@@ -128,79 +116,60 @@ it.effect("drops planner statistics a database already has", () => {
       );
     }).pipe(Effect.provide(persistence()));
   }).pipe(
-    Effect.ensuring(
-      Effect.sync(() =>
-        NodeFS.rmSync(tempDir, { recursive: true, force: true }),
-      ),
-    ),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
   );
 });
 
-it.effect(
-  "upgrades an existing database on a read-write worker connection",
-  () => {
-    const tempDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3-sqlite-upgrade-"),
-    );
-    const dbPath = NodePath.join(tempDir, "state.sqlite");
+it.effect("upgrades an existing database on a read-write worker connection", () => {
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-upgrade-"));
+  const dbPath = NodePath.join(tempDir, "state.sqlite");
 
-    return Effect.gen(function* () {
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`PRAGMA journal_mode = WAL;`;
-        yield* runMigrations({ toMigrationInclusive: 81 });
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
-      const startedBefore = workerData.length;
+  return Effect.gen(function* () {
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`PRAGMA journal_mode = WAL;`;
+      yield* runMigrations({ toMigrationInclusive: 81 });
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+    const startedBefore = workerData.length;
 
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const rows = yield* sql<{
-          readonly migration_id: number;
-          readonly name: string;
-        }>`
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{
+        readonly migration_id: number;
+        readonly name: string;
+      }>`
         SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
       `;
-        assert.deepStrictEqual(
-          rows.map((row) => [row.migration_id, row.name] as const),
-          migrationManifest,
-        );
-      }).pipe(
-        Effect.provide(
-          SqlitePersistence.layerFromPath(dbPath).pipe(
-            Layer.provide(NodeServices.layer),
-          ),
-        ),
+      assert.deepStrictEqual(
+        rows.map((row) => [row.migration_id, row.name] as const),
+        migrationManifest,
       );
-      assert.deepInclude(workerData.slice(startedBefore), {
-        filename: dbPath,
-        readOnly: false,
-        requireWal: false,
-        allowExtension: false,
-        prepareCacheSize: 200,
-      });
     }).pipe(
-      Effect.ensuring(
-        Effect.sync(() =>
-          NodeFS.rmSync(tempDir, { recursive: true, force: true }),
-        ),
+      Effect.provide(
+        SqlitePersistence.layerFromPath(dbPath).pipe(Layer.provide(NodeServices.layer)),
       ),
     );
-  },
-);
+    assert.deepInclude(workerData.slice(startedBefore), {
+      filename: dbPath,
+      readOnly: false,
+      requireWal: false,
+      allowExtension: false,
+      prepareCacheSize: 200,
+    });
+  }).pipe(
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+  );
+});
 
 it.effect("names a database file that is not SQLite", () => {
-  const tempDir = NodeFS.mkdtempSync(
-    NodePath.join(NodeOS.tmpdir(), "t3-sqlite-notadb-"),
-  );
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-notadb-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
   NodeFS.writeFileSync(dbPath, "not a db\n");
 
   return Effect.gen(function* () {
     const opened = yield* Effect.void.pipe(
       Effect.provide(
-        SqlitePersistence.layerFromPath(dbPath).pipe(
-          Layer.provide(NodeServices.layer),
-        ),
+        SqlitePersistence.layerFromPath(dbPath).pipe(Layer.provide(NodeServices.layer)),
       ),
       Effect.result,
     );
@@ -211,11 +180,7 @@ it.effect("names a database file that is not SQLite", () => {
       assert.include(opened.failure.message, dbPath);
     }
   }).pipe(
-    Effect.ensuring(
-      Effect.sync(() =>
-        NodeFS.rmSync(tempDir, { recursive: true, force: true }),
-      ),
-    ),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
   );
 });
 
@@ -253,40 +218,32 @@ const layerT3Home = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-sqlite-cli-",
 });
 
-it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
-  "layerCliConfig",
-  (it) => {
-    it.effect("does not migrate a T3 home a running server owns", () =>
-      Effect.gen(function* () {
-        const recorded = Math.max(...migrationManifest.map(([id]) => id)) - 1;
-        yield* migrateTo(recorded);
-        yield* ownT3Home();
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("layerCliConfig", (it) => {
+  it.effect("does not migrate a T3 home a running server owns", () =>
+    Effect.gen(function* () {
+      const recorded = Math.max(...migrationManifest.map(([id]) => id)) - 1;
+      yield* migrateTo(recorded);
+      yield* ownT3Home();
 
-        const opened = yield* Effect.void.pipe(
-          Effect.provide(SqlitePersistence.layerCliConfig),
-          Effect.result,
-        );
+      const opened = yield* Effect.void.pipe(
+        Effect.provide(SqlitePersistence.layerCliConfig),
+        Effect.result,
+      );
 
-        assert.equal(yield* latestRecordedMigrationId, recorded);
-        assert.equal(opened._tag, "Failure");
-        if (opened._tag === "Failure") {
-          assert.instanceOf(
-            opened.failure,
-            SqlitePersistence.ServerOwnsDatabaseError,
-          );
-        }
-      }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
-    );
+      assert.equal(yield* latestRecordedMigrationId, recorded);
+      assert.equal(opened._tag, "Failure");
+      if (opened._tag === "Failure") {
+        assert.instanceOf(opened.failure, SqlitePersistence.ServerOwnsDatabaseError);
+      }
+    }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
+  );
 
-    it.effect("opens a current T3 home while a running server owns it", () =>
-      Effect.gen(function* () {
-        yield* migrateTo();
-        yield* ownT3Home();
+  it.effect("opens a current T3 home while a running server owns it", () =>
+    Effect.gen(function* () {
+      yield* migrateTo();
+      yield* ownT3Home();
 
-        yield* Effect.void.pipe(
-          Effect.provide(SqlitePersistence.layerCliConfig),
-        );
-      }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
-    );
-  },
-);
+      yield* Effect.void.pipe(Effect.provide(SqlitePersistence.layerCliConfig));
+    }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
+  );
+});

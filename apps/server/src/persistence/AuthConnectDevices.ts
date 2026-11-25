@@ -8,10 +8,7 @@ import * as SqlSchema from "effect/sql/SqlSchema";
 
 import { AuthClientMetadata } from "@t3tools/contracts";
 
-import {
-  type AuthPairingLinkRepositoryError,
-  PersistenceSqlError,
-} from "./Errors.ts";
+import { type AuthPairingLinkRepositoryError, PersistenceSqlError } from "./Errors.ts";
 
 export const AuthConnectDeviceRecord = Schema.Struct({
   proofKeyThumbprint: Schema.String,
@@ -122,13 +119,9 @@ export const make = Effect.gen(function* () {
   });
 
   const trust: AuthConnectDeviceRepository["Service"]["trust"] = (input) =>
-    trustRow(input).pipe(
-      Effect.mapError(sqlError("AuthConnectDeviceRepository.trust")),
-    );
+    trustRow(input).pipe(Effect.mapError(sqlError("AuthConnectDeviceRepository.trust")));
 
-  const isTrusted: AuthConnectDeviceRepository["Service"]["isTrusted"] = (
-    proofKeyThumbprint,
-  ) =>
+  const isTrusted: AuthConnectDeviceRepository["Service"]["isTrusted"] = (proofKeyThumbprint) =>
     isTrustedRow({ proofKeyThumbprint }).pipe(
       NodeSqliteClient.readOnly,
       Effect.map((rows) => rows.length > 0),
@@ -141,22 +134,19 @@ export const make = Effect.gen(function* () {
       Effect.mapError(sqlError("AuthConnectDeviceRepository.list")),
     );
 
-  const remove: AuthConnectDeviceRepository["Service"]["remove"] = (
-    proofKeyThumbprint,
-  ) =>
+  const remove: AuthConnectDeviceRepository["Service"]["remove"] = (proofKeyThumbprint) =>
     removeRows({ proofKeyThumbprint }).pipe(
       Effect.map((rows) => rows.length > 0),
       Effect.mapError(sqlError("AuthConnectDeviceRepository.remove")),
     );
 
-  const removeAllExcept: AuthConnectDeviceRepository["Service"]["removeAllExcept"] =
-    (keepProofKeyThumbprint) =>
-      removeAllExceptRows({ keepProofKeyThumbprint }).pipe(
-        Effect.map((rows) => rows.length),
-        Effect.mapError(
-          sqlError("AuthConnectDeviceRepository.removeAllExcept"),
-        ),
-      );
+  const removeAllExcept: AuthConnectDeviceRepository["Service"]["removeAllExcept"] = (
+    keepProofKeyThumbprint,
+  ) =>
+    removeAllExceptRows({ keepProofKeyThumbprint }).pipe(
+      Effect.map((rows) => rows.length),
+      Effect.mapError(sqlError("AuthConnectDeviceRepository.removeAllExcept")),
+    );
 
   return {
     trust,

@@ -21,8 +21,7 @@ export const PullRequestFilesViewedScope = Schema.Struct({
   number: Schema.Int,
   viewer: Schema.String,
 });
-export type PullRequestFilesViewedScope =
-  typeof PullRequestFilesViewedScope.Type;
+export type PullRequestFilesViewedScope = typeof PullRequestFilesViewedScope.Type;
 
 export const PullRequestFileViewedMark = Schema.Struct({
   path: Schema.String,
@@ -32,9 +31,7 @@ export const PullRequestFileViewedMark = Schema.Struct({
 export type PullRequestFileViewedMark = typeof PullRequestFileViewedMark.Type;
 
 export interface SetPullRequestFilesViewedInput extends PullRequestFilesViewedScope {
-  readonly files: ReadonlyArray<
-    PullRequestFileViewedMark & { readonly viewed: boolean }
-  >;
+  readonly files: ReadonlyArray<PullRequestFileViewedMark & { readonly viewed: boolean }>;
   readonly viewedAt: string;
 }
 
@@ -50,10 +47,7 @@ export class PullRequestFilesViewedRepository extends Context.Service<
   {
     readonly list: (
       input: PullRequestFilesViewedScope,
-    ) => Effect.Effect<
-      PullRequestFilesViewedPage,
-      PullRequestFilesViewedRepositoryError
-    >;
+    ) => Effect.Effect<PullRequestFilesViewedPage, PullRequestFilesViewedRepositoryError>;
     readonly set: (
       input: SetPullRequestFilesViewedInput,
     ) => Effect.Effect<void, PullRequestFilesViewedRepositoryError>;
@@ -97,12 +91,7 @@ const make = Effect.gen(function* () {
           files: rows.slice(0, MAX_FILES_VIEWED_ROWS),
           truncated: rows.length > MAX_FILES_VIEWED_ROWS,
         })),
-        Effect.mapError(
-          toSqlOrDecodeError(
-            "listPullRequestFilesViewed",
-            "PullRequestFileViewed",
-          ),
-        ),
+        Effect.mapError(toSqlOrDecodeError("listPullRequestFilesViewed", "PullRequestFileViewed")),
       );
     }),
 
