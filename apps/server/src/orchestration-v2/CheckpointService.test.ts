@@ -117,6 +117,7 @@ it.effect("captures baseline and completion snapshots when the opt-out is absent
     const captureCheckpoint = vi.fn((input: CheckpointStore.CaptureCheckpointInput) =>
       Effect.sync(() => {
         refs.add(input.checkpointRef);
+        return null;
       }),
     );
     const testLayer = CheckpointService.layer.pipe(
