@@ -153,9 +153,7 @@ describe("runMigrations", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 119 });
-      assert.deepStrictEqual(yield* runMigrations(), [
-        [120, "GerritPendingClones"],
-      ]);
+      assert.deepStrictEqual(yield* runMigrations(), [[120, "GerritPendingClones"]]);
       const tables = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_schema WHERE name IN ('gerrit_pending_clones', 'gerrit_pending_clone_attempts') ORDER BY name
       `;
