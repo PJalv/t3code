@@ -139,11 +139,11 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 102 }), []);
       assert.deepStrictEqual(yield* history, beforeHistory);
       assert.deepStrictEqual(
-        yield* runMigrations({ toMigrationInclusive: 117 }),
-        migrationManifest.filter(([id]) => id >= 103 && id <= 117),
+        yield* runMigrations({ toMigrationInclusive: 119 }),
+        migrationManifest.filter(([id]) => id >= 103 && id <= 119),
       );
       assert.deepStrictEqual(yield* gerritData, beforeData);
-      assert.deepStrictEqual(yield* runMigrations(), [[118, "GerritPendingClones"]]);
+      assert.deepStrictEqual(yield* runMigrations(), [[120, "GerritPendingClones"]]);
       assert.deepStrictEqual(yield* history, migrationManifest);
       assert.deepStrictEqual(yield* gerritData, beforeData);
     }).pipe(Effect.provide(temporaryDatabase)),
